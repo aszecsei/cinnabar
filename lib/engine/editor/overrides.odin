@@ -671,7 +671,13 @@ Shown_Entity :: struct {
 // capture_shown copies each component of each watched entity with a held field, as the world shows it now. Call it
 // while the overrides are laid, before the poll lifts them, so the editor can key what the preview shows.
 @(private)
-capture_shown :: proc(e: ^Editor, w: ^ecs.World, allocator := context.allocator) -> (shown: Shown) {
+capture_shown :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	allocator := context.allocator,
+) -> (
+	shown: Shown,
+) {
 	if e.session.overrides.layer != .Laid {
 		return
 	}
@@ -680,10 +686,14 @@ capture_shown :: proc(e: ^Editor, w: ^ecs.World, allocator := context.allocator)
 	}
 	entities := make([dynamic]Shown_Entity, allocator)
 	for watched in e.session.watched {
-		if !ecs.is_alive(w, watched.entity) || len(held_fields(e, w, watched.entity, allocator)) == 0 {
+		if !ecs.is_alive(w, watched.entity) ||
+		   len(held_fields(e, w, watched.entity, allocator)) == 0 {
 			continue
 		}
-		append(&entities, Shown_Entity{watched.entity, component_values(w, watched.entity, allocator)})
+		append(
+			&entities,
+			Shown_Entity{watched.entity, component_values(w, watched.entity, allocator)},
+		)
 	}
 	shown.entities = entities[:]
 	return
@@ -691,7 +701,11 @@ capture_shown :: proc(e: ^Editor, w: ^ecs.World, allocator := context.allocator)
 
 // component_values copies each component of an entity, as it is in memory.
 @(private)
-component_values :: proc(w: ^ecs.World, entity: ecs.Entity, allocator := context.allocator) -> []link.Component_Value {
+component_values :: proc(
+	w: ^ecs.World,
+	entity: ecs.Entity,
+	allocator := context.allocator,
+) -> []link.Component_Value {
 	components := ecs.entity_components(w, entity)
 	values := make([]link.Component_Value, len(components), allocator)
 	for id, j in components {

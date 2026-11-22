@@ -500,7 +500,11 @@ a_preview_shows_the_cutscene_at_each_time_and_close_gives_the_document_back :: p
 	testing.expect_value(t, document_x, METER)
 	sx, has_shown := shown_x.?
 	testing.expectf(t, has_shown && abs(sx - 5 * METER) <= 1, "shown x %v", shown_x)
-	testing.expect_value(t, values.shown_preview, link.Shown_Preview{ticket = 1, tick = SECOND / 2})
+	testing.expect_value(
+		t,
+		values.shown_preview,
+		link.Shown_Preview{ticket = 1, tick = SECOND / 2},
+	)
 
 	messages = step(f, link.Cutscene_Preview_Close{ticket = 1})
 	_, answered := find_message(messages, link.Cutscene_Preview_Ended)

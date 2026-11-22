@@ -477,6 +477,45 @@ public abstract class HostTests : IAsyncDisposable
         Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
     }
 
+    [Fact]
+    public async Task AHeldEntitysValuesShowWhatThePreviewShowsAndItsKeysReadBackAsTheCurve()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        var snapshot = await Load(editor, Scene(Entity(Fox, "Fox")), guid: AnimationScene);
+        var fox = snapshot.Entities.Single(e => e.SceneId == Fox).Entity;
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Drained(editor);
+        editor.Link.Send(new WatchEntity(fox));
+
+        // At 5 s the walk's linear keys, 0 m at 0 s and 4 m at 10 s, give 2 m along the fox's own x. The sub-sequence, which
+        // walks the fox too, is silent.
+        editor.Link.Send(new CutscenePreviewOpen(1, Convert.FromHexString(IntroCutscene), false, 300000));
+        editor.Link.Send(new CutscenePreviewSettings(1, false, false, [4]));
+        await editor.Next<CutscenePreviewOpened>(o => o.Ticket == 1);
+        var values = await editor.Next<EntityValues>(v => v.Entity == fox && v.Shown.Length > 0);
+
+        Assert.Equal(new ShownPreview(1, 300000), values.ShownPreview);
+        var own = values.Components.Single(c => c.Id == 1).Data;
+        var shown = values.Shown.Single(c => c.Id == 1).Data;
+        Assert.Equal(Origin, BitConverter.ToInt64(own, 0));
+        var position = new FieldInfo("position", 0, FieldKind.Position, FieldKind.Position, [], false, false, 0, 0, false, false, 0, "");
+        var rotation = new FieldInfo("rotation", 24, FieldKind.Quaternion, FieldKind.Quaternion, [], false, false, 0, 0, false, false, 0, "");
+        var (a, b) = (Shell.KeyValues.Units(position, own)!, Shell.KeyValues.Units(position, shown)!);
+        var q = Shell.KeyValues.Numbers(rotation, own)!;
+        var keys = Shell.PoseKeys.RelativePosition(
+            new Maths.Vec3((b[0] - a[0]) / Shell.PoseKeys.UnitsPerMeter, (b[1] - a[1]) / Shell.PoseKeys.UnitsPerMeter, (b[2] - a[2]) / Shell.PoseKeys.UnitsPerMeter),
+            new Maths.Quat(q[0], q[1], q[2], q[3]));
+        Assert.Equal(2.0, keys[0], 3);
+        Assert.Equal(0.0, keys[1], 3);
+        Assert.Equal(0.0, keys[2], 3);
+
+        editor.Link.Send(new CutscenePreviewClose(1));
+        await editor.Next<EntityValues>(v => v.Entity == fox && v.Held.Length == 0 && v.Shown.Length == 0);
+        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+    }
+
     // The sample's intro, and the scene and the entity that its fox binding possesses.
     const string IntroCutscene = "9d549a4b7235fb289389db323a19fd8f";
     const string AnimationScene = "f496b929575035d9c2626ed56d3165ba";
