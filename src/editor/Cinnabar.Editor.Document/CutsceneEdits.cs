@@ -839,7 +839,8 @@ public static class CutsceneEdits
         return track;
     }
 
-    static int InsertAt(CutsceneFile file, int? binding)
+    // Where a new track for a binding goes under the cutscene: after the binding's last track, or after the last track.
+    internal static int InsertAt(CutsceneFile file, int? binding)
     {
         var children = file.Root.Children.ToList();
         var last = children.FindLastIndex(c => c.Kind == CutsceneBlockKind.Track && BindingOf(c) == binding);

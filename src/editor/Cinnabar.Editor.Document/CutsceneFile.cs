@@ -31,6 +31,14 @@ public sealed class CutsceneBlock
         Parent = parent;
     }
 
+    /// <summary>A new block of a kind with one keyword line, which is not in a file yet.</summary>
+    internal static CutsceneBlock Of(CutsceneBlockKind kind, string line)
+    {
+        var block = new CutsceneBlock(kind, null);
+        block.Lines.Add(new TextLine(line, ""));
+        return block;
+    }
+
     public CutsceneBlockKind Kind { get; }
 
     public CutsceneBlock? Parent { get; private set; }
@@ -165,7 +173,7 @@ public sealed class CutsceneBlock
         Lines.Insert(at, new TextLine($"{indent}{key} = {value}", ""));
     }
 
-    static string Indent(TextLine line) => line.Text[..(line.Text.Length - line.Text.TrimStart().Length)];
+    internal static string Indent(TextLine line) => line.Text[..(line.Text.Length - line.Text.TrimStart().Length)];
 
     /// <summary>Renames a binding, a track or a marker, keeping its ID and its kind or time.</summary>
     public void SetName(string name)
