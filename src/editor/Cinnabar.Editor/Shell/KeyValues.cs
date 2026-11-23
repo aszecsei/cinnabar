@@ -199,6 +199,17 @@ public static class PoseKeys
     /// <summary>A relative track's rotation keys: the rotation after the binding's own one, as Euler angles.</summary>
     public static double[] RelativeRotation(Quat own, Quat shown) => Euler((own.Normalized().Conjugate * shown).Normalized());
 
+    /// <summary>
+    /// A track's keys that is relative to another binding: the world pose in the other binding's pose, the inverse of
+    /// the engine's <c>track_frame</c>. The position is in meters, in the other's axes, from the difference in units.
+    /// </summary>
+    public static (double[] Position, Quat Rotation) RelativeTo(IReadOnlyList<long> shown, Quat shownRotation, IReadOnlyList<long> other, Quat otherRotation)
+    {
+        var frame = otherRotation.Normalized().Conjugate;
+        var offset = new Vec3((shown[0] - other[0]) / UnitsPerMeter, (shown[1] - other[1]) / UnitsPerMeter, (shown[2] - other[2]) / UnitsPerMeter);
+        return (frame.Rotate(offset).ToArray(), (frame * shownRotation).Normalized());
+    }
+
     /// <summary>A rotation's Euler angles in degrees, as the engine's <c>euler_of</c> gives them.</summary>
     public static double[] Euler(Quat q) => FieldValues.Euler(q.X, q.Y, q.Z, q.W);
 

@@ -73,7 +73,7 @@ public sealed partial class EditorShell
         CutscenePreview.PlayheadMoved += Keying.Raise;
         World.ValuesChanged += entity =>
         {
-            if (Selection.Entities.Contains(entity))
+            if (Selection.Entities.Contains(entity) || Keying.Watches(entity))
             {
                 Keying.Raise();
             }

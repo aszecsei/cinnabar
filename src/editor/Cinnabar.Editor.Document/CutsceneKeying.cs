@@ -128,11 +128,25 @@ public static class CutsceneKeying
         {
             return "Its track is locked.";
         }
-        if (target is KeyTarget.Pose && SpaceOf(track) is not ("relative" or "absolute"))
+        if (target is KeyTarget.Pose && SpaceOf(track) is not ("relative" or "absolute") && RelativeToOf(file, target) == null)
         {
-            return "Its track is relative to another binding, which keys from here cannot measure yet.";
+            return $"Its track's space, \"{SpaceOf(track)}\", is not one that keys can measure.";
         }
         return null;
+    }
+
+    /// <summary>
+    /// The binding that a pose target's track is relative to, for a space of <c>relative &lt;id&gt;</c> that names another
+    /// binding, or null.
+    /// </summary>
+    public static int? RelativeToOf(CutsceneFile file, KeyTarget target)
+    {
+        if (target is not KeyTarget.Pose || TrackOf(file, target) is not { } track || SpaceOf(track).Split(' ', StringSplitOptions.RemoveEmptyEntries) is not ["relative", var id]
+            || !int.TryParse(id, NumberStyles.None, CultureInfo.InvariantCulture, out var other) || other == target.Binding)
+        {
+            return null;
+        }
+        return other;
     }
 
     /// <summary>Why values, one for each of the target's channels, cannot be its keys, or null when they can.</summary>

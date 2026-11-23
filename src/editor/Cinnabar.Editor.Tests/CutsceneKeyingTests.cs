@@ -199,7 +199,13 @@ public sealed class CutsceneKeyingTests
         Assert.NotNull(CutsceneKeying.Refusal(Position, [double.NaN]));
         Assert.Null(CutsceneKeying.Refusal(Mode, [-3]));
 
+        // A track relative to another binding keys; a space that names none, or its own binding, does not.
         file.Find("track:1")!.Set("space", "relative 2");
+        Assert.Null(CutsceneKeying.Refusal(file, Position, null));
+        Assert.Equal(2, CutsceneKeying.RelativeToOf(file, Position));
+        file.Find("track:1")!.Set("space", "relative 1");
+        Assert.NotNull(CutsceneKeying.Refusal(file, Position, null));
+        file.Find("track:1")!.Set("space", "sideways");
         Assert.NotNull(CutsceneKeying.Refusal(file, Position, null));
         Assert.Null(CutsceneKeying.Refusal(file, Glow, null));
     }

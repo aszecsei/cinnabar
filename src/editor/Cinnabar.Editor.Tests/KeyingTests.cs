@@ -704,4 +704,41 @@ public sealed class KeyingTests : IDisposable
         Assert.Equal(KeyState.Track, shell.Keying.StateOf(both, LightId, Brightness)!.State);
         Assert.Equal("Remove Key", editor.Document.History[^1]);
     }
+
+    [Fact]
+    public void ATrackRelativeToAnotherBindingKeysThePoseInTheOthersPose()
+    {
+        const ulong gate = 2UL << 32;
+        var (shell, editor, ticket) = NewShell(Cutscene + $"binding 2 \"Gate\"\n\tpossess = @{SceneGuid}/0000000000000002\n"
+            + "track 1 transform \"Ride\"\n\tbinding = 1\n\tspace = relative 2\n");
+        using var _ = shell;
+        shell.OnGameMessage(new EntitySnapshot(
+        [
+            new EntityInfo(Door, "Door", 1, 1, 0, true, [SceneEdits.TransformId, LightId]),
+            new EntityInfo(gate, "Gate", 2, 1, 0, true, [SceneEdits.TransformId, LightId]),
+        ]));
+        shell.Selection.Select(Door);
+        // Keying watches the other binding's entity, for its pose.
+        Assert.True(shell.Keying.Watches(gate));
+        Assert.Contains(new WatchEntity(gate), _sent.OfType<WatchEntity>());
+        var position = new KeyTarget.Pose(1, PosePart.Position);
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2);
+        Assert.Contains("pose of binding 2", shell.Keying.StateOf(Door, SceneEdits.TransformId, Transform.Fields[0])!.Refusal);
+
+        // The gate stands at 10 m, turned 90°; the preview shows the door 2 m along the gate's x, turned 30° more.
+        var gateTurn = Yaw(90);
+        shell.OnGameMessage(new EntityValues(gate, [new ComponentValue(SceneEdits.TransformId, Pose([10, 0, 0], gateTurn)), new ComponentValue(LightId, Lamp(1))], [],
+            [], [], new ShownPreview(0, 0, 0, 0)));
+        var along = gateTurn.Rotate(new Vec3(2, 0, 0));
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (Pose([10 + along.X, along.Y, along.Z], gateTurn * Yaw(30)), null, new ShownPreview(ticket, 0, 0, 0)));
+
+        shell.Commands.Get(EditorCommands.CutsceneKeyTransform).Execute();
+        Assert.Equal([2.0, 0, 0], CutsceneKeying.KeysAt(editor.File, position, 0).Select(v => Math.Round(v!.Value, 4)));
+        Assert.Equal([0.0, 30, 0], CutsceneKeying.KeysAt(editor.File, new KeyTarget.Pose(1, PosePart.Rotation), 0).Select(v => Math.Round(v!.Value, 3)));
+        Assert.Equal(KeyState.Keyed, shell.Keying.StateOf(Door, SceneEdits.TransformId, Transform.Fields[0])!.State);
+
+        // Closing the tab lets the gate go.
+        shell.CloseGraph(editor, discard: true);
+        Assert.False(shell.Keying.Watches(gate));
+    }
 }

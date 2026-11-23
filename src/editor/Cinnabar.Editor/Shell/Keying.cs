@@ -31,6 +31,7 @@ public sealed partial class Keying
     {
         // Values over the preview go with the session, the playhead or the text that they were set or keyed at.
         _shell.PreviewValues.Follow();
+        FollowWatches();
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();
     }
@@ -550,6 +551,31 @@ public sealed partial class Keying
                 return (Field("scale") is { } scale ? KeyValues.Numbers(scale, shown) : null, null);
         }
         var part = ((KeyTarget.Pose)target).Part;
+        if (CutsceneKeying.RelativeToOf(file, target) is { } relativeTo)
+        {
+            // A track relative to another binding keys the world's pose in the other's pose, as the game measures them.
+            if (overlay != null && node.Parent != 0 && _shell.World.ShownPreviewOf(handle)?.Values != _shell.PreviewValues.Serial)
+            {
+                return (null, "Waiting for the preview to show the values.");
+            }
+            if (HandleOfBinding(relativeTo) is not { } other)
+            {
+                return (null, $"Its track is relative to binding {relativeTo}, which possesses no entity of an open scene.");
+            }
+            var otherHeld = _shell.World.Type(SceneEdits.TransformId) is { } transformType && ComponentHeld(other, SceneEdits.TransformId, transformType);
+            if (otherHeld && Fresh(other) is { } otherWait)
+            {
+                return (null, otherWait);
+            }
+            if (WorldPose(handle, held) is not { } shownPose || WorldPose(other, otherHeld) is not { } otherPose)
+            {
+                return (null, $"Waiting for the game to send the pose of binding {relativeTo}.");
+            }
+            var (inOther, rotation) = PoseKeys.RelativeTo(shownPose.Units, shownPose.Rotation, otherPose.Units, otherPose.Rotation);
+            return part == PosePart.Rotation
+                ? (PoseKeys.Unwrap(PoseKeys.Euler(rotation), CutsceneKeying.NearKeys(file, target, cutscene.Playhead)), null)
+                : (inOther, null);
+        }
         if (CutsceneKeying.OriginOf(file, target) is { } originMeters)
         {
             // An absolute track keys the world's pose: a child's composed Transform, which the game composes, so values
@@ -617,6 +643,51 @@ public sealed partial class Keying
             return null;
         }
         return (units, new Quat(x, y, z, w));
+    }
+
+    // The entity that a binding of the keyed cutscene possesses in an open scene, or null: for a spawned binding, or one
+    // whose scene is not open.
+    ulong? HandleOfBinding(int binding)
+    {
+        if (Cutscene?.File.Bindings.FirstOrDefault(b => b.Id == binding) is not { } block || PossessRef.Parse(block.Get("possess")) is not { } entity
+            || _shell.SceneOfGuid(entity.SceneGuid) is not { } scene || _shell.World.FindScene(scene.Number, entity.Id) is not { } node)
+        {
+            return null;
+        }
+        return node.Handle;
+    }
+
+    // The entities that the keyed cutscene's tracks are relative to, which the editor watches so their poses are at hand.
+    readonly HashSet<ulong> _watched = [];
+
+    /// <summary>Whether keying watches an entity, as the other binding of a track relative to it.</summary>
+    public bool Watches(ulong handle) => _watched.Contains(handle);
+
+    // The one writer of the watches: those of the cutscene that holds the preview now, and none without one.
+    void FollowWatches()
+    {
+        var wanted = new HashSet<ulong>();
+        if (Cutscene is { } cutscene)
+        {
+            foreach (var track in cutscene.File.Tracks.Where(t => t.TrackKind == "transform"))
+            {
+                if (CutsceneEdits.BindingOf(track) is { } binding && CutsceneKeying.RelativeToOf(cutscene.File, new KeyTarget.Pose(binding, PosePart.Position)) is { } other
+                    && HandleOfBinding(other) is { } handle)
+                {
+                    wanted.Add(handle);
+                }
+            }
+        }
+        foreach (var gone in _watched.Except(wanted).ToList())
+        {
+            _watched.Remove(gone);
+            _shell.Unwatch(gone);
+        }
+        foreach (var added in wanted.Except(_watched).ToList())
+        {
+            _watched.Add(added);
+            _shell.Watch(added);
+        }
     }
 
     // Why what the world shows of an entity is not yet the playhead's, or null when it is.
