@@ -324,4 +324,77 @@ public sealed class CutsceneCurveEditorTests : IDisposable
         shell.Commands.Get("edit.undo").Execute();
         Assert.Equal(third, editor.Document.Text);
     }
+
+    [Fact]
+    public void AnEntryReadsASetOrAnOffsetAndRefusesTheRest()
+    {
+        Assert.Equal(new CurveEntry(CurveEntryOp.Set, 1.5), CurveEntry.ParseValue("1.5"));
+        Assert.Equal(new CurveEntry(CurveEntryOp.Set, -2), CurveEntry.ParseValue(" = -2 "));
+        Assert.Equal(new CurveEntry(CurveEntryOp.Add, 0.5), CurveEntry.ParseValue("+=0.5"));
+        Assert.Equal(new CurveEntry(CurveEntryOp.Subtract, 3), CurveEntry.ParseValue("-= 3"));
+        Assert.Null(CurveEntry.ParseValue("abc"));
+        Assert.Null(CurveEntry.ParseValue("+="));
+        Assert.Null(CurveEntry.ParseValue("NaN"));
+        Assert.Null(CurveEntry.ParseValue("1e400"));
+        // Times are frames or timecode at the rate: 10 frames at 30 are 20000 ticks.
+        Assert.Equal(new CurveEntry(CurveEntryOp.Add, 20000), CurveEntry.ParseTime("+=10", 30));
+        Assert.Equal(new CurveEntry(CurveEntryOp.Set, 60000), CurveEntry.ParseTime("00:01:00", 30));
+        Assert.Null(CurveEntry.ParseTime("+=-10", 30));
+        Assert.Equal(4.5, new CurveEntry(CurveEntryOp.Subtract, 0.5).Apply(5));
+    }
+
+    [Fact]
+    public void AValueTypedForThreeSelectedKeysSetsThemAllAndAnOffsetMovesEach()
+    {
+        var (shell, editor, _, text) = Intro();
+        editor.Select([$"{Gain}/key:0", $"{Gain}/key:1", $"{Gain}/key:2"], SelectMode.Replace);
+        Assert.Null(editor.CurveKeyValue);
+        Assert.Null(editor.CurveKeyTime);
+        Assert.Null(editor.SetCurveKeyValue("0.5"));
+        var set = text.Replace("\t\t\tkey 0 0.6 auto\n\t\t\tkey 200000 1 auto\n\t\t\tkey 400000 0.8 auto\n",
+            "\t\t\tkey 0 0.5 auto\n\t\t\tkey 200000 0.5 auto\n\t\t\tkey 400000 0.5 auto\n");
+        Assert.Equal(set, editor.Document.Text);
+        Assert.Equal(0.5f, editor.CurveKeyValue);
+        Assert.Null(editor.SetCurveKeyValue("+=1"));
+        Assert.Equal(text.Replace("\t\t\tkey 0 0.6 auto\n\t\t\tkey 200000 1 auto\n\t\t\tkey 400000 0.8 auto\n",
+            "\t\t\tkey 0 1.5 auto\n\t\t\tkey 200000 1.5 auto\n\t\t\tkey 400000 1.5 auto\n"), editor.Document.Text);
+        Assert.Equal(["Set Key Value", "Set Key Value"], editor.Document.History.TakeLast(2));
+        // An entry that does not read changes nothing and leaves no entry.
+        var entries = editor.Document.History.Count();
+        Assert.NotNull(editor.SetCurveKeyValue("louder"));
+        Assert.Equal(entries, editor.Document.History.Count());
+        shell.Commands.Get("edit.undo").Execute();
+        Assert.Equal(set, editor.Document.Text);
+        shell.Commands.Get("edit.undo").Execute();
+        Assert.Equal(text, editor.Document.Text);
+    }
+
+    [Fact]
+    public void ATypedTimeMovesTheSelectedKeysAndRefusesTwoOfACurveAtOneTime()
+    {
+        var (_, editor, _, text) = Intro();
+        editor.Select([$"{Gain}/key:1"], SelectMode.Replace);
+        Assert.Equal(200000, editor.CurveKeyTime);
+        // 30 frames later at 30 a second: 260000.
+        Assert.Null(editor.SetCurveKeyTime("+=30"));
+        Assert.Equal(text.Replace(Peak + "\n", "\t\t\tkey 260000 1 auto\n"), editor.Document.Text);
+        Assert.Equal([$"{Gain}/key:1"], editor.SelectedPaths);
+        // Past the key after it, it sorts, and the selection follows it.
+        Assert.Null(editor.SetCurveKeyTime("00:08:00"));
+        Assert.Equal(text.Replace(Peak + "\n", "").Replace("\t\t\tkey 400000 0.8 auto\n", "\t\t\tkey 400000 0.8 auto\n\t\t\tkey 480000 1 auto\n"), editor.Document.Text);
+        Assert.Equal([$"{Gain}/key:2"], editor.SelectedPaths);
+        Assert.Equal(480000, editor.CurveKeyTime);
+        // Two keys of the gain at one time: nothing changes, and there is no entry.
+        editor.Select([$"{Gain}/key:0", $"{Gain}/key:1"], SelectMode.Replace);
+        var before = editor.Document.Text;
+        var entries = editor.Document.History.Count();
+        Assert.NotNull(editor.SetCurveKeyTime("00:05:00"));
+        Assert.Equal(before, editor.Document.Text);
+        Assert.Equal(entries, editor.Document.History.Count());
+        Assert.NotNull(editor.SetCurveKeyTime("soon"));
+        Assert.Equal(entries, editor.Document.History.Count());
+        // An offset moves each by the same time.
+        Assert.Null(editor.SetCurveKeyTime("+=1"));
+        Assert.Equal([2000, 402000], editor.CurveKeys.Select(p => editor.File.Find(p)!.Start!.Value).Order());
+    }
 }

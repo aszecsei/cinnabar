@@ -255,6 +255,70 @@ public static class CutsceneCurveEdits
     }
 
     /// <summary>
+    /// Sets keys' values, each to what <paramref name="value"/> makes of its own, as the curve editor's value box does. A
+    /// key of a channel that <paramref name="stepped"/> says steps takes a whole number. A value that is not finite, or
+    /// that an f32 does not hold, leaves its key. Returns whether a key changed.
+    /// </summary>
+    public static bool SetValues(CutsceneFile file, IEnumerable<string> paths, Func<double, double> value, Func<CutsceneBlock, bool>? stepped = null, IReadOnlySet<int>? locked = null)
+    {
+        var changed = false;
+        foreach (var (block, curve, index) in Resolve(file, paths, locked).ToList())
+        {
+            var v = value(curve[index].Value);
+            if (stepped?.Invoke(block.Parent!) == true)
+            {
+                v = Math.Round(v);
+            }
+            if (!double.IsFinite(v) || Math.Abs(v) > float.MaxValue)
+            {
+                continue;
+            }
+            var text = CutsceneKeying.Format((float)v);
+            if (text != block.KeyValue)
+            {
+                block.SetKeyValue(text);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    /// <summary>
+    /// Moves keys, each to the time that <paramref name="time"/> makes of its own on the cutscene's time, as the curve
+    /// editor's time box does, kept inside its section. Returns the keys' paths after the moves, or null with a problem
+    /// when two of the keys of one channel would land on one tick, which changes nothing. A key may land on a key that
+    /// does not move, as a drag's may, and the cooker reports it.
+    /// </summary>
+    public static IReadOnlyList<string>? SetTimes(CutsceneFile file, IEnumerable<string> paths, Func<int, double> time, out string? problem, IReadOnlySet<int>? locked = null)
+    {
+        problem = null;
+        var targets = new List<(CutsceneBlock Block, int Local)>();
+        foreach (var (block, _, _) in Resolve(file, paths, locked).ToList())
+        {
+            if (CutsceneEdits.SectionOf(block) is not { Start: { } start, End: { } end } || block.Start is not { } local)
+            {
+                continue;
+            }
+            var to = time(start + local) - start;
+            if (!double.IsFinite(to))
+            {
+                continue;
+            }
+            targets.Add((block, (int)Math.Clamp(Math.Round(to), 0, end - start)));
+        }
+        if (targets.GroupBy(t => (t.Block.Parent, t.Local)).Any(g => g.Count() > 1))
+        {
+            problem = "two of the keys of one curve would be at one time";
+            return null;
+        }
+        foreach (var (block, local) in targets)
+        {
+            CutsceneEdits.Move(file, [CutsceneFile.PathOf(block)], local - block.Start!.Value, locked);
+        }
+        return [.. targets.Select(t => CutsceneFile.PathOf(t.Block))];
+    }
+
+    /// <summary>
     /// Moves keys by ticks and by a value, as a drag in the curve editor does: the value of each, then their times, which
     /// <see cref="CutsceneEdits.Move"/> keeps inside their sections. Returns the keys' paths after the move.
     /// </summary>

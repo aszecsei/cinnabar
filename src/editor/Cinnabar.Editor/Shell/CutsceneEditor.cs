@@ -1,3 +1,4 @@
+using Cinnabar.Editor.Cutscenes;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Tools;
@@ -813,6 +814,79 @@ public sealed class CutsceneEditor : IGraphEditor
             _ => "Flatten Tangents",
         };
         Own(() => Document.Edit(label, f => CutsceneCurveEdits.SetTangents(f, keys, mode, _locked)));
+    }
+
+    /// <summary>
+    /// The selected keys that the curve editor's time and value boxes show and set: on a curve that the runtime reads, on
+    /// a track that is not locked. Stepped curves' keys are among them.
+    /// </summary>
+    public IReadOnlyList<string> CurveKeys => [.. _selection.Where(p => File.Find(p) is { Kind: CutsceneBlockKind.Key, Parent: { } channel } key
+        && !CutsceneEdits.IsLocked(key, _locked) && CutsceneCurveEdits.KeysOf(channel) != null)];
+
+    /// <summary>The time on the cutscene's time that every one of <see cref="CurveKeys"/> has, or null when they differ or there are none.</summary>
+    public int? CurveKeyTime
+    {
+        get
+        {
+            var times = CurveKeys.Select(File.Find).Select(b => CutsceneEdits.SectionOf(b!)?.Start + b!.Start).Distinct().ToList();
+            return times.Count == 1 ? times[0] : null;
+        }
+    }
+
+    /// <summary>The value that every one of <see cref="CurveKeys"/> has, or null when they differ or there are none.</summary>
+    public float? CurveKeyValue
+    {
+        get
+        {
+            var values = CurveKeys.Select(p => CurveKey.Parse(File.Find(p)!)?.Value).Distinct().ToList();
+            return values.Count == 1 ? values[0] : null;
+        }
+    }
+
+    /// <summary>
+    /// Sets the times of <see cref="CurveKeys"/> from a typed entry (see <see cref="CurveEntry"/>): timecode or frames at the
+    /// display rate, or <c>+=</c> or <c>-=</c> one, as one undo entry, and selects them where they went. Returns a problem,
+    /// or null. An entry that does not read, or that would put two keys of one curve at one time, changes nothing.
+    /// </summary>
+    public string? SetCurveKeyTime(string text)
+    {
+        var keys = CurveKeys;
+        if (Document.InTransaction || keys.Count == 0)
+        {
+            return null;
+        }
+        if (CurveEntry.ParseTime(text, File.Rate) is not { } entry)
+        {
+            return "a time is timecode or frames, or += or -= one";
+        }
+        string? problem = null;
+        IReadOnlyList<string>? paths = null;
+        Own(() => Document.Edit("Set Key Time", f => paths = CutsceneCurveEdits.SetTimes(f, keys, t => entry.Apply(t), out problem, _locked)));
+        if (paths != null)
+        {
+            Select(paths, SelectMode.Replace);
+        }
+        return problem;
+    }
+
+    /// <summary>
+    /// Sets the values of <see cref="CurveKeys"/> from a typed entry (see <see cref="CurveEntry"/>): a number, or <c>+=</c>
+    /// or <c>-=</c> one, as one undo entry. A stepped curve's key takes a whole number. Returns a problem, or null. An
+    /// entry that does not read changes nothing.
+    /// </summary>
+    public string? SetCurveKeyValue(string text)
+    {
+        var keys = CurveKeys;
+        if (Document.InTransaction || keys.Count == 0)
+        {
+            return null;
+        }
+        if (CurveEntry.ParseValue(text) is not { } entry)
+        {
+            return "a value is a number, or += or -= one";
+        }
+        Own(() => Document.Edit("Set Key Value", f => CutsceneCurveEdits.SetValues(f, keys, entry.Apply, Stepped, _locked)));
+        return null;
     }
 
     /// <summary>

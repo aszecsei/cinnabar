@@ -163,7 +163,7 @@ public sealed class CutsceneEditorView : DockPanel
         Grid.SetRow(_curveSplit, 1);
         panes.Children.Add(_curveSplit);
         _curveEditor = new CutsceneCurveEditor(editor);
-        var curveBar = new CutsceneCurveBar(editor);
+        var curveBar = new CutsceneCurveBar(editor, () => _curveEditor.Focus());
         DockPanel.SetDock(curveBar, DockSide.Top);
         _curvePane.Children.Add(curveBar);
         _curvePane.Children.Add(_curveEditor);
