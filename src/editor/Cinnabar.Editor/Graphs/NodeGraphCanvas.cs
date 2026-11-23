@@ -40,6 +40,9 @@ public enum CanvasPressKind
 
     /// <summary>A drag of the canvas's own, such as a link from a port, which it follows until the release.</summary>
     Connect,
+
+    /// <summary>The press did all that it does, as a double click that opens a node: nothing follows it.</summary>
+    Taken,
 }
 
 /// <summary>What a press of the left button at a point takes, and the thing that it is on.</summary>
@@ -50,7 +53,9 @@ public readonly record struct CanvasPress(CanvasPressKind Kind, int Id = 0);
 /// the canvas's own units under a pan and a zoom, framed when it first has a size. The left button selects (Shift adds,
 /// Ctrl toggles), drags what is selected, drags a box, and starts the drags that a canvas has of its own. The right or
 /// middle button pans, and a right click without a drag, Space or Tab opens the canvas's add menu. The wheel zooms
-/// about the mouse. Delete deletes what is selected, F frames the graph, and Escape cancels a drag.
+/// about the mouse. Delete deletes what is selected, F frames the graph, and Escape cancels a drag. The view's input
+/// goes through <see cref="Press"/>, <see cref="MovePointer"/>, <see cref="Release"/>, <see cref="LoseCapture"/> and
+/// <see cref="PressKey"/>, which tests drive as the view does.
 /// </summary>
 public abstract class NodeGraphCanvas : Control
 {
@@ -91,7 +96,7 @@ public abstract class NodeGraphCanvas : Control
     protected abstract IGraphLayout Layout { get; }
 
     /// <summary>The pan and the zoom.</summary>
-    protected Canvas2DView View => _view;
+    public Canvas2DView View => _view;
 
     /// <summary>Whether a drag of the canvas's own is under way.</summary>
     protected bool Connecting => _gesture == Gesture.Connect;
@@ -99,8 +104,11 @@ public abstract class NodeGraphCanvas : Control
     /// <summary>Whether no button is down.</summary>
     protected bool Idle => _gesture == Gesture.None;
 
-    /// <summary>What a press of the left button at a point of the canvas takes. A Connect starts the canvas's own drag.</summary>
-    protected abstract CanvasPress PressAt(Vec2 at, KeyModifiers modifiers);
+    /// <summary>
+    /// What a press of the left button at a point of the canvas takes: the first press, or with a click count of 2, the
+    /// second of a double click. A Connect starts the canvas's own drag.
+    /// </summary>
+    protected abstract CanvasPress PressAt(Vec2 at, KeyModifiers modifiers, int clickCount);
 
     /// <summary>The canvas's own drag moved to a point.</summary>
     protected virtual void ConnectMoved(Vec2 at)
@@ -183,50 +191,70 @@ public abstract class NodeGraphCanvas : Control
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
-        if (_gesture != Gesture.None)
+        if (!Idle)
         {
             return;
         }
         Focus();
         var point = e.GetCurrentPoint(this);
-        _start = _last = point.Position;
-        if (point.Properties.IsRightButtonPressed || point.Properties.IsMiddleButtonPressed)
-        {
-            _gesture = point.Properties.IsRightButtonPressed ? Gesture.PanClick : Gesture.Pan;
-        }
-        else if (point.Properties.IsLeftButtonPressed)
-        {
-            var press = PressAt(ToCanvas(point.Position), e.KeyModifiers);
-            switch (press.Kind)
-            {
-                case CanvasPressKind.Connect:
-                    _gesture = Gesture.Connect;
-                    break;
-                case CanvasPressKind.Select:
-                    if (!_editor.Selection.Contains(press.Id) || e.KeyModifiers != KeyModifiers.None)
-                    {
-                        _editor.Select([press.Id], ModeOf(e.KeyModifiers));
-                    }
-                    _pressed = press.Id;
-                    _gesture = Gesture.Click;
-                    break;
-                default:
-                    _pressed = 0;
-                    _gesture = Gesture.Click;
-                    break;
-            }
-        }
-        if (_gesture != Gesture.None)
+        var p = point.Properties;
+        var button = p.IsRightButtonPressed ? MouseButton.Right
+            : p.IsMiddleButtonPressed ? MouseButton.Middle
+            : p.IsLeftButtonPressed ? MouseButton.Left
+            : MouseButton.None;
+        if (Press(point.Position, button, e.KeyModifiers, e.ClickCount))
         {
             e.Pointer.Capture(this);
             e.Handled = true;
         }
     }
 
+    /// <summary>A press of a button at a point of the view. Returns whether a gesture began, which then takes the pointer.</summary>
+    internal bool Press(Point position, MouseButton button, KeyModifiers modifiers, int clickCount = 1)
+    {
+        if (_gesture != Gesture.None)
+        {
+            return false;
+        }
+        _start = _last = position;
+        if (button is MouseButton.Right or MouseButton.Middle)
+        {
+            _gesture = button == MouseButton.Right ? Gesture.PanClick : Gesture.Pan;
+        }
+        else if (button == MouseButton.Left)
+        {
+            var press = PressAt(ToCanvas(position), modifiers, clickCount);
+            switch (press.Kind)
+            {
+                case CanvasPressKind.Connect:
+                    _gesture = Gesture.Connect;
+                    break;
+                case CanvasPressKind.Select:
+                    if (!_editor.Selection.Contains(press.Id) || modifiers != KeyModifiers.None)
+                    {
+                        _editor.Select([press.Id], ModeOf(modifiers));
+                    }
+                    _pressed = press.Id;
+                    _gesture = Gesture.Click;
+                    break;
+                case CanvasPressKind.Empty:
+                    _pressed = 0;
+                    _gesture = Gesture.Click;
+                    break;
+            }
+        }
+        return _gesture != Gesture.None;
+    }
+
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
-        var position = e.GetPosition(this);
+        MovePointer(e.GetPosition(this));
+    }
+
+    /// <summary>The pointer moved to a point of the view, with a button down or none.</summary>
+    internal void MovePointer(Point position)
+    {
         var delta = position - _last;
         _last = position;
         var moved = position - _start;
@@ -271,7 +299,13 @@ public abstract class NodeGraphCanvas : Control
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
-        var position = e.GetPosition(this);
+        Release(e.GetPosition(this), e.KeyModifiers);
+        e.Pointer.Capture(null);
+    }
+
+    /// <summary>The button was let go at a point of the view, which ends the gesture.</summary>
+    internal void Release(Point position, KeyModifiers modifiers)
+    {
         var gesture = _gesture;
         // The gesture ends before what it does, so a drag of the canvas's own is over when its end draws.
         _gesture = Gesture.None;
@@ -283,9 +317,9 @@ public abstract class NodeGraphCanvas : Control
             case Gesture.Click:
                 if (_pressed == 0)
                 {
-                    _editor.Select([], ModeOf(e.KeyModifiers) == SelectMode.Replace ? SelectMode.Replace : SelectMode.Add);
+                    _editor.Select([], ModeOf(modifiers) == SelectMode.Replace ? SelectMode.Replace : SelectMode.Add);
                 }
-                else if (e.KeyModifiers == KeyModifiers.None)
+                else if (modifiers == KeyModifiers.None)
                 {
                     _editor.Select([_pressed]);
                 }
@@ -294,13 +328,12 @@ public abstract class NodeGraphCanvas : Control
                 _editor.EndMove();
                 break;
             case Gesture.Box:
-                _editor.Select(Layout.InBox(ToCanvas(_start), ToCanvas(position)), ModeOf(e.KeyModifiers));
+                _editor.Select(Layout.InBox(ToCanvas(_start), ToCanvas(position)), ModeOf(modifiers));
                 break;
             case Gesture.Connect:
                 EndConnect(ToCanvas(position));
                 break;
         }
-        e.Pointer.Capture(null);
         InvalidateVisual();
     }
 
@@ -313,6 +346,12 @@ public abstract class NodeGraphCanvas : Control
     protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
     {
         base.OnPointerCaptureLost(e);
+        LoseCapture();
+    }
+
+    /// <summary>The pointer was taken away: a move ends where it is, and the canvas's own drag is cancelled.</summary>
+    internal void LoseCapture()
+    {
         switch (_gesture)
         {
             case Gesture.Move:
@@ -338,15 +377,24 @@ public abstract class NodeGraphCanvas : Control
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        switch (e.Key)
+        if (PressKey(e.Key, e.KeyModifiers))
+        {
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>A key pressed while the canvas has the focus. Returns whether the canvas took it.</summary>
+    internal virtual bool PressKey(Key key, KeyModifiers modifiers)
+    {
+        switch (key)
         {
             case Key.Delete or Key.Back:
                 _editor.DeleteSelected();
                 break;
-            case Key.F when e.KeyModifiers == KeyModifiers.None:
+            case Key.F when modifiers == KeyModifiers.None:
                 Frame();
                 break;
-            case Key.Space or Key.Tab when e.KeyModifiers == KeyModifiers.None:
+            case Key.Space or Key.Tab when modifiers == KeyModifiers.None:
                 OpenAddMenu(ToCanvas(_last));
                 break;
             case Key.Escape when _gesture == Gesture.Move:
@@ -359,8 +407,8 @@ public abstract class NodeGraphCanvas : Control
                 InvalidateVisual();
                 break;
             default:
-                return;
+                return false;
         }
-        e.Handled = true;
+        return true;
     }
 }

@@ -23,7 +23,7 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor, IGraphCan
     const float StartDistance = 3f;
     const float MaxDistance = 40f;
 
-    readonly HashSet<int> _selection = [];
+    readonly NodeSelection _selection = new();
     readonly List<GraphProblem> _problems = [];
 
     // The mesh that the user picked.
@@ -82,7 +82,11 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor, IGraphCan
     /// <summary>The graph or its document's state changed.</summary>
     public event Action? Changed;
 
-    public event Action? SelectionChanged;
+    public event Action? SelectionChanged
+    {
+        add => _selection.Changed += value;
+        remove => _selection.Changed -= value;
+    }
 
     public event Action? ProblemsChanged;
 
@@ -96,10 +100,7 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor, IGraphCan
     void OnDocumentChanged()
     {
         // A node that undo or a delete took is no longer selected.
-        if (_selection.RemoveWhere(id => File.Find(id) == null) > 0)
-        {
-            SelectionChanged?.Invoke();
-        }
+        _selection.Prune(id => File.Find(id) != null);
         GatherProblems();
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();
@@ -111,28 +112,10 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor, IGraphCan
 
     // Selection.
 
-    public void Select(IEnumerable<int> nodes, SelectMode mode = SelectMode.Replace)
-    {
-        if (mode == SelectMode.Replace)
-        {
-            _selection.Clear();
-        }
-        foreach (var id in nodes)
-        {
-            if (mode == SelectMode.Toggle && !_selection.Add(id))
-            {
-                _selection.Remove(id);
-            }
-            else
-            {
-                _selection.Add(id);
-            }
-        }
-        SelectionChanged?.Invoke();
-    }
+    public void Select(IEnumerable<int> nodes, SelectMode mode = SelectMode.Replace) => _selection.Select(nodes, mode);
 
     /// <summary>The selected node, when exactly one is.</summary>
-    public AnimationGraphNode? SelectedNode => _selection.Count == 1 ? File.Find(_selection.First()) : null;
+    public AnimationGraphNode? SelectedNode => _selection.One is { } id ? File.Find(id) : null;
 
     /// <summary>What a node is called on the canvas and in undo entries.</summary>
     public string Label(int id) => File.Find(id) switch
@@ -281,7 +264,7 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor, IGraphCan
     // Moving nodes.
 
     /// <summary>A drag of the selected nodes: begin, a move per step by the drag's offset from its start, then end.</summary>
-    public void BeginMove() => Document.Begin(_selection.Count == 1 ? $"Move {Label(_selection.First())}" : $"Move {_selection.Count} Nodes");
+    public void BeginMove() => _selection.BeginMove(Document, Label);
 
     /// <summary>Where the selected nodes are now, which a drag's steps start from: a transition's middle, or a node's corner.</summary>
     public Dictionary<int, Vec2> MoveStarts()
@@ -303,25 +286,9 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor, IGraphCan
     }
 
     public void MoveSelected(IReadOnlyDictionary<int, Vec2> starts, Vec2 offset) =>
-        Document.Step(g =>
-        {
-            foreach (var (id, start) in starts)
-            {
-                g.Find(id)?.SetPosition(start.X + offset.X, start.Y + offset.Y);
-            }
-        });
+        NodeSelection.MoveSelected(Document, starts, offset, (g, id, at) => g.Find(id)?.SetPosition(at.X, at.Y));
 
-    public void EndMove(bool cancel = false)
-    {
-        if (cancel)
-        {
-            Document.Cancel();
-        }
-        else if (Document.InTransaction)
-        {
-            Document.Commit();
-        }
-    }
+    public void EndMove(bool cancel = false) => NodeSelection.EndMove(Document, cancel);
 
     // Fields.
 

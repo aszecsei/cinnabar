@@ -1,5 +1,4 @@
 using Avalonia;
-using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Cinnabar.Editor.Document;
@@ -14,78 +13,43 @@ using static Cinnabar.Editor.Materials.CanvasDrawing;
 namespace Cinnabar.Editor.Materials;
 
 /// <summary>
-/// The material editor's node canvas (see docs/editor/material-editor.md#material-editor): the graph's nodes and links, drawn in the
-/// canvas's own units under a pan and a zoom. The left button selects nodes, drags them, drags a box, and drags a link
-/// from a pin to a pin; a link dragged off an input comes away. The right or middle button pans, and a right click
-/// without a drag, Space or Tab adds a node. The wheel zooms about the mouse. Delete deletes the selected nodes,
-/// Ctrl+D duplicates them, and F frames the graph.
+/// The material editor's node canvas (see docs/editor/material-editor.md#material-editor): the graph's nodes and links, with
+/// the gestures of every graph canvas (NodeGraphCanvas). Its own drag takes a link from a pin to a pin; a link dragged
+/// off an input comes away. A double click on a function node opens its function, and Ctrl+D duplicates the selected
+/// nodes.
 /// </summary>
-public sealed class GraphCanvas : Control
+public sealed class GraphCanvas : NodeGraphCanvas
 {
-    const double MinZoom = 0.2;
-    const double MaxZoom = 2;
-
     static readonly IBrush NodeBody = new SolidColorBrush(Color.Parse("#2A2A2E"));
     static readonly IPen NodeBorder = new Pen(new SolidColorBrush(Color.Parse("#3C3C42")), 1);
     static readonly IPen SelectedBorder = new Pen(new SolidColorBrush(Palette.Accent), 2);
     static readonly IPen ErrorBorder = new Pen(new SolidColorBrush(Palette.Error), 2, new DashStyle([3, 2], 0));
     static readonly IBrush Text = new SolidColorBrush(Color.Parse("#E4E4E8"));
     static readonly IBrush DimText = new SolidColorBrush(Color.Parse("#8A8A92"));
-    static readonly IBrush BoxFill = new SolidColorBrush(Color.Parse("#22E34234"));
-    static readonly IPen BoxPen = new Pen(new SolidColorBrush(Palette.Accent), 1);
 
-    enum Gesture
-    {
-        None,
-        Click,
-        Move,
-        Box,
-        Link,
-        Pan,
-        PanClick,
-    }
+    // A link being dragged: from an output, or back from an input; the input that it came off, if any; and where it is.
+    readonly record struct LinkDrag((int Node, string Pin, bool FromOutput) Start, (int Node, string Input)? Detached, Vec2 End);
 
     readonly EditorShell _shell;
     readonly MaterialEditor _editor;
     readonly NodePicker<(int Node, string Pin, bool FromOutput)?> _picker;
     GraphGeometry _geometry;
-    Canvas2DView _view = new(new Vec2(-200, -150), 1);
-    Gesture _gesture;
-    Point _start;
-    Point _last;
-    int _pressed;
-    Dictionary<int, Vec2> _moveStarts = [];
-    // A link being dragged: from an output, or back from an input, and the input that it came off, if any.
-    (int Node, string Pin, bool FromOutput) _linkStart;
-    (int Node, string Input)? _detached;
-    Vec2 _linkEnd;
-    bool _framed;
+    LinkDrag? _link;
 
     public GraphCanvas(EditorShell shell, MaterialEditor editor)
+        : base(editor)
     {
         _shell = shell;
         _editor = editor;
         _geometry = editor.Geometry();
-        Focusable = true;
-        ClipToBounds = true;
         _picker = new(() => editor.Catalog.KindsFor(editor.Document.Kind).Where(k => k.Kind != "output")
             .Select(k => new PickerEntry(k.Kind, k.Label, k.Category, k.Description)));
         _picker.Picked += OnPicked;
-        AttachedToVisualTree += (_, _) =>
-        {
-            _editor.Changed += OnChanged;
-            _editor.SelectionChanged += InvalidateVisual;
-            _editor.ProblemsChanged += InvalidateVisual;
-            _shell.Assets.Changed += OnChanged;
-            OnChanged();
-        };
-        DetachedFromVisualTree += (_, _) =>
-        {
-            _editor.Changed -= OnChanged;
-            _editor.SelectionChanged -= InvalidateVisual;
-            _editor.ProblemsChanged -= InvalidateVisual;
-            _shell.Assets.Changed -= OnChanged;
-        };
+        new ViewSubscriptions(this, attached: OnChanged)
+            .Add(() => _editor.Changed += OnChanged, () => _editor.Changed -= OnChanged)
+            .Add(() => _editor.SelectionChanged += InvalidateVisual, () => _editor.SelectionChanged -= InvalidateVisual)
+            .Add(() => _editor.ProblemsChanged += InvalidateVisual, () => _editor.ProblemsChanged -= InvalidateVisual)
+            .Add(() => _shell.Assets.Changed += OnChanged, () => _shell.Assets.Changed -= OnChanged);
     }
 
     void OnChanged()
@@ -94,61 +58,23 @@ public sealed class GraphCanvas : Control
         InvalidateVisual();
     }
 
-    protected override Size ArrangeOverride(Size finalSize)
+    protected override IGraphLayout Layout => _geometry;
+
+    protected override void DrawGraph(DrawingContext context)
     {
-        var size = base.ArrangeOverride(finalSize);
-        // The graph starts framed, once the canvas has a size.
-        if (!_framed && finalSize.Width > 0 && finalSize.Height > 0)
+        foreach (var link in _geometry.Links)
         {
-            _framed = true;
-            Frame(finalSize);
+            DrawLink(context, link.Start, link.End, link.Type);
         }
-        return size;
-    }
-
-    Vec2 ToCanvas(Point p) => _view.ToCanvas(p.X, p.Y);
-
-    /// <summary>Pans and zooms so the whole graph is in view.</summary>
-    public void Frame() => Frame(Bounds.Size);
-
-    void Frame(Size size)
-    {
-        if (_geometry.Extent() is not { } extent || size.Width <= 0)
+        if (_link is { } drag && PinPoint(drag.Start) is { } from)
         {
-            return;
+            var (start, end) = drag.Start.FromOutput ? (from.Point, drag.End) : (drag.End, from.Point);
+            DrawLink(context, start, end, from.Type);
         }
-        const double Margin = 40;
-        _view = Canvas2DView.Fit(extent, size.Width, size.Height, Margin, MinZoom, 1);
-        InvalidateVisual();
-    }
-
-    /// <summary>The middle of the view, in canvas units, where a node that the view adds goes.</summary>
-    public Vec2 Middle => ToCanvas(new Point(Bounds.Width / 2, Bounds.Height / 2));
-
-    public override void Render(DrawingContext context)
-    {
-        CanvasDrawing.DrawBackground(context, Bounds.Size, _view);
-        using (context.PushTransform(Matrix.CreateTranslation(-_view.Offset.X, -_view.Offset.Y) * Matrix.CreateScale(_view.Zoom, _view.Zoom)))
+        var problems = _editor.Problems.Where(p => p.Error && p.Node != null).Select(p => p.Node!.Value).ToHashSet();
+        foreach (var node in _geometry.Nodes)
         {
-            foreach (var link in _geometry.Links)
-            {
-                DrawLink(context, link.Start, link.End, link.Type);
-            }
-            if (_gesture == Gesture.Link && PinPoint(_linkStart) is { } from)
-            {
-                var (start, end) = _linkStart.FromOutput ? (from.Point, _linkEnd) : (_linkEnd, from.Point);
-                DrawLink(context, start, end, from.Type);
-            }
-            var problems = _editor.Problems.Where(p => p.Error && p.Node != null).Select(p => p.Node!.Value).ToHashSet();
-            foreach (var node in _geometry.Nodes)
-            {
-                DrawNode(context, node, _editor.Selection.Contains(node.Node.Id), problems.Contains(node.Node.Id));
-            }
-        }
-        if (_gesture == Gesture.Box)
-        {
-            var box = new Rect(_start, _last).Normalize();
-            context.DrawRectangle(BoxFill, BoxPen, box);
+            DrawNode(context, node, _editor.Selection.Contains(node.Node.Id), problems.Contains(node.Node.Id));
         }
     }
 
@@ -275,199 +201,86 @@ public sealed class GraphCanvas : Control
         return j < 0 ? null : (node.InputAt(j), node.Inputs[j].Type);
     }
 
-    static SelectMode ModeOf(KeyModifiers modifiers) =>
-        modifiers.HasFlag(KeyModifiers.Shift) ? SelectMode.Add : modifiers.HasFlag(KeyModifiers.Control) ? SelectMode.Toggle : SelectMode.Replace;
-
-    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    protected override CanvasPress PressAt(Vec2 at, KeyModifiers modifiers, int clickCount)
     {
-        base.OnPointerPressed(e);
-        if (_gesture != Gesture.None)
+        var hit = _geometry.HitTest(at);
+        switch (hit.Kind)
         {
-            return;
-        }
-        Focus();
-        var point = e.GetCurrentPoint(this);
-        _start = _last = point.Position;
-        if (point.Properties.IsRightButtonPressed || point.Properties.IsMiddleButtonPressed)
-        {
-            _gesture = point.Properties.IsRightButtonPressed ? Gesture.PanClick : Gesture.Pan;
-        }
-        else if (point.Properties.IsLeftButtonPressed)
-        {
-            var hit = _geometry.HitTest(ToCanvas(point.Position));
-            switch (hit.Kind)
-            {
-                case GraphHitKind.Output:
-                    StartLink(hit.Node, hit.Pin, fromOutput: true, null);
-                    break;
-                case GraphHitKind.Input:
-                    // A linked input gives up its link, which the drag then carries from its output.
-                    if (_editor.Document.Graph.Find(hit.Node)?.Get(hit.Pin) is GraphLink link)
-                    {
-                        StartLink(link.Node, link.Output, fromOutput: true, (hit.Node, hit.Pin));
-                    }
-                    else
-                    {
-                        StartLink(hit.Node, hit.Pin, fromOutput: false, null);
-                    }
-                    break;
-                case GraphHitKind.Node:
-                    if (e.ClickCount == 2)
-                    {
-                        OpenFunction(hit.Node);
-                        return;
-                    }
-                    if (!_editor.Selection.Contains(hit.Node) || e.KeyModifiers != KeyModifiers.None)
-                    {
-                        _editor.Select([hit.Node], ModeOf(e.KeyModifiers));
-                    }
-                    _pressed = hit.Node;
-                    _gesture = Gesture.Click;
-                    break;
-                default:
-                    _pressed = 0;
-                    _gesture = Gesture.Click;
-                    break;
-            }
-        }
-        if (_gesture != Gesture.None)
-        {
-            e.Pointer.Capture(this);
-            e.Handled = true;
+            case GraphHitKind.Output:
+                _link = new LinkDrag((hit.Node, hit.Pin, true), null, at);
+                return new CanvasPress(CanvasPressKind.Connect);
+            case GraphHitKind.Input:
+                // A linked input gives up its link, which the drag then carries from its output.
+                _link = _editor.Document.Graph.Find(hit.Node)?.Get(hit.Pin) is GraphLink link
+                    ? new LinkDrag((link.Node, link.Output, true), (hit.Node, hit.Pin), at)
+                    : new LinkDrag((hit.Node, hit.Pin, false), null, at);
+                return new CanvasPress(CanvasPressKind.Connect);
+            case GraphHitKind.Node when clickCount == 2:
+                OpenFunction(hit.Node);
+                return new CanvasPress(CanvasPressKind.Taken);
+            case GraphHitKind.Node:
+                return new CanvasPress(CanvasPressKind.Select, hit.Node);
+            default:
+                return new CanvasPress(CanvasPressKind.Empty);
         }
     }
 
-    void StartLink(int node, string pin, bool fromOutput, (int, string)? detached)
+    protected override void ConnectMoved(Vec2 at)
     {
-        _linkStart = (node, pin, fromOutput);
-        _detached = detached;
-        _linkEnd = ToCanvas(_start);
-        _gesture = Gesture.Link;
-    }
-
-    protected override void OnPointerMoved(PointerEventArgs e)
-    {
-        base.OnPointerMoved(e);
-        var position = e.GetPosition(this);
-        var delta = position - _last;
-        _last = position;
-        var moved = position - _start;
-        var far = Gestures.MovedPast(moved);
-        switch (_gesture)
+        if (_link is { } drag)
         {
-            case Gesture.PanClick when far:
-                _gesture = Gesture.Pan;
-                break;
-            case Gesture.Pan:
-                _view = _view.Pan(delta.X, delta.Y);
-                InvalidateVisual();
-                break;
-            case Gesture.Click when far:
-                if (_pressed != 0)
-                {
-                    _moveStarts = _editor.Selection.Select(_editor.Document.Graph.Find).OfType<GraphNode>().ToDictionary(n => n.Id, n => new Vec2(n.X, n.Y));
-                    _editor.BeginMove();
-                    _gesture = Gesture.Move;
-                }
-                else
-                {
-                    _gesture = Gesture.Box;
-                }
-                break;
-            case Gesture.Move:
-                _editor.MoveSelected(_moveStarts, _view.ToCanvasDelta(moved.X, moved.Y));
-                break;
-            case Gesture.Box:
-                InvalidateVisual();
-                break;
-            case Gesture.Link:
-                _linkEnd = ToCanvas(position);
-                InvalidateVisual();
-                break;
+            _link = drag with { End = at };
         }
     }
 
-    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    protected override void EndConnect(Vec2 at)
     {
-        base.OnPointerReleased(e);
-        var position = e.GetPosition(this);
-        switch (_gesture)
+        if (_link is { } drag)
         {
-            case Gesture.PanClick:
-                _picker.Open(this, ToCanvas(position), null);
-                break;
-            case Gesture.Click:
-                if (_pressed == 0)
-                {
-                    _editor.Select([], ModeOf(e.KeyModifiers) == SelectMode.Replace ? SelectMode.Replace : SelectMode.Add);
-                }
-                else if (e.KeyModifiers == KeyModifiers.None)
-                {
-                    _editor.Select([_pressed]);
-                }
-                break;
-            case Gesture.Move:
-                _editor.EndMove();
-                break;
-            case Gesture.Box:
-                _editor.Select(_geometry.InBox(ToCanvas(_start), ToCanvas(position)), ModeOf(e.KeyModifiers));
-                break;
-            case Gesture.Link:
-                EndLink(ToCanvas(position));
-                break;
+            _link = null;
+            EndLink(drag, at);
         }
-        _gesture = Gesture.None;
-        e.Pointer.Capture(null);
-        InvalidateVisual();
     }
 
-    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
-    {
-        base.OnPointerCaptureLost(e);
-        if (_gesture == Gesture.Move)
-        {
-            _editor.EndMove();
-        }
-        _gesture = Gesture.None;
-        InvalidateVisual();
-    }
+    protected override void CancelConnect() => _link = null;
 
     // A link that ends on a pin of the other side links them. One that came off an input and ends nowhere is gone, and
     // one that ends on nothing else opens the node picker, whose node it then links to.
-    void EndLink(Vec2 at)
+    void EndLink(LinkDrag drag, Vec2 at)
     {
         var hit = _geometry.HitTest(at);
-        var start = PinPoint(_linkStart);
-        if (_linkStart.FromOutput && hit.Kind == GraphHitKind.Input && start is { } output && TypeOf(hit) is { } inputType
+        var (from, detached) = (drag.Start, drag.Detached);
+        var start = PinPoint(from);
+        if (from.FromOutput && hit.Kind == GraphHitKind.Input && start is { } output && TypeOf(hit) is { } inputType
             && GraphGeometry.CanLink(output.Type, inputType))
         {
-            if (_detached is { } old && (old.Node, old.Input) != (hit.Node, hit.Pin))
+            if (detached is { } old && (old.Node, old.Input) != (hit.Node, hit.Pin))
             {
-                _editor.MoveLink(old.Node, old.Input, _linkStart.Node, _linkStart.Pin, hit.Node, hit.Pin);
+                _editor.MoveLink(old.Node, old.Input, from.Node, from.Pin, hit.Node, hit.Pin);
             }
-            else if (_detached == null && !_editor.Link(_linkStart.Node, _linkStart.Pin, hit.Node, hit.Pin))
+            else if (detached == null && !_editor.Link(from.Node, from.Pin, hit.Node, hit.Pin))
             {
                 _shell.Console.Add(Model.LogLevel.Warning, "material: that link would make a loop");
             }
             return;
         }
-        if (!_linkStart.FromOutput && hit.Kind == GraphHitKind.Output && start is { } input && TypeOf(hit) is { } outputType
+        if (!from.FromOutput && hit.Kind == GraphHitKind.Output && start is { } input && TypeOf(hit) is { } outputType
             && GraphGeometry.CanLink(outputType, input.Type))
         {
-            if (!_editor.Link(hit.Node, hit.Pin, _linkStart.Node, _linkStart.Pin))
+            if (!_editor.Link(hit.Node, hit.Pin, from.Node, from.Pin))
             {
                 _shell.Console.Add(Model.LogLevel.Warning, "material: that link would make a loop");
             }
             return;
         }
-        if (_detached is { } detached)
+        if (detached is { } gone)
         {
-            _editor.SetField(detached.Node, detached.Input, null);
+            _editor.SetField(gone.Node, gone.Input, null);
             return;
         }
         if (hit.Kind == GraphHitKind.None)
         {
-            _picker.Open(this, at, _linkStart);
+            _picker.Open(this, at, from);
         }
     }
 
@@ -513,39 +326,15 @@ public sealed class GraphCanvas : Control
         }
     }
 
-    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
-    {
-        base.OnPointerWheelChanged(e);
-        var at = e.GetPosition(this);
-        _view = _view.ZoomAbout(at.X, at.Y, Math.Pow(Canvas2DView.WheelStep, e.Delta.Y), MinZoom, MaxZoom);
-        InvalidateVisual();
-        e.Handled = true;
-    }
+    protected override void OpenAddMenu(Vec2 at) => _picker.Open(this, at, null);
 
-    protected override void OnKeyDown(KeyEventArgs e)
+    internal override bool PressKey(Key key, KeyModifiers modifiers)
     {
-        base.OnKeyDown(e);
-        switch (e.Key)
+        if (key == Key.D && modifiers == KeyModifiers.Control)
         {
-            case Key.Delete or Key.Back:
-                _editor.DeleteSelected();
-                break;
-            case Key.D when e.KeyModifiers == KeyModifiers.Control:
-                _editor.DuplicateSelected();
-                break;
-            case Key.F when e.KeyModifiers == KeyModifiers.None:
-                Frame();
-                break;
-            case Key.Space or Key.Tab when e.KeyModifiers == KeyModifiers.None:
-                _picker.Open(this, ToCanvas(_last), null);
-                break;
-            case Key.Escape when _gesture == Gesture.Move:
-                _editor.EndMove(cancel: true);
-                _gesture = Gesture.None;
-                break;
-            default:
-                return;
+            _editor.DuplicateSelected();
+            return true;
         }
-        e.Handled = true;
+        return base.PressKey(key, modifiers);
     }
 }

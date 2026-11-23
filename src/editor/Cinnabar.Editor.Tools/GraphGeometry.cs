@@ -46,7 +46,7 @@ public readonly record struct LinkLayout(int From, string Output, int To, string
 /// Where a graph's nodes and links are on the canvas (see docs/editor/material-editor.md#material-editor), and what is at a point, so
 /// the node editor's hit tests run without a window.
 /// </summary>
-public sealed class GraphGeometry
+public sealed class GraphGeometry : IGraphLayout
 {
     public const double NodeWidth = 180;
     public const double HeaderHeight = 24;

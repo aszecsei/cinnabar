@@ -245,7 +245,7 @@ public sealed class BehaviorTreeCanvas : NodeGraphCanvas
 
     int? NodeAt(Vec2 at) => _geometry.HitTest(at) is { Kind: TreeHitKind.Node or TreeHitKind.Foot } hit ? hit.Node : null;
 
-    protected override CanvasPress PressAt(Vec2 at, KeyModifiers modifiers)
+    protected override CanvasPress PressAt(Vec2 at, KeyModifiers modifiers, int clickCount)
     {
         var hit = _geometry.HitTest(at);
         switch (hit.Kind)
