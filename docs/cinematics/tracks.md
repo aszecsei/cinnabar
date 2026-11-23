@@ -54,7 +54,7 @@ A channel of a section is a **curve**: keys in rising time, each with a time in 
 - Its arithmetic is `f64` `+ - * /` in a fixed order. A weighted segment's solve takes a fixed number of halvings (`CURVE_SOLVE_STEPS`, 48), not a tolerance.
 - `lib/engine/cutscene/testdata/curve.txt` holds a shared test curve and its value at every 250 ticks, as `f32` bits. The runtime's test reads it, and so does the test of the editor's evaluator, `CutsceneCurve`, which gives the same bits (see [Editor: Cutscene editor](../editor/cutscene-editor.md#the-evaluator)). Run the cutscene tests with `CINNABAR_WRITE_CURVE_GOLDEN=1` to write it again after a deliberate change.
   - Its `infinity <pre> <post> <from> <to>` blocks hold the values of the curve's keys from `<from>` to before `<to>` with those modes, from -60000 to 180000 ticks. They end with the ticks beside the keys' ends and their repeats, where a floored division goes wrong first, and two far ticks.
-  - Each mode is on each side once, beside another mode, so a side read as the other fails.
+  - Each mode is on each side once, beside another mode, so a side read as the other fails. Two more blocks extend `linear` along the other kinds of end segment: Bezier tangents on both sides, and a linear start with a constant end.
 
 The text of a key and of a channel's infinity is in [Content: Cutscenes](../content/kinds/cutscenes.md#channels-and-keys). The cooker checks that keys are in order, that numbers are finite, that weights are from 0 to 1, and that a channel's infinity is one that it takes.
 

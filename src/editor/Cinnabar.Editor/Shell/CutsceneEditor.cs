@@ -864,8 +864,9 @@ public sealed class CutsceneEditor : IGraphEditor
 
     /// <summary>
     /// Sets the times of <see cref="CurveKeys"/> from a typed entry (see <see cref="CurveEntry"/>): timecode or frames at the
-    /// display rate, or <c>+=</c> or <c>-=</c> one, as one undo entry, and selects them where they went. Returns a problem,
-    /// or null. An entry that does not read, or that would put two keys of one curve at one time, changes nothing.
+    /// display rate, or <c>+=</c> or <c>-=</c> one, as one undo entry, and selects them where they went. An offset moves
+    /// them together, as a drag does, so at a section's edge they all stop and keep their spacing. Returns a problem, or
+    /// null. An entry that does not read, or a time that would put two keys of one curve at one time, changes nothing.
     /// </summary>
     public string? SetCurveKeyTime(string text)
     {
@@ -880,7 +881,15 @@ public sealed class CutsceneEditor : IGraphEditor
         }
         string? problem = null;
         IReadOnlyList<string>? paths = null;
-        Own(() => Document.Edit("Set Key Time", f => paths = CutsceneCurveEdits.SetTimes(f, keys, t => entry.Apply(t), out problem, _locked)));
+        if (entry.Op == CurveEntryOp.Set)
+        {
+            Own(() => Document.Edit("Set Key Time", f => paths = CutsceneCurveEdits.SetTimes(f, keys, t => entry.Apply(t), out problem, _locked)));
+        }
+        else
+        {
+            var delta = (int)Math.Clamp(entry.Op == CurveEntryOp.Add ? entry.Operand : -entry.Operand, int.MinValue, int.MaxValue);
+            Own(() => Document.Edit("Set Key Time", f => paths = CutsceneEdits.Move(f, keys, delta, _locked)));
+        }
         if (paths != null)
         {
             Select(paths, SelectMode.Replace);

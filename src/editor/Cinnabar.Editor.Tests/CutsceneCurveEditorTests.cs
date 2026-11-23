@@ -396,6 +396,9 @@ public sealed class CutsceneCurveEditorTests : IDisposable
         // An offset moves each by the same time.
         Assert.Null(editor.SetCurveKeyTime("+=1"));
         Assert.Equal([2000, 402000], editor.CurveKeys.Select(p => editor.File.Find(p)!.Start!.Value).Order());
+        // Together, as a drag: 2 frames earlier stops both at the section's start, 1 frame on, and keeps their spacing.
+        Assert.Null(editor.SetCurveKeyTime("-=2"));
+        Assert.Equal([0, 400000], editor.CurveKeys.Select(p => editor.File.Find(p)!.Start!.Value).Order());
     }
 
     [Fact]

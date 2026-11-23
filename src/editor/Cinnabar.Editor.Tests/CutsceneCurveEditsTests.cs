@@ -127,6 +127,20 @@ public sealed class CutsceneCurveEditsTests
     }
 
     [Fact]
+    public void ASplitKeepsTheChannelsInfinityInBothHalves()
+    {
+        var file = Parse();
+        CutsceneCurveEdits.SetInfinity(file, ["section:1/channel:value"], InfinitySide.Pre, CurveInfinity.Oscillate);
+        CutsceneCurveEdits.SetInfinity(file, ["section:1/channel:value"], InfinitySide.Post, CurveInfinity.Cycle);
+        var halves = CutsceneEdits.Split(file, ["section:1"], 60000 + 90000);
+        Assert.Equal(2, halves.Count);
+        foreach (var half in halves)
+        {
+            Assert.Equal((CurveInfinity.Oscillate, CurveInfinity.Cycle), CutsceneCurveEdits.InfinityOf(file.Find($"{half}/channel:value")!));
+        }
+    }
+
+    [Fact]
     public void AnInfinityIsAChannelSettingBeforeItsKeysAndConstantHasNone()
     {
         var file = Parse();

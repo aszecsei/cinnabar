@@ -21,21 +21,28 @@ GOLDEN_PATH :: "lib/engine/cutscene/testdata/curve.txt"
 @(private = "file")
 GOLDEN_STEP :: 250
 
-// GOLDEN_INFINITY is each infinity block of the shared file: its pre and post modes, on the golden curve's keys from
-// GOLDEN_FROM to GOLDEN_TO. Those keys leave the first on a Bezier slope and reach the last on a linear segment, and
-// their values change, so linear and cycle with offset each give something other than a hold. Each mode is on each side
-// once, beside another, so a side read as the other fails.
+// Golden_Block is an infinity block of the shared file: its pre and post modes, on the golden curve's keys from from to
+// before to.
 @(private = "file")
-GOLDEN_INFINITY := [?][2]format.Cutscene_Infinity {
-	{.Linear, .Cycle},
-	{.Cycle, .Oscillate},
-	{.Cycle_Offset, .Linear},
-	{.Oscillate, .Cycle_Offset},
+Golden_Block :: struct {
+	pre, post: format.Cutscene_Infinity,
+	from, to:  int,
 }
+
+// GOLDEN_INFINITY is each infinity block of the shared file. The first four are on keys 3 to 5, which leave the first on
+// a Bezier slope and reach the last on a linear segment, and whose values change, so linear and cycle with offset each
+// give something other than a hold. Each mode is on each side once there, beside another, so a side read as the other
+// fails. The last two extend linearly along each other kind of end segment: keys 2 and 3 end on Bezier tangents on both
+// sides, and keys 4 to 6 start on a linear segment and end on a constant one.
 @(private = "file")
-GOLDEN_FROM :: 3
-@(private = "file")
-GOLDEN_TO :: 6
+GOLDEN_INFINITY := [?]Golden_Block {
+	{.Linear, .Cycle, 3, 6},
+	{.Cycle, .Oscillate, 3, 6},
+	{.Cycle_Offset, .Linear, 3, 6},
+	{.Oscillate, .Cycle_Offset, 3, 6},
+	{.Linear, .Linear, 2, 4},
+	{.Linear, .Linear, 4, 7},
+}
 // GOLDEN_INFINITY_TICKS are the infinity blocks' ticks from GOLDEN_INFINITY_START to GOLDEN_INFINITY_END in steps of
 // GOLDEN_STEP, and then the ticks of golden_infinity_edges.
 @(private = "file")
@@ -416,15 +423,15 @@ the_curve_gives_the_shared_values :: proc(t: ^testing.T) {
 				transmute(u32)curve_value(keys, tick, .Constant, .Constant),
 			)
 		}
-		part := keys[GOLDEN_FROM:GOLDEN_TO]
-		for modes in GOLDEN_INFINITY {
+		for g in GOLDEN_INFINITY {
+			part := keys[g.from:g.to]
 			fmt.sbprintfln(
 				&b,
 				"infinity %s %s %d %d",
-				INFINITY_NAMES[modes[0]],
-				INFINITY_NAMES[modes[1]],
-				GOLDEN_FROM,
-				GOLDEN_TO,
+				INFINITY_NAMES[g.pre],
+				INFINITY_NAMES[g.post],
+				g.from,
+				g.to,
 			)
 			for tick := i32(GOLDEN_INFINITY_START);
 			    tick <= GOLDEN_INFINITY_END;
@@ -433,7 +440,7 @@ the_curve_gives_the_shared_values :: proc(t: ^testing.T) {
 					&b,
 					"at %d %08x",
 					tick,
-					transmute(u32)curve_value(part, tick, modes[0], modes[1]),
+					transmute(u32)curve_value(part, tick, g.pre, g.post),
 				)
 			}
 			for tick in golden_infinity_edges(part) {
@@ -441,7 +448,7 @@ the_curve_gives_the_shared_values :: proc(t: ^testing.T) {
 					&b,
 					"at %d %08x",
 					tick,
-					transmute(u32)curve_value(part, tick, modes[0], modes[1]),
+					transmute(u32)curve_value(part, tick, g.pre, g.post),
 				)
 			}
 		}
@@ -486,12 +493,13 @@ the_curve_gives_the_shared_values :: proc(t: ^testing.T) {
 			if block >= len(GOLDEN_INFINITY) {
 				return
 			}
-			testing.expect_value(t, fields[1], INFINITY_NAMES[GOLDEN_INFINITY[block][0]])
-			testing.expect_value(t, fields[2], INFINITY_NAMES[GOLDEN_INFINITY[block][1]])
-			testing.expect_value(t, fields[3], fmt.tprint(GOLDEN_FROM))
-			testing.expect_value(t, fields[4], fmt.tprint(GOLDEN_TO))
-			curve = keys[GOLDEN_FROM:GOLDEN_TO]
-			pre, post = GOLDEN_INFINITY[block][0], GOLDEN_INFINITY[block][1]
+			g := GOLDEN_INFINITY[block]
+			testing.expect_value(t, fields[1], INFINITY_NAMES[g.pre])
+			testing.expect_value(t, fields[2], INFINITY_NAMES[g.post])
+			testing.expect_value(t, fields[3], fmt.tprint(g.from))
+			testing.expect_value(t, fields[4], fmt.tprint(g.to))
+			curve = keys[g.from:g.to]
+			pre, post = g.pre, g.post
 		case "at":
 			tick, _ := strconv.parse_int(fields[1])
 			bits, _ := strconv.parse_u64_of_base(fields[2], 16)

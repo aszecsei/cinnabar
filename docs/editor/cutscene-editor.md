@@ -497,11 +497,12 @@ A curve's infinity is what it does before its first key and after its last, insi
 - A curve that does not take a mode keeps its own: an audio track's `pitch` takes only constant, and a curve of assets has none.
 - **The curve draws dashed** from its section's start to its first key and from its last key to its section's end, as the runtime evaluates it there. Its span in the normalized view, and F with no key selected, take in those parts on a side that is not constant.
 - **A double-click** on a dashed part adds a key with the value that it shows. The new key changes the keys' span, so a cycle's repeats change.
+- **Split** keeps the modes in both halves. A cut in a dashed part keys the value there, which changes the keys' span in the same way.
 
 ### Typed times and values
 
 The curve toolbar's **Time** and **Value** boxes show the time and the value that every selected key has, or a dash when they differ. The time is on the cutscene's time, as timecode or as frames, as the ruler shows it.
-- **Type an entry and press Enter:** a number sets every selected key, and `+=` or `-=` and a number moves each by it. Esc, or a click away, puts back what the keys have. Each entry is one undo entry (`Set Key Time`, `Set Key Value`).
+- **Type an entry and press Enter:** a number sets every selected key, and `+=` or `-=` and a number moves each by it. An offset of times moves the keys together, as a drag does, so at a section's edge they all stop. Esc, or a click away, puts back what the keys have. Each entry is one undo entry (`Set Key Time`, `Set Key Value`).
 - **A time** is timecode or frames at the display rate, as Go to Time takes. A key stays inside its section, and the selection follows the keys as they sort. An entry that would put two selected keys of one curve at one time changes nothing, and the box's tip says why. A key can land on a key that is not selected, as with a drag, and the cooker reports it.
 - **A value** is a number. A stepped curve's key takes a whole number.
 - An entry that does not read changes nothing, and the box's tip says what it takes.
