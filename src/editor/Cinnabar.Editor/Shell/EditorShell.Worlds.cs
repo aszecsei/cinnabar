@@ -1,4 +1,3 @@
-using Cinnabar.Editor.Docking;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
 using Wire = Cinnabar.Editor.Link.Protocol;
@@ -25,8 +24,6 @@ public sealed partial class EditorShell
     // The component ID of World_Streamer in lib/engine/streaming.
     const ulong WorldStreamerId = 144;
 
-    // The open World editors, in the order that they were opened or shown.
-    readonly List<WorldEditor> _worlds = [];
     // The last World_View that the game was sent, as a key of its content. The game starts with none, which is the empty key.
     // OnNewGameState resets it.
     string _sentWorldView = "";
@@ -35,7 +32,8 @@ public sealed partial class EditorShell
     // The world file that a streamer names, as it was read from disk, with the file's time.
     (string Path, DateTime Modified, WorldFile? File)? _streamerWorld;
 
-    public IReadOnlyList<WorldEditor> Worlds => _worlds;
+    /// <summary>The open World editors, in the order that they were opened or shown.</summary>
+    public IReadOnlyList<WorldEditor> Worlds => [.. _graphEditors.OfType<WorldEditor>()];
 
     /// <summary>Where the preview is. <see cref="SetPreview"/> is the only writer.</summary>
     public WorldPreview Preview { get; private set; } = new WorldPreview.Off();
@@ -53,36 +51,7 @@ public sealed partial class EditorShell
     /// Opens a world in the World editor, or shows its open editor. A file that does not start with <c>world 1</c>
     /// opens in the script editor instead, with the reason in the console.
     /// </summary>
-    public WorldEditor? OpenWorld(Asset asset)
-    {
-        if (_worlds.Find(w => w.Guid == asset.Guid) is { } open)
-        {
-            // The editor that was shown last is the world that the viewport shows.
-            _worlds.Remove(open);
-            _worlds.Add(open);
-            Layout.ShowDocument(open);
-            SendWorldView();
-            return open;
-        }
-        if (Assets.FullPath(asset) is not { } path)
-        {
-            return null;
-        }
-        var (document, problem) = WorldDocument.Open(path, asset.Guid);
-        if (document == null)
-        {
-            Report("world", path, [(problem!.Line, problem.Message, true)]);
-            OpenScript(path, (uint)problem.Line);
-            return null;
-        }
-        var editor = new WorldEditor(this, document);
-        _worlds.Add(editor);
-        _ = editor.CookNow();
-        Layout.OpenDocument(new WorldEditorDocument(editor, () => new Worlds.WorldEditorView(this, editor)));
-        GraphEditorsChanged?.Invoke();
-        SendWorldView();
-        return editor;
-    }
+    public WorldEditor? OpenWorld(Asset asset) => OpenEditor(asset) as WorldEditor;
 
     internal void OnWorldChanged() => SendWorldView();
 
@@ -134,7 +103,7 @@ public sealed partial class EditorShell
     // the first streamer in the open scenes, read from disk.
     (string Guid, WorldFile File)? ShownWorld()
     {
-        if (_worlds.LastOrDefault() is { } editor)
+        if (_graphEditors.OfType<WorldEditor>().LastOrDefault() is { } editor)
         {
             return (editor.Guid, editor.Document.Graph);
         }

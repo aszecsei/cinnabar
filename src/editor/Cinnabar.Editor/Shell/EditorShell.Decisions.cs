@@ -1,19 +1,14 @@
-using Cinnabar.Editor.Docking;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
-using Cinnabar.Editor.Model;
 
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>The decision editor's and the blackboard editor's documents (see docs/editor/decision-editor.md#decision-editor).</summary>
 public sealed partial class EditorShell
 {
-    readonly List<DecisionEditor> _decisions = [];
-    readonly List<BlackboardEditor> _blackboards = [];
+    public IReadOnlyList<DecisionEditor> Decisions => [.. _graphEditors.OfType<DecisionEditor>()];
 
-    public IReadOnlyList<DecisionEditor> Decisions => _decisions;
-
-    public IReadOnlyList<BlackboardEditor> Blackboards => _blackboards;
+    public IReadOnlyList<BlackboardEditor> Blackboards => [.. _graphEditors.OfType<BlackboardEditor>()];
 
     /// <summary>The decision editor whose document is active, or null when the viewport or another document is.</summary>
     public DecisionEditor? ActiveDecision => ActiveGraphEditor as DecisionEditor;
@@ -22,66 +17,18 @@ public sealed partial class EditorShell
     /// Opens a decision in the decision editor, or shows its open editor. A file that does not start with
     /// <c>decision 1</c> opens in the script editor instead, with the reason in the console.
     /// </summary>
-    public DecisionEditor? OpenDecision(Asset asset)
-    {
-        if (_decisions.Find(d => d.Guid == asset.Guid) is { } open)
-        {
-            Layout.ShowDocument(open);
-            return open;
-        }
-        if (Assets.FullPath(asset) is not { } path)
-        {
-            return null;
-        }
-        var (document, problem) = DecisionDocument.Open(path, asset.Guid);
-        if (document == null)
-        {
-            Report("decision", path, [(problem!.Line, problem.Message, true)]);
-            OpenScript(path, (uint)problem.Line);
-            return null;
-        }
-        var editor = new DecisionEditor(this, document);
-        _decisions.Add(editor);
-        _ = editor.CookNow();
-        Layout.OpenDocument(new DecisionEditorDocument(editor, () => new Decisions.DecisionEditorView(this, editor)));
-        GraphEditorsChanged?.Invoke();
-        return editor;
-    }
+    public DecisionEditor? OpenDecision(Asset asset) => OpenEditor(asset) as DecisionEditor;
 
     /// <summary>
     /// Opens a blackboard in the blackboard editor, or shows its open editor. A file that does not start with
     /// <c>blackboard 1</c> opens in the script editor instead, with the reason in the console.
     /// </summary>
-    public BlackboardEditor? OpenBlackboard(Asset asset)
-    {
-        if (_blackboards.Find(b => b.Guid == asset.Guid) is { } open)
-        {
-            Layout.ShowDocument(open);
-            return open;
-        }
-        if (Assets.FullPath(asset) is not { } path)
-        {
-            return null;
-        }
-        var (document, problem) = BlackboardDocument.Open(path, asset.Guid);
-        if (document == null)
-        {
-            Report("blackboard", path, [(problem!.Line, problem.Message, true)]);
-            OpenScript(path, (uint)problem.Line);
-            return null;
-        }
-        var editor = new BlackboardEditor(this, document);
-        _blackboards.Add(editor);
-        _ = editor.CookNow();
-        Layout.OpenDocument(new BlackboardEditorDocument(editor, () => new Decisions.BlackboardEditorView(this, editor)));
-        GraphEditorsChanged?.Invoke();
-        return editor;
-    }
+    public BlackboardEditor? OpenBlackboard(Asset asset) => OpenEditor(asset) as BlackboardEditor;
 
     /// <summary>A blackboard's text: its open editor's, with what it has not saved, or its file's, or null.</summary>
     public string? BlackboardText(string guid)
     {
-        if (_blackboards.Find(b => b.Guid == guid) is { } open)
+        if (_graphEditors.Find(e => e.Guid == guid) is BlackboardEditor open)
         {
             return open.Document.Text;
         }
@@ -96,7 +43,7 @@ public sealed partial class EditorShell
     // An asset's text: its open decision editor's, or its file's, or null when it cannot be read.
     string? ReadText(Asset asset)
     {
-        if (_decisions.Find(d => d.Guid == asset.Guid) is { } open)
+        if (_graphEditors.Find(e => e.Guid == asset.Guid) is DecisionEditor open)
         {
             return open.Document.Text;
         }

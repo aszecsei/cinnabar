@@ -59,7 +59,7 @@ public sealed partial class EditorShell
     // A cutscene that leaves, by its tab closing or by giving the preview to another, is no longer what Undo follows.
     void ForgetKeyed()
     {
-        if (_undoTarget is UndoTarget.Cutscene c && (c.Editor != CutscenePreview.Owner || !_cutscenes.Contains(c.Editor)))
+        if (_undoTarget is UndoTarget.Cutscene c && (c.Editor != CutscenePreview.Owner || !_graphEditors.Contains(c.Editor)))
         {
             Edited(UndoTarget.Scene.Instance);
         }

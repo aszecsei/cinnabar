@@ -1,6 +1,6 @@
 # Animation graph editor
 
-The animation graph editor edits an animation graph (see [Content: Animation graphs](../content/kinds/animation-graphs.md#animation-graphs)) and shows it playing (see [Animation](../animation/design.md#design)). Each open one is a document beside the viewport, `AnimationGraphEditorDocument`, over an `AnimationGraphEditor` in the shell, which holds its state, so docking can rebuild the view, and tests drive the editor without a window.
+The animation graph editor edits an animation graph (see [Content: Animation graphs](../content/kinds/animation-graphs.md#animation-graphs)) and shows it playing (see [Animation](../animation/design.md#design)). Each open one is a document beside the viewport, a `GraphEditorDocument` with the ID `animation_graph.{guid}`, over an `AnimationGraphEditor` in the shell, which holds its state, so docking can rebuild the view, and tests drive the editor without a window.
 
 **In this document:** [The file](#the-file) · [The canvas](#the-canvas) · [Preview](#preview) · [Live view](#live-view)
 

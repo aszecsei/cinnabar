@@ -52,7 +52,7 @@ public sealed class CutsceneEditorTests : IDisposable
         Assert.Same(editor, shell.ActiveCutscene);
         Assert.Contains(editor, shell.GraphEditors);
         Assert.Equal("Open in Cutscene Editor", shell.OpenLabel(asset));
-        Assert.Equal($"cutscene.{Guid}", Assert.IsType<CutsceneEditorDocument>(FindDocument(shell, editor)).Id);
+        Assert.Equal($"cutscene.{Guid}", Assert.IsType<GraphEditorDocument>(FindDocument(shell, editor)).Id);
         Assert.False(editor.Document.IsDirty);
         Assert.Equal(template, editor.Document.Text);
         // Opening it again shows the same editor.

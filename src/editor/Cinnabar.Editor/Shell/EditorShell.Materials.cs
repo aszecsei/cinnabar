@@ -1,7 +1,6 @@
 using Cinnabar.Editor.Docking;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Model;
-using Cinnabar.Editor.Panels;
 using AssetKind = Cinnabar.Editor.Link.Cook.AssetKind;
 
 namespace Cinnabar.Editor.Shell;
@@ -15,61 +14,111 @@ public sealed partial class EditorShell
     // MAX_PREVIEW_TARGETS in lib/core/gpu/gpu.odin.
     public const int MaxPreviews = 4;
 
-    readonly List<MaterialEditor> _materials = [];
+    // The open graph editors of every kind, in the order that they were opened or shown again. The last World editor in it
+    // is the world that the viewport shows.
+    readonly List<IGraphEditor> _graphEditors = [];
     // A new link knows no previews, and a preview's frames come by its slot.
     readonly PreviewSlots _previewSlots;
     // The material functions that graphs call, read from their files, by GUID, with the file's time.
     readonly Dictionary<string, (DateTime Modified, MaterialGraph? Graph)> _functions = [];
     // Editors that closed with their changes discarded, so their documents close without asking again.
     readonly HashSet<IGraphEditor> _discarding = [];
-    // The command line's materials, effects, animation graphs, UI documents, decisions, blackboards and cutscenes, which
-    // open once the index has them.
-    readonly List<string> _pendingMaterials = [];
+    // The command line's assets, by path, and the content browser's new assets, by GUID, which open once the index has them.
+    readonly List<PendingOpen> _pendingOpens = [];
 
-    void OpenPendingMaterials()
+    abstract record PendingOpen
     {
-        foreach (var path in _pendingMaterials.ToList())
+        public sealed record ByPath(string Path) : PendingOpen;
+
+        public sealed record ByGuid(string Guid) : PendingOpen;
+    }
+
+    void OpenPending()
+    {
+        foreach (var pending in _pendingOpens.ToList())
         {
-            if (Assets.FindByPath(path) is { } asset)
+            var asset = pending switch
             {
-                _pendingMaterials.Remove(path);
-                if (asset.Kind == AssetKind.Effect)
-                {
-                    OpenEffect(asset);
-                }
-                else if (asset.Kind == AssetKind.AnimationGraph)
-                {
-                    OpenAnimationGraph(asset);
-                }
-                else if (asset.Kind == AssetKind.Ui)
-                {
-                    OpenUiDocument(asset);
-                }
-                else if (asset.Kind == AssetKind.Decision)
-                {
-                    OpenDecision(asset);
-                }
-                else if (asset.Kind == AssetKind.Blackboard)
-                {
-                    OpenBlackboard(asset);
-                }
-                else if (asset.Kind == AssetKind.Cutscene)
-                {
-                    OpenCutscene(asset);
-                }
-                else
-                {
-                    OpenMaterial(asset);
-                }
+                PendingOpen.ByPath byPath => Assets.FindByPath(byPath.Path),
+                PendingOpen.ByGuid byGuid => Assets.Find(byGuid.Guid),
+                _ => null,
+            };
+            if (asset != null)
+            {
+                _pendingOpens.Remove(pending);
+                OpenAsset(asset);
             }
         }
     }
 
-    public IReadOnlyList<MaterialEditor> Materials => _materials;
+    public IReadOnlyList<MaterialEditor> Materials => [.. _graphEditors.OfType<MaterialEditor>()];
 
     /// <summary>The open graphs of every kind.</summary>
-    public IEnumerable<IGraphEditor> GraphEditors => _materials.Concat<IGraphEditor>(_animationGraphs).Concat(_uiDocuments).Concat(_decisions).Concat(_blackboards).Concat(_worlds)
-        .Concat(_cutscenes);
+    public IEnumerable<IGraphEditor> GraphEditors => _graphEditors;
+
+    /// <summary>
+    /// Opens an asset in its graph editor (see <see cref="GraphEditorKinds"/>), or shows its open editor. A file that its
+    /// kind does not read opens in the script editor instead, with the reason in the console; a material's problems only
+    /// go to the console. Null for an asset that has no graph editor or did not open.
+    /// </summary>
+    internal IGraphEditor? OpenEditor(Link.Cook.Asset asset)
+    {
+        if (GraphEditorKindOf(asset.Kind) is not { } kind)
+        {
+            return null;
+        }
+        if (_graphEditors.Find(e => e.Guid == asset.Guid) is { } open)
+        {
+            // The World editor that was shown last is the world that the viewport shows.
+            _graphEditors.Remove(open);
+            _graphEditors.Add(open);
+            Layout.ShowDocument(open);
+            SendWorldView();
+            return open;
+        }
+        if (Assets.FullPath(asset) is not { } path)
+        {
+            return null;
+        }
+        IGraphDocument document;
+        switch (kind.Open(path, asset.Guid))
+        {
+            case OpenResult.Opened opened:
+                Report(kind.Noun, path, opened.Problems.Select(p => (p.Line, p.Message, p.IsError)));
+                document = opened.Document;
+                break;
+            case OpenResult.Refused refused:
+                Report(kind.Noun, path, refused.Problems.Select(p => (p.Line, p.Message, p.IsError)));
+                return null;
+            case OpenResult.NotOfKind { Problem: var problem }:
+                Report(kind.Noun, path, [(problem.Line, problem.Message, true)]);
+                OpenScript(path, (uint)problem.Line);
+                return null;
+            default:
+                return null;
+        }
+        int? previewId = null;
+        if (kind.WantsPreview(document))
+        {
+            previewId = _previewSlots.Free();
+            if (previewId == null)
+            {
+                Console.Add(LogLevel.Warning, $"{kind.Noun}: {MaxPreviews} previews are open, so {document.Title} has none");
+            }
+        }
+        var editor = kind.Create(this, document, previewId);
+        // The document's activation reads the list, so the editor is in it first.
+        _graphEditors.Add(editor);
+        if (Host.Linked && editor is PreviewOwner owner)
+        {
+            owner.SendPreview();
+        }
+        _ = editor.CookNow();
+        Layout.OpenDocument(new GraphEditorDocument(editor, kind, () => kind.CreateView(this, editor)));
+        GraphEditorsChanged?.Invoke();
+        SendWorldView();
+        return editor;
+    }
 
     /// <summary>The graph editor whose document is active, or null when the viewport is.</summary>
     public IGraphEditor? ActiveGraphEditor { get; private set; }
@@ -96,7 +145,7 @@ public sealed partial class EditorShell
             return null;
         }
         // An open function's graph is what its editor has, saved or not.
-        if (_materials.Find(m => m.Guid == guid) is { } open)
+        if (_graphEditors.Find(e => e.Guid == guid) is MaterialEditor open)
         {
             return open.Document.Graph;
         }
@@ -121,43 +170,7 @@ public sealed partial class EditorShell
     /// Opens a material or a material function in the material editor, or shows its open editor. A material whose
     /// evaluate is HLSL opens in the script editor instead.
     /// </summary>
-    public MaterialEditor? OpenMaterial(Link.Cook.Asset asset)
-    {
-        if (_materials.Find(m => m.Guid == asset.Guid) is { } open)
-        {
-            Layout.ShowDocument(open);
-            return open;
-        }
-        if (Assets.FullPath(asset) is not { } path)
-        {
-            return null;
-        }
-        var (document, problems) = MaterialDocument.Open(path, asset.Guid);
-        Report("material", path, problems.Select(p => (p.Line, p.Message, p.IsError)));
-        if (document == null)
-        {
-            return null;
-        }
-        int? previewId = null;
-        if (document.Kind == MaterialFileKind.Material)
-        {
-            previewId = _previewSlots.Free();
-            if (previewId == null)
-            {
-                Console.Add(LogLevel.Warning, $"material: {MaxPreviews} previews are open, so {document.Title} has none");
-            }
-        }
-        var editor = new MaterialEditor(this, document, previewId);
-        _materials.Add(editor);
-        if (Host.Linked)
-        {
-            editor.SendPreview();
-        }
-        _ = editor.CookNow();
-        Layout.OpenDocument(new MaterialEditorDocument(editor, () => new global::Cinnabar.Editor.Materials.MaterialEditorView(this, editor)));
-        GraphEditorsChanged?.Invoke();
-        return editor;
-    }
+    public MaterialEditor? OpenMaterial(Link.Cook.Asset asset) => OpenEditor(asset) as MaterialEditor;
 
     /// <summary>The document dock's active document changed.</summary>
     void OnActiveDocumentChanged(Dock.Model.Core.IDockable? document)
@@ -191,44 +204,12 @@ public sealed partial class EditorShell
             OnEffectClosed(preview);
             return;
         }
-        if (document is not GraphEditorDocument { GraphEditor: var editor } || !GraphEditors.Contains(editor))
+        if (document is not GraphEditorDocument { GraphEditor: var editor, Kind: var kind } || !_graphEditors.Remove(editor))
         {
             return;
         }
-        if (editor is MaterialEditor material)
-        {
-            _materials.Remove(material);
-            material.ClosePreview();
-        }
-        if (editor is AnimationGraphEditor graph)
-        {
-            _animationGraphs.Remove(graph);
-            graph.ClosePreview();
-        }
-        if (editor is UiEditor ui)
-        {
-            _uiDocuments.Remove(ui);
-            ui.ClosePreview();
-        }
-        if (editor is DecisionEditor decision)
-        {
-            _decisions.Remove(decision);
-        }
-        if (editor is BlackboardEditor blackboard)
-        {
-            _blackboards.Remove(blackboard);
-        }
-        if (editor is WorldEditor world)
-        {
-            _worlds.Remove(world);
-        }
-        if (editor is CutsceneEditor cutscene)
-        {
-            _cutscenes.Remove(cutscene);
-            EndBindingPickFor(null, cutscene);
-            CutscenePreview.OnTabClosed(cutscene);
-            ForgetKeyed();
-        }
+        (editor as PreviewOwner)?.ClosePreview();
+        kind.OnClosed(this, editor);
         _discarding.Remove(editor);
         editor.Dispose();
         if (ActiveGraphEditor == editor)
@@ -294,6 +275,6 @@ public sealed partial class EditorShell
         }
     }
 
-    // The material editors' previews, then the effects', then the animation graphs', then the UI documents'.
-    IEnumerable<PreviewOwner> PreviewOwners() => _materials.Concat<PreviewOwner>(_effects).Concat(_animationGraphs).Concat(_uiDocuments);
+    // The graph editors' previews, then the effects'.
+    IEnumerable<PreviewOwner> PreviewOwners() => _graphEditors.OfType<PreviewOwner>().Concat(_effects);
 }
