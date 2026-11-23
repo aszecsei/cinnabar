@@ -53,6 +53,23 @@ public static class Gizmo
         _ => GizmoKind.None,
     };
 
+    /// <summary>
+    /// The verb of a drag with <paramref name="tool"/>'s gizmo, for its undo entry: Rotate, Scale, or
+    /// <paramref name="move"/> for the move gizmo, which a texture's drag calls Shift.
+    /// </summary>
+    public static string VerbOf(Tool tool, string move = "Move") => tool switch
+    {
+        Tool.Rotate => "Rotate",
+        Tool.Scale => "Scale",
+        _ => move,
+    };
+
+    /// <summary>
+    /// Whether <paramref name="tool"/>'s gizmo takes the selection's own axes: in local space, and always for Scale, which
+    /// scales along the selection's own axes.
+    /// </summary>
+    public static bool LocalAxes(Tool tool, Space space) => space == Space.Local || tool == Tool.Scale;
+
     /// <summary>The axes' length in meters, so they are <see cref="ScreenLength"/> pixels long at the gizmo's distance.</summary>
     public static double Size(EditorCamera camera, Vec3 center, double height) =>
         camera.PixelSize(Math.Max(Vec3.Dot(center, camera.Forward), camera.Near), height) * ScreenLength;

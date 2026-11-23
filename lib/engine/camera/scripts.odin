@@ -26,10 +26,8 @@ TOKEN_SLOTS :: 64
 // register_scripts defines the Views library, which reaches v and, for set_layout, the renderer. A game's Register_Proc
 // calls it, so init and every reload define them again.
 register_scripts :: proc(r: ^script.Runtime, v: ^Views, renderer: ^render.Renderer) {
-	luau.pushlightuserdata(r.L, v)
-	luau.setfield(r.L, luau.REGISTRYINDEX, VIEWS_KEY)
-	luau.pushlightuserdata(r.L, renderer)
-	luau.setfield(r.L, luau.REGISTRYINDEX, RENDERER_KEY)
+	script.set_registry_pointer(r, VIEWS_KEY, v)
+	script.set_registry_pointer(r, RENDERER_KEY, renderer)
 
 	BLEND :: "{ duration: number, curve: string?, clock: string?, out: number? }"
 	script.define(
@@ -57,18 +55,12 @@ register_scripts :: proc(r: ^script.Runtime, v: ^Views, renderer: ^render.Render
 
 @(private = "file")
 views_of :: proc(L: ^luau.State) -> ^Views {
-	luau.getfield(L, luau.REGISTRYINDEX, VIEWS_KEY)
-	v := (^Views)(luau.tolightuserdata(L, -1))
-	luau.pop(L, 1)
-	return v
+	return script.registry_pointer(L, VIEWS_KEY, Views)
 }
 
 @(private = "file")
 renderer_of :: proc(L: ^luau.State) -> ^render.Renderer {
-	luau.getfield(L, luau.REGISTRYINDEX, RENDERER_KEY)
-	r := (^render.Renderer)(luau.tolightuserdata(L, -1))
-	luau.pop(L, 1)
-	return r
+	return script.registry_pointer(L, RENDERER_KEY, render.Renderer)
 }
 
 // token_number is a token as scripts see it: a number, which the game also sends with on_camera_removed.

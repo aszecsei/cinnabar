@@ -363,7 +363,7 @@ cook_stage :: proc(
 	}
 	guid_of := make(map[string]format.Guid, len(a.subassets), context.temp_allocator)
 	for s in a.subassets {
-		guid_of[fmt.tprintf("%s.%s", subasset_kind_name(s.kind), s.name)] = s.guid
+		guid_of[fmt.tprintf("%s.%s", format.subasset_kind_name(s.kind), s.name)] = s.guid
 	}
 	for &t in textures {
 		t.guid = guid_of[fmt.tprintf("%s.%s", format.TEXTURE_KIND, t.name)]
@@ -2105,7 +2105,7 @@ write_generated :: proc(path, text: string, problems: ^Problems) -> bool {
 
 @(private = "file")
 kind_word :: proc(kind: format.Asset_Kind) -> string {
-	return subasset_kind_name(kind)
+	return format.subasset_kind_name(kind)
 }
 
 @(private = "file")
@@ -2181,7 +2181,7 @@ manifest_current :: proc(m: Stage_Manifest, a: Asset_Source, out_dir: string) ->
 		}
 	}
 	for s in m.subassets {
-		guid, found := format.meta_subasset(a.meta, subasset_kind_name(s.kind), s.name)
+		guid, found := format.meta_subasset(a.meta, format.subasset_kind_name(s.kind), s.name)
 		if !found || guid != s.guid {
 			return false
 		}

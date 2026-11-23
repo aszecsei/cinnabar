@@ -19,8 +19,7 @@ STATE_KEY :: "cinnabar.ai"
 // the game's script registration, so a reload defines them again. It does not write s, which the runtime that writes
 // the definitions file has none of.
 register_scripts :: proc(r: ^script.Runtime, s: ^State) {
-	luau.pushlightuserdata(r.L, s)
-	luau.setfield(r.L, luau.REGISTRYINDEX, STATE_KEY)
+	script.set_registry_pointer(r, STATE_KEY, s)
 	script.set_fixed_hook(r, {run_script_actions, s})
 	script.define(r, "Blackboard.get", proc(L: ^luau.State) -> c.int {
 			s := state_of(L)
@@ -321,10 +320,7 @@ current_action :: proc(s: ^State, e: ecs.Entity) -> string {
 
 @(private = "file")
 state_of :: proc(L: ^luau.State) -> ^State {
-	luau.getfield(L, luau.REGISTRYINDEX, STATE_KEY)
-	s := (^State)(luau.tolightuserdata(L, -1))
-	luau.pop(L, 1)
-	return s
+	return script.registry_pointer(L, STATE_KEY, State)
 }
 
 // agent_args reads an entity with an Agent and a key's name.

@@ -147,6 +147,22 @@ runtime_of :: proc "contextless" (L: ^luau.State) -> ^Runtime {
 	return container_of((^script_host.Bindings)(luau.callbacks(L).userdata), Runtime, "bindings")
 }
 
+// set_registry_pointer keeps p in the VM's registry under key, for a package's bindings to find with
+// registry_pointer. A package's register_scripts calls it on init and on every reload, so the pointer is never older
+// than the state that it points to.
+set_registry_pointer :: proc "contextless" (r: ^Runtime, key: cstring, p: rawptr) {
+	luau.pushlightuserdata(r.L, p)
+	luau.setfield(r.L, luau.REGISTRYINDEX, key)
+}
+
+// registry_pointer is the pointer that set_registry_pointer kept under key, or nil when no package has set it.
+registry_pointer :: proc "contextless" (L: ^luau.State, key: cstring, $T: typeid) -> ^T {
+	luau.getfield(L, luau.REGISTRYINDEX, key)
+	p := (^T)(luau.tolightuserdata(L, -1))
+	luau.pop(L, 1)
+	return p
+}
+
 // Register_Proc defines the game's bindings with define. init and reload both call it, so each binding is defined
 // in one place.
 Register_Proc :: #type proc(r: ^Runtime)

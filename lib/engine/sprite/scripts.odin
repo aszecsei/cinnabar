@@ -17,8 +17,7 @@ REGISTRY_KEY :: "cinnabar.sprite"
 // register_scripts defines the Sprites library, which reaches s, and exposes Sprite_Renderer. A game's Register_Proc
 // calls it, so init and every reload define them again.
 register_scripts :: proc(r: ^script.Runtime, s: ^State) {
-	luau.pushlightuserdata(r.L, s)
-	luau.setfield(r.L, luau.REGISTRYINDEX, REGISTRY_KEY)
+	script.set_registry_pointer(r, REGISTRY_KEY, s)
 	script.expose(r, render.Sprite_Renderer, render.DEFAULT_SPRITE_RENDERER)
 
 	script.define(r, "Sprites.play", proc(L: ^luau.State) -> c.int {
@@ -59,10 +58,7 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 
 @(private = "file")
 state_of :: proc(L: ^luau.State) -> ^State {
-	luau.getfield(L, luau.REGISTRYINDEX, REGISTRY_KEY)
-	s := (^State)(luau.tolightuserdata(L, -1))
-	luau.pop(L, 1)
-	return s
+	return script.registry_pointer(L, REGISTRY_KEY, State)
 }
 
 // sprite_arg reads the entity in the first argument, and raises an error unless it has a Sprite_Renderer. With write,

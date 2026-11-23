@@ -72,8 +72,7 @@ script_quality :: proc(renderer: ^render.Renderer, path: string) -> (q: Script_Q
 // define_quality_bindings defines the Render bindings, which reach q. A game's Register_Proc calls it, so init and
 // every reload define them again. The bindings read q only when a script calls them.
 define_quality_bindings :: proc(r: ^script.Runtime, q: ^Script_Quality) {
-	luau.pushlightuserdata(r.L, q)
-	luau.setfield(r.L, luau.REGISTRYINDEX, REGISTRY_KEY)
+	script.set_registry_pointer(r, REGISTRY_KEY, q)
 	script.define(r, "Render.quality", quality_binding, "() -> RenderQuality")
 	script.define(
 		r,
@@ -87,10 +86,7 @@ define_quality_bindings :: proc(r: ^script.Runtime, q: ^Script_Quality) {
 }
 
 script_quality_of :: proc(L: ^luau.State) -> ^Script_Quality {
-	luau.getfield(L, luau.REGISTRYINDEX, REGISTRY_KEY)
-	q := (^Script_Quality)(luau.tolightuserdata(L, -1))
-	luau.pop(L, 1)
-	return q
+	return script.registry_pointer(L, REGISTRY_KEY, Script_Quality)
 }
 
 // Render.quality() is the renderer's quality, with every field.

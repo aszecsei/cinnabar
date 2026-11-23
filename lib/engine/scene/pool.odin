@@ -281,8 +281,7 @@ POOL_REGISTRY_KEY :: "cinnabar.scene.pools"
 // calls it.
 @(private)
 register_pool_scripts :: proc(r: ^script.Runtime, s: ^Scenes) {
-	luau.pushlightuserdata(r.L, s)
-	luau.setfield(r.L, luau.REGISTRYINDEX, POOL_REGISTRY_KEY)
+	script.set_registry_pointer(r, POOL_REGISTRY_KEY, s)
 	script.define(r, "Pool.spawn", proc(L: ^luau.State) -> c.int {
 			r, s := pools_of(L)
 			guid := script.to_asset(r, L, 1)
@@ -340,9 +339,7 @@ register_pool_scripts :: proc(r: ^script.Runtime, s: ^Scenes) {
 @(private = "file")
 pools_of :: proc(L: ^luau.State) -> (^script.Runtime, ^Scenes) {
 	r := script.runtime_of(L)
-	luau.getfield(L, luau.REGISTRYINDEX, POOL_REGISTRY_KEY)
-	s := (^Scenes)(luau.tolightuserdata(L, -1))
-	luau.pop(L, 1)
+	s := script.registry_pointer(L, POOL_REGISTRY_KEY, Scenes)
 	if s == nil || r.world == nil {
 		script.raise(L, "Pool needs the scenes, which the game gives scene.register_scripts")
 	}

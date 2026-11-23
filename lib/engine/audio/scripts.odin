@@ -16,8 +16,7 @@ REGISTRY_KEY :: "cinnabar.audio"
 // register_scripts defines the Audio library, which reaches s, and exposes Audio_Source and Audio_Listener. A game's
 // Register_Proc calls it, so init and every reload define them again.
 register_scripts :: proc(r: ^script.Runtime, s: ^State) {
-	luau.pushlightuserdata(r.L, s)
-	luau.setfield(r.L, luau.REGISTRYINDEX, REGISTRY_KEY)
+	script.set_registry_pointer(r, REGISTRY_KEY, s)
 	script.expose(r, Audio_Source, DEFAULT_AUDIO_SOURCE)
 	script.expose(r, Audio_Listener)
 	script.define(
@@ -42,10 +41,7 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 
 @(private = "file")
 state_of :: proc(L: ^luau.State) -> ^State {
-	luau.getfield(L, luau.REGISTRYINDEX, REGISTRY_KEY)
-	s := (^State)(luau.touserdata(L, -1))
-	luau.pop(L, 1)
-	return s
+	return script.registry_pointer(L, REGISTRY_KEY, State)
 }
 
 // A bus by name, which must be Master or one of the project's.

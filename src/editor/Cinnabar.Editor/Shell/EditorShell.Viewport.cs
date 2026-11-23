@@ -194,7 +194,7 @@ public sealed partial class EditorShell
             return null;
         }
         // Scaling is along the entity's own axes.
-        var local = Space == Space.Local || Tool == Tool.Scale;
+        var local = Gizmo.LocalAxes(Tool, Space);
         return (pose.Position, local ? pose.Rotation : Quat.Identity);
     }
 
@@ -263,7 +263,7 @@ public sealed partial class EditorShell
         }
         var (width, height) = FrameSize;
         var count = poseEdit.Moved.Count();
-        var verb = Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Move" };
+        var verb = Gizmo.VerbOf(Tool);
         var drag = new GizmoDrag(Gizmo.KindOf(Tool), HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height);
         var target = new PoseTarget(this, poseEdit, pivot, axes);
         var label = count == 1 ? $"{verb} {Label(flat.Find(poseEdit.Moved.First())!)}" : $"{verb} {count} Entities";

@@ -21,6 +21,23 @@ guids_round_trip_through_text :: proc(t: ^testing.T) {
 }
 
 @(test)
+subasset_kind_names_round_trip :: proc(t: ^testing.T) {
+	named := 0
+	for kind in Asset_Kind {
+		name := subasset_kind_name(kind)
+		if name == "" {
+			testing.expect_value(t, subasset_kind_of(name), Asset_Kind.None)
+			continue
+		}
+		named += 1
+		testing.expect_value(t, subasset_kind_of(name), kind)
+	}
+	testing.expect_value(t, named, 9)
+	testing.expect_value(t, subasset_kind_name(.Scene), SUBLEVEL_KIND)
+	testing.expect_value(t, subasset_kind_of("sublevel_or_not"), Asset_Kind.None)
+}
+
+@(test)
 meta_files_hold_a_guid_and_settings :: proc(t: ^testing.T) {
 	meta, ok := meta_parse(
 		"# a comment\nguid = " + TEST_GUID + "\r\nnative = true\n\n",

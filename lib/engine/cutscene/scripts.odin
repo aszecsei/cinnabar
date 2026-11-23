@@ -18,8 +18,7 @@ REGISTRY_KEY :: "cinnabar.cutscene"
 // register_scripts defines the Cutscene library, which reaches s, the Cutscene handle's methods and wait_cutscene. A
 // game's Register_Proc calls it, so init and every reload define them again.
 register_scripts :: proc(r: ^script.Runtime, s: ^State) {
-	luau.pushlightuserdata(r.L, s)
-	luau.setfield(r.L, luau.REGISTRYINDEX, REGISTRY_KEY)
+	script.set_registry_pointer(r, REGISTRY_KEY, s)
 	script.define(
 		r,
 		"Cutscene.play",
@@ -162,10 +161,7 @@ failure_text :: proc(failure: Failure) -> string {
 
 @(private = "file")
 state_of :: proc(L: ^luau.State) -> ^State {
-	luau.getfield(L, luau.REGISTRYINDEX, REGISTRY_KEY)
-	s := (^State)(luau.tolightuserdata(L, -1))
-	luau.pop(L, 1)
-	return s
+	return script.registry_pointer(L, REGISTRY_KEY, State)
 }
 
 @(private = "file")
