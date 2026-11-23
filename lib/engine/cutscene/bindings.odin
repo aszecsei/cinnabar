@@ -96,8 +96,9 @@ Binding_Failure :: struct {
 
 // Resolve is what resolve_bindings needs: the world, its scenes, the scripts that a prefab's behaviours attach to (or
 // nil), the assets that prefabs load from, and the cutscene's blob. For a sub-sequence, mapped has, for each binding,
-// the parent's binding that its section maps it to, or nil. With unheld, the bindings suspend nothing on their
-// entities, for the editor's preview, where no system runs (see docs/editor/cutscene-editor.md#preview).
+// the parent's binding that its section maps it to, or nil. With preview, for the editor's preview, where no system
+// runs, the bindings suspend nothing on their entities, and a provided binding without an override is missing, not a
+// failure (see docs/editor/cutscene-editor.md#preview).
 Resolve :: struct {
 	world:   ^ecs.World,
 	scenes:  ^scene.Scenes,
@@ -106,7 +107,7 @@ Resolve :: struct {
 	data:    []byte,
 	blob:    ^format.Cutscene_Blob,
 	mapped:  []Maybe(Mapping),
-	unheld:  bool,
+	preview: bool,
 }
 
 // Mapping is a parent's binding that a sub-sequence's binding is mapped to: its index in the parent's blob, and its
@@ -141,8 +142,9 @@ binding_index :: proc(data: []byte, blob: ^format.Cutscene_Blob, key: Binding_Ke
 // resolve_bindings finds or spawns the entity of each binding, once, in the blob's order (see
 // docs/cinematics/bindings.md#resolving). An override wins over the asset's reference. A possessed binding finds its
 // entity in the first ready scene with its GUID. A spawned one spawns its prefab hidden by Loading until
-// reveal_bindings, and the cutscene owns it. A missing optional binding warns and does nothing. A missing required
-// binding, or a prefab that does not spawn, fails: what was spawned is despawned, and the failure names the binding. A
+// reveal_bindings, and the cutscene owns it. A provided binding has its entity from an override alone. A missing
+// optional binding warns and does nothing, as does a provided one in a preview. A missing required binding, or a prefab
+// that does not spawn, fails: what was spawned is despawned, and the failure names the binding. A
 // binding that r.mapped maps is Binding_Mapped, and an override of it does nothing.
 resolve_bindings :: proc(
 	b: ^Bindings,
@@ -176,7 +178,7 @@ resolve_bindings :: proc(
 				continue
 			}
 		}
-		hold := Binding_Hold{} if r.unheld else hold_of(binding)
+		hold := Binding_Hold{} if r.preview else hold_of(binding)
 		if entity := given[index]; entity != 0 {
 			if ecs.is_alive(w, entity) {
 				set_binding(b, w, index, Binding_Possessed{entity, hold})
@@ -195,6 +197,17 @@ resolve_bindings :: proc(
 			} else if binding.policy == .Optional {
 				log.warnf(
 					"cutscene: %s: the optional binding %q is missing, so its tracks do nothing",
+					source_of(r),
+					name_of(r, index),
+				)
+				set_binding(b, w, index, Binding_Missing{})
+			} else {
+				return fail(b, r, {index = index, reason = .Missing})
+			}
+		case .Provided:
+			if binding.policy == .Optional || r.preview {
+				log.warnf(
+					"cutscene: %s: the provided binding %q has no entity, so its tracks do nothing",
 					source_of(r),
 					name_of(r, index),
 				)

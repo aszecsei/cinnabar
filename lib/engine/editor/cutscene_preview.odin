@@ -544,7 +544,7 @@ preview_context :: proc(
 	w: ^ecs.World,
 	scripts: ^script.Runtime,
 ) -> cutscene.Player_Context {
-	return {world = w, scenes = e.scenes, scripts = scripts, unheld = true}
+	return {world = w, scenes = e.scenes, scripts = scripts, preview = true}
 }
 
 // preview_entities adds the entities that the preview writes or spawned.

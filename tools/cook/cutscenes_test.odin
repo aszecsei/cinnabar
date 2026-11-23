@@ -112,6 +112,27 @@ track 5 camera_cut ""
 `
 
 @(test)
+a_provided_binding_cooks_with_its_kind_and_policy :: proc(t: ^testing.T) {
+	parsed, problems := cutscene_parse(
+		"cutscene 1\nlength = 10\nbinding 1 \"Guest\"\n\tprovided = true\n\tpolicy = optional\nbinding 2 \"Host\"\n\tprovided = true\n",
+		context.temp_allocator,
+	)
+	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
+	if len(parsed.contents.bindings) != 2 {
+		testing.expectf(t, false, "%d bindings", len(parsed.contents.bindings))
+		return
+	}
+	guest := parsed.contents.bindings[0]
+	testing.expect_value(t, guest.kind, format.Cutscene_Binding_Kind.Provided)
+	testing.expect_value(t, guest.policy, format.Cutscene_Policy.Optional)
+	testing.expect_value(t, guest.asset, format.Guid{})
+	testing.expect_value(t, guest.entity, 0)
+	host := parsed.contents.bindings[1]
+	testing.expect_value(t, host.kind, format.Cutscene_Binding_Kind.Provided)
+	testing.expect_value(t, host.policy, format.Cutscene_Policy.Required)
+}
+
+@(test)
 cutscenes_parse_their_header_bindings_tracks_sections_and_keys :: proc(t: ^testing.T) {
 	parsed, problems := cutscene_parse(INTRO, context.temp_allocator)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
@@ -376,7 +397,11 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 			5,
 			"a binding named \"A\"",
 		},
-		{"cutscene 1\nlength = 10\nbinding 1 \"A\"\n", 3, "possesses an entity with possess"},
+		{
+			"cutscene 1\nlength = 10\nbinding 1 \"A\"\n",
+			3,
+			"or is provided by a script with provided = true",
+		},
 		{
 			"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tpossess = " +
 			S +
@@ -384,7 +409,30 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 			P +
 			"\n",
 			5,
-			"not both",
+			"only one of them",
+		},
+		{
+			"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tpossess = " + S + "\n\tprovided = true\n",
+			5,
+			"only one of them",
+		},
+		{
+			"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tprovided = true\n\tspawn = " + P + "\n",
+			5,
+			"only one of them",
+		},
+		{
+			"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tprovided = true\n\tscale = [1, 1, 1]\n",
+			5,
+			"scale is for a spawned binding",
+		},
+		{"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tprovided = false\n", 4, "provided is true"},
+		{
+			"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tprovided = true\nbinding 2 \"B\"\n\tspawn = " +
+			P +
+			"\n\tparent = 1\n",
+			7,
+			"parent is a spawned binding",
 		},
 		{
 			"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tpossess = @0001\n",

@@ -65,6 +65,13 @@ static partial class EditorCommands
     public const string CutsceneAddBindingSelected = "cutscene.addBindingSelected";
     public const string CutsceneRebindToSelection = "cutscene.rebindToSelection";
     public const string CutsceneFilterSelected = "cutscene.filterSelected";
+    public const string CutsceneSpawnPrefab = "cutscene.spawnPrefab";
+    public const string CutsceneAddSlot = "cutscene.addSlot";
+    public const string CutsceneConvertToPossessed = "cutscene.convertToPossessed";
+    public const string CutsceneConvertToSpawned = "cutscene.convertToSpawned";
+    public const string CutsceneConvertToSlot = "cutscene.convertToSlot";
+    public const string CutscenePickBinding = "cutscene.pickBinding";
+    public const string CutsceneStandInSelection = "cutscene.standInSelection";
 
     /// <summary>The timeline's commands, which act on the active cutscene while its timeline has the keyboard.</summary>
     public static readonly string[] CutsceneTimelineCommands =
@@ -91,7 +98,11 @@ static partial class EditorCommands
     /// The bindings' commands, which act between the entities selected in the viewport or the Outliner and the active
     /// cutscene, or the one that holds the preview, wherever the keyboard is (see docs/editor/cutscene-editor.md#bindings).
     /// </summary>
-    public static readonly string[] CutsceneBindingCommands = [CutsceneAddBindingSelected, CutsceneRebindToSelection, CutsceneFilterSelected];
+    public static readonly string[] CutsceneBindingCommands =
+    [
+        CutsceneAddBindingSelected, CutsceneRebindToSelection, CutsceneFilterSelected, CutsceneSpawnPrefab, CutsceneAddSlot, CutsceneConvertToPossessed,
+        CutsceneConvertToSpawned, CutsceneConvertToSlot, CutscenePickBinding, CutsceneStandInSelection,
+    ];
 
     // The cutscene editor's timeline (see docs/editor/cutscene-editor.md#the-timeline). Its keys are bare letters, which
     // the viewport and the other panels use too, so each command acts only while the timeline has the keyboard. Delete
@@ -336,6 +347,55 @@ static partial class EditorCommands
             Description = "Point the selected binding at the selected entity, and keep its tracks.",
             Icon = "cutscene",
             CanExecuteWhen = () => Bindings() is { } editor && editor.RebindRefusal(shell.Selection.Entity) == null,
+        });
+        commands.Register(new Command(CutsceneSpawnPrefab, "Add Binding: Spawn Prefab…", () => Bindings()?.RequestSpawnPrefab())
+        {
+            Description = "Pick a prefab for the cutscene to spawn, and add a binding for it.",
+            Icon = "cutscene",
+            CanExecuteWhen = () => Bindings() is { } editor && !editor.Document.InTransaction,
+        });
+        commands.Register(new Command(CutsceneAddSlot, "Add Binding: Script Slot", () => Bindings()?.AddSlot("Slot"))
+        {
+            Description = "Add a binding whose entity a script gives when it plays the cutscene. Rename it to the name that the script uses.",
+            Icon = "cutscene",
+            CanExecuteWhen = () => Bindings() is { } editor && !editor.Document.InTransaction,
+        });
+        commands.Register(new Command(CutsceneConvertToPossessed, "Convert Binding to Possessed", () => Bindings()?.Convert(CutsceneBindingKind.Possessed))
+        {
+            Description = "Make the selected binding possess the selected entity, or a script slot's stand-in, and keep its tracks.",
+            Icon = "cutscene",
+            CanExecuteWhen = () => Bindings() is { } editor && editor.ConvertRefusal(CutsceneBindingKind.Possessed) == null,
+        });
+        commands.Register(new Command(CutsceneConvertToSpawned, "Convert Binding to Spawned", () => Bindings()?.Convert(CutsceneBindingKind.Spawned))
+        {
+            Description = "Make the selected binding spawn its entity's prefab where the entity is, and keep its tracks.",
+            Icon = "cutscene",
+            CanExecuteWhen = () => Bindings() is { } editor && editor.ConvertRefusal(CutsceneBindingKind.Spawned) == null,
+        });
+        commands.Register(new Command(CutsceneConvertToSlot, "Convert Binding to Script Slot", () => Bindings()?.Convert(CutsceneBindingKind.Provided))
+        {
+            Description = "Make the selected binding one whose entity a script gives, keep its tracks, and preview it with what it bound.",
+            Icon = "cutscene",
+            CanExecuteWhen = () => Bindings() is { } editor && editor.ConvertRefusal(CutsceneBindingKind.Provided) == null,
+        });
+        commands.Register(new Command(CutscenePickBinding, "Pick Binding's Entity", () =>
+        {
+            if (Bindings() is { } editor && !editor.CancelPick())
+            {
+                editor.ArmPick();
+            }
+        })
+        {
+            Description = "Point the selected binding at the next entity selected in the viewport or the Outliner. Esc cancels.",
+            Icon = "cutscene",
+            CanExecuteWhen = () => Bindings() is { } editor && (editor.Picking != null || editor.PickRefusal() == null),
+            IsCheckedWhen = () => Bindings()?.Picking != null,
+        });
+        commands.Register(new Command(CutsceneStandInSelection, "Stand In Selection", () => Bindings()?.StandInSelection())
+        {
+            Description = "Preview the selected script slot with the selected entity. The stand-in is yours, and not saved in the cutscene.",
+            Icon = "cutscene",
+            CanExecuteWhen = () => Bindings() is { } editor && editor.StandInRefusal() == null,
         });
         commands.Register(new Command(CutsceneFilterSelected, "Show Selected Entities' Bindings", () =>
         {

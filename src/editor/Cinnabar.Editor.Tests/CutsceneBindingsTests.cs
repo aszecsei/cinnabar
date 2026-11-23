@@ -158,7 +158,7 @@ public sealed class CutsceneBindingsTests : IDisposable
         Assert.Equal(new CutsceneBindingInfo(CutsceneBindingKind.Spawned, "crate", CutsceneBindingState.Bound), Row(editor, 3).Binding);
         Assert.Equal(CutsceneBindingState.Broken, Row(editor, 4).Binding!.State);
         Assert.Equal(CutsceneBindingKind.Spawned, Row(editor, 4).Binding!.Kind);
-        Assert.Equal(new CutsceneBindingInfo(CutsceneBindingKind.Unknown, null, CutsceneBindingState.Broken, "It has neither possess nor spawn."), Row(editor, 5).Binding);
+        Assert.Equal(new CutsceneBindingInfo(CutsceneBindingKind.Unknown, null, CutsceneBindingState.Broken, "It has none of possess, spawn and provided."), Row(editor, 5).Binding);
     }
 
     [Fact]
@@ -201,7 +201,7 @@ public sealed class CutsceneBindingsTests : IDisposable
 
         shell.Selection.Select(Lamp);
         Assert.Equal([PathOf(editor, 2)], editor.SelectedPaths);
-        Assert.Equal("The binding spawns a prefab. Only a possessed binding can be pointed at an entity.", editor.RebindRefusal(Lamp));
+        Assert.Equal("The binding spawns a prefab. Convert it to a possessed binding to point it at an entity.", editor.RebindRefusal(Lamp));
         Assert.False(shell.Commands.Get(EditorCommands.CutsceneRebindToSelection).CanExecute);
 
         shell.Commands.Get("edit.undo").Execute();

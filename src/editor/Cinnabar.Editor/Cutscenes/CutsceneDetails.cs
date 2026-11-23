@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
@@ -47,7 +48,7 @@ sealed class CutsceneDetails : ScrollViewer
             return;
         }
         // A binding's state and whether a delete can remove it depend on the scenes and the other blocks.
-        var binding = block?.Kind == CutsceneBlockKind.Binding ? $"#{_editor.InfoOf(block)}#{_editor.DeleteBindingRefusal()}" : "";
+        var binding = block?.Kind == CutsceneBlockKind.Binding ? BindingKey(block) : "";
         var shown = block == null ? "" : $"{_editor.Selection}#{string.Join("\n", block.LineTexts)}#{_editor.File.Rate}{binding}";
         if (shown == _shown)
         {
@@ -77,23 +78,7 @@ sealed class CutsceneDetails : ScrollViewer
                     _editor.EditSelected("Rename", b => b.SetName(text.Trim())))));
                 if (block.Kind == CutsceneBlockKind.Binding)
                 {
-                    // See docs/editor/cutscene-editor.md#bindings.
-                    var info = _editor.InfoOf(block);
-                    var what = info.Kind switch
-                    {
-                        CutsceneBindingKind.Possessed => "Possesses",
-                        CutsceneBindingKind.Spawned => "Spawns",
-                        _ => "Binds",
-                    };
-                    _content.Children.Add(Row(what, new TextBlock { Text = info.TargetName ?? "?", FontSize = 12 }));
-                    if (info.Reason is { } reason)
-                    {
-                        _content.Children.Add(Dim(info.State == CutsceneBindingState.NotLoaded ? $"Not loaded: {reason}" : $"Broken: {reason}"));
-                    }
-                    if (_editor.DeleteBindingRefusal() is { } refusal)
-                    {
-                        _content.Children.Add(Dim($"Delete: {refusal}"));
-                    }
+                    AddBindingRows(block);
                 }
                 break;
             case CutsceneBlockKind.Section or CutsceneBlockKind.Range:
@@ -168,6 +153,111 @@ sealed class CutsceneDetails : ScrollViewer
             })));
         }
     }
+
+    // What a binding's rows depend on besides its lines: its state, the stand-in, an armed pick, the candidates, and
+    // what a convert, a stand-in and a delete would refuse, which the selected entities change.
+    string BindingKey(CutsceneBlock block)
+    {
+        var id = block.Id ?? 0;
+        var candidates = string.Join(",", _editor.CandidatesOf(block).Select(c => c.Entity));
+        var refusals = string.Join("|", Kinds.Select(_editor.ConvertRefusal));
+        return $"#{_editor.InfoOf(block)}#{_editor.DeleteBindingRefusal()}#{_editor.StandInOf(id)}#{_editor.Picking}#{_editor.PickRefusal()}"
+            + $"#{candidates}#{refusals}#{_editor.StandInRefusal()}";
+    }
+
+    static readonly CutsceneBindingKind[] Kinds = [CutsceneBindingKind.Possessed, CutsceneBindingKind.Spawned, CutsceneBindingKind.Provided];
+
+    // A binding's rows (see docs/editor/cutscene-editor.md#bindings): what it binds and whether that is there, a script
+    // slot's stand-in, a broken binding's Pick and the entities with its name, the converts and Delete's refusal.
+    void AddBindingRows(CutsceneBlock block)
+    {
+        var id = block.Id ?? 0;
+        var info = _editor.InfoOf(block);
+        var what = info.Kind switch
+        {
+            CutsceneBindingKind.Possessed => "Possesses",
+            CutsceneBindingKind.Spawned => "Spawns",
+            CutsceneBindingKind.Provided => "Stand-in",
+            _ => "Binds",
+        };
+        var target = info.TargetName ?? (info.Kind == CutsceneBindingKind.Provided && _editor.StandInOf(id) == null ? "none" : "?");
+        _content.Children.Add(Row(what, new TextBlock { Text = target, FontSize = 12 }));
+        if (info.Kind == CutsceneBindingKind.Provided)
+        {
+            _content.Children.Add(Dim($"A script gives this binding's entity when it plays the cutscene, as bindings = {{ [\"{block.Name}\"] = entity }}. "
+                + "The stand-in is yours, for the preview, and is not saved in the cutscene."));
+            var use = SmallButton("Use Selection", _editor.StandInRefusal() ?? "Preview the slot with the selected entity.", _editor.StandInSelection);
+            use.IsEnabled = _editor.StandInRefusal() == null;
+            var prefab = PrefabPicker(guid => _editor.SetStandIn(id, CutsceneBindings.FormatPrefab(guid))).Button("Prefab…");
+            prefab.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left;
+            ToolTip.SetTip(prefab, "Preview the slot with a prefab that the preview spawns.");
+            var clear = SmallButton("Clear", "Preview the slot with nothing: its tracks do nothing.", () => _editor.SetStandIn(id, null));
+            clear.IsEnabled = _editor.StandInOf(id) != null;
+            _content.Children.Add(Row("", use, prefab, clear));
+        }
+        if (info.Reason is { } reason)
+        {
+            _content.Children.Add(Dim(info.State == CutsceneBindingState.NotLoaded ? $"Not loaded: {reason}" : $"Broken: {reason}"));
+        }
+        if (info.Kind == CutsceneBindingKind.Possessed && info.State == CutsceneBindingState.Broken)
+        {
+            var armed = _editor.Picking?.Binding == id;
+            var pick = SmallButton(armed ? "Cancel Pick" : "Pick", armed
+                ? "Select an entity in the viewport or the Outliner for the binding to possess. Esc cancels."
+                : _editor.PickRefusal() ?? "Point the binding at the next entity that you select in the viewport or the Outliner.", () =>
+                {
+                    if (!_editor.CancelPick())
+                    {
+                        _editor.ArmPick();
+                    }
+                });
+            pick.IsEnabled = armed || _editor.PickRefusal() == null;
+            _content.Children.Add(Row("Fix", pick));
+            if (armed)
+            {
+                _content.Children.Add(Dim("Select the entity for the binding to possess, in the viewport or the Outliner."));
+            }
+            foreach (var candidate in _editor.CandidatesOf(block))
+            {
+                _content.Children.Add(Row("", SmallButton($"{candidate.Name} in {candidate.Scene}", "Point the binding at this entity, which has its name.",
+                    () => _editor.RebindTo(id, candidate.Entity))));
+            }
+        }
+        var converts = new List<Control>();
+        foreach (var kind in Kinds.Where(k => k != info.Kind))
+        {
+            var refusal = _editor.ConvertRefusal(kind);
+            var label = kind switch
+            {
+                CutsceneBindingKind.Possessed => "Possessed",
+                CutsceneBindingKind.Spawned => "Spawned",
+                _ => "Script Slot",
+            };
+            var button = SmallButton(label, refusal ?? $"Make the binding {label.ToLowerInvariant()}, and keep its tracks.", () => _editor.Convert(kind));
+            button.IsEnabled = refusal == null;
+            converts.Add(button);
+        }
+        if (converts.Count > 0)
+        {
+            _content.Children.Add(Row("Convert to", converts[0], [.. converts.Skip(1)]));
+        }
+        if (_editor.DeleteBindingRefusal() is { } deleteRefusal)
+        {
+            _content.Children.Add(Dim($"Delete: {deleteRefusal}"));
+        }
+    }
+
+    readonly HashSet<string> _prefabFolders = [];
+
+    CatalogPicker PrefabPicker(Action<string> pick) => PrefabPicker(_editor, pick, _prefabFolders);
+
+    /// <summary>A picker of the prefabs that the asset index knows, which gives the GUID of the one picked.</summary>
+    internal static CatalogPicker PrefabPicker(CutsceneEditor editor, Action<string> pick, HashSet<string> folders) => new("Search prefabs",
+        () => [.. editor.KnownPrefabs().Select(p => new CatalogItem(p.Guid, p.Name, ""))],
+        item => pick(item.Id), folders, _ => null)
+    {
+        Note = () => editor.KnownPrefabs().Count == 0 ? "The asset index knows no prefab yet." : null,
+    };
 
     static string Format(int ticks) => ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
 

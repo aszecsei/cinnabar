@@ -44,7 +44,7 @@ public sealed partial class Keying
 
     /// <summary>The binding of the keyed cutscene that possesses an entity, or null.</summary>
     public int? BindingOf(ulong handle) =>
-        Cutscene is { } cutscene && PossessOf(handle) is { } entity ? CutsceneKeying.BindingOf(cutscene.File, entity) : null;
+        Cutscene is { } cutscene && PossessOf(handle) is { } entity ? cutscene.BindingOfEntity(entity) : null;
 
     /// <summary>
     /// What keys a field of a bound entity: a pose part for a root's Transform or a child's Local_Transform, or the field

@@ -134,6 +134,16 @@ public sealed partial class EditorShell
         return true;
     }
 
+    /// <summary>
+    /// Finds the entity drawn in front at a pixel of the frame, as a click or a double click would pick it, and calls back
+    /// with its handle when it is selected, or 0. Returns false without a linked host, which never answers.
+    /// </summary>
+    public bool PickSelectedAt(Vec2 pixel, Action<ulong> then) => PickPixel(pixel, result =>
+    {
+        var front = result.Hits.FirstOrDefault(h => Pickable(h.Entity));
+        then(front == null ? 0 : ((ulong[])[InstanceRootOf(front.Entity, front.Scene, front.SceneId), front.Entity]).FirstOrDefault(Selection.Contains));
+    });
+
     // The handle of the outermost root of the instance that an entity is inside, in its own scene, or the entity's own.
     ulong InstanceRootOf(ulong handle, uint scene, ulong sceneId) =>
         IsEditing && SceneByNumber(scene)?.Expanded.InstanceOf(sceneId) is { IsInstanceRoot: false } info && World.FindScene(scene, info.Instance) is { } root

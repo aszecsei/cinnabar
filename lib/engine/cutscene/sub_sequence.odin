@@ -362,7 +362,7 @@ open_level :: proc(
 				data    = child_data,
 				blob    = child,
 				mapped  = mappings_of(e, w, parent, data, blob, index, child_data, child),
-				unheld  = c.unheld,
+				preview = c.preview,
 			}
 			if failure, failed := resolve_bindings(&e.children[at - 1].bindings, r).?; failed {
 				failure.cutscene = guid

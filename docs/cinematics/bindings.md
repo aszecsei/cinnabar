@@ -1,12 +1,13 @@
 # Bindings
 
-A track acts on a binding, not on an entity. A binding is one of two kinds:
+A track acts on a binding, not on an entity. A binding is one of three kinds:
 - **Possessed:** an entity that already exists in the world.
 - **Spawned:** an entity that the cutscene makes from a prefab and despawns when it ends.
+- **Provided:** an entity that a script gives when it plays the cutscene. The asset names no entity.
 
 This document describes how bindings resolve and how tracks read them, in `lib/engine/cutscene/bindings.odin`. The text and the blob of a binding are in [Content: Cutscenes](../content/kinds/cutscenes.md#bindings).
 
-**In this document:** [The states](#the-states) · [Resolving](#resolving) · [Possessed bindings](#possessed-bindings) · [Spawned bindings](#spawned-bindings) · [Overrides](#overrides) · [A missing binding](#a-missing-binding) · [Entities that go](#entities-that-go) · [Procedures](#procedures)
+**In this document:** [The states](#the-states) · [Resolving](#resolving) · [Possessed bindings](#possessed-bindings) · [Spawned bindings](#spawned-bindings) · [Provided bindings](#provided-bindings) · [Overrides](#overrides) · [A missing binding](#a-missing-binding) · [Entities that go](#entities-that-go) · [Procedures](#procedures)
 
 ## The states
 
@@ -15,9 +16,9 @@ This document describes how bindings resolve and how tracks read them, in `lib/e
 | State | Meaning |
 |---|---|
 | `nil` | Not resolved yet. |
-| `Binding_Possessed{entity, hold}` | An entity that the cutscene does not own: an entity of a scene, or an override. |
+| `Binding_Possessed{entity, hold}` | An entity that the cutscene does not own: an entity of a scene, or an override. A provided binding with an override is in this state. |
 | `Binding_Spawned{entity, hold}` | The root of a prefab instance that the cutscene spawned. The cutscene owns it. |
-| `Binding_Missing` | An optional binding whose entity was not found. Its tracks do nothing. |
+| `Binding_Missing` | An optional binding whose entity was not found, or a provided binding that has no override in the editor's preview. Its tracks do nothing. |
 | `Binding_Mapped` | A sub-sequence's binding that its section maps to a binding of the parent, by the parent's index. Its tracks act on the parent's binding's entity, which `tree_binding` finds. It suspends nothing: the parent's binding holds the entity ([Tracks: Sub-sequence tracks](tracks.md#sub-sequence-tracks)). |
 
 `hold` is what the binding suspends on its entity, from the cutscene's settings: its systems, and whether a body keeps its velocity. `set_binding` suspends them when the binding enters the state and resumes them when it leaves, so a binding holds its entity exactly while it is resolved ([Possession](possession.md#the-settings)).
@@ -30,7 +31,7 @@ The states hold no strings and no pointers, so they survive a code reload. A fai
 
 1. A sub-sequence's binding that its section maps (`Resolve.mapped`) is `Binding_Mapped`. A spawned binding under it spawns under the parent's entity.
 1. If an override for the binding has an entity that is alive, the override wins ([Overrides](#overrides)).
-2. If not, a possessed binding finds its entity, and a spawned binding spawns its prefab.
+2. If not, a possessed binding finds its entity, and a spawned binding spawns its prefab. A provided binding has no other source, so it is missing.
 3. The resolution fails if a required binding is missing or a prefab does not spawn. On a failure it:
    - despawns what it already spawned, so nothing stays changed;
    - logs an error that names the binding;
@@ -57,24 +58,33 @@ A spawned binding names a prefab, a parent binding or none, and a start transfor
 - **Release.** `release_bindings` forgets every binding, which resumes what each suspended, and then despawns each spawned root with its children, including the spawned bindings under it. The player calls it when it gives the world back, in `Restored` or `Failed`.
 - **Gameplay code** gets a spawned entity from the player while the cutscene runs.
 
+## Provided bindings
+
+A provided binding is a slot for a script. The asset names no entity and no prefab. The script that plays the cutscene gives the entity with a `Binding_Override`, by the binding's name or ID (see [Scripts](scripts.md#playing)). So one cutscene works for any entity.
+
+- **Ownership.** The binding is `Binding_Possessed` with the override, so the cutscene does not own the entity and does not despawn it.
+- **Suspension.** The binding suspends what its `suspend` says, as a possessed binding does.
+- **No override.** The binding is missing, and its `policy` decides what follows ([A missing binding](#a-missing-binding)).
+- **The editor's preview.** No script plays the cutscene there, so a provided binding without an override is always `Binding_Missing`, with a warning, and the preview does not fail. The editor gives each user a stand-in entity for the slot (see [Editor: Cutscene editor: Bindings](../editor/cutscene-editor.md#bindings)). `Resolve.preview` turns this on.
+
 ## Overrides
 
 When a caller plays the cutscene, it can give an entity for any binding, as a `Binding_Override`. The override names the binding by its ID (`Binding_Id`) or by its name.
 
-- An override wins over the asset's reference, for a possessed binding and for a spawned one. An overridden binding is `Binding_Possessed`. The cutscene spawns nothing for it, and does not despawn the override.
+- An override wins over the asset's reference, for a possessed binding and for a spawned one. A provided binding has no reference, so its override is its only source. An overridden binding is `Binding_Possessed`. The cutscene spawns nothing for it, and does not despawn the override.
 - An override that names no binding of the cutscene gives a warning, and does nothing.
 - An override whose entity is not alive gives a warning. The binding then resolves as the asset says.
 
 ## A missing binding
 
-A possessed binding's `policy` says what happens when its entity is not found:
+A possessed or provided binding's `policy` says what happens when its entity is not found:
 
 | Policy | Result |
 |---|---|
 | `required` (the default) | The resolution fails with `Missing`, and the player goes to `Failed` with the binding's name. |
 | `optional` | The binding is `Binding_Missing`, with one warning. Its tracks do nothing. |
 
-A binding is missing when no ready scene has its GUID, or when the scene has no entity with its ID.
+A possessed binding is missing when no ready scene has its GUID, or when the scene has no entity with its ID. A provided binding is missing when the script gave no override for it, or gave one that is not alive. In the editor's preview a provided binding without an override is `Binding_Missing` whatever its policy.
 
 ## Entities that go
 

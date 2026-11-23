@@ -23,7 +23,7 @@ public enum CutscenePane
 /// tests can drive the editor without a window. Blocks are named by path, since an undo reads the file again and
 /// replaces its block objects.
 /// </summary>
-public sealed class CutsceneEditor : IGraphEditor
+public sealed partial class CutsceneEditor : IGraphEditor
 {
     readonly EditorShell _shell;
     readonly List<GraphProblem> _problems = [];
@@ -55,7 +55,7 @@ public sealed class CutsceneEditor : IGraphEditor
     {
         _shell = shell;
         Document = document;
-        _cook = new PreviewCook(() => _shell.PreviewCooker.Linked, () => Document.Text, text => _shell.PreviewCooker.CookPreview(Guid, text), ShowProblems);
+        _cook = new PreviewCook(() => _shell.PreviewCooker.Linked, () => CookText, text => _shell.PreviewCooker.CookPreview(Guid, text), ShowProblems);
         Document.Changed += OnDocumentChanged;
         var view = shell.CutsceneTimelineSettingsOf(Guid);
         _showFrames = view.ShowFrames;
@@ -64,6 +64,7 @@ public sealed class CutsceneEditor : IGraphEditor
         _soloed = [.. view.Soloed ?? []];
         _scrubSound = view.ScrubSound;
         _previewEvents = view.Events;
+        _standIns = new(view.StandIns ?? []);
         // A binding's row shows its entity or prefab, which the open scenes and the asset index have.
         _shell.SceneChanged += OnBindingTargetsChanged;
         _shell.Assets.Changed += OnBindingTargetsChanged;
@@ -110,6 +111,7 @@ public sealed class CutsceneEditor : IGraphEditor
         FollowShownCurves();
         // A binding added or removed changes which bindings the selected entities have.
         _entityBindings = BindingsOfEntities(_shell.Selection.Entities);
+        EndStalePick();
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();
         if (!Document.InTransaction)
@@ -153,6 +155,7 @@ public sealed class CutsceneEditor : IGraphEditor
         // A new selection ends a held nudge, so nudges of two selections are two entries.
         Document.EndMerge();
         Replace(next);
+        EndStalePick();
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();
         SelectBoundEntities();
@@ -563,7 +566,8 @@ public sealed class CutsceneEditor : IGraphEditor
     }
 
     void SaveView() => _shell.SaveCutsceneTimelineSettings(Guid,
-        new CutsceneTimelineView(_showFrames, [.. _locked.Order()], [.. _muted.Order()], [.. _soloed.Order()], _scrubSound, _previewEvents));
+        new CutsceneTimelineView(_showFrames, [.. _locked.Order()], [.. _muted.Order()], [.. _soloed.Order()], _scrubSound, _previewEvents,
+            _standIns.Count == 0 ? null : new(_standIns)));
 
     /// <summary>The text that the track tree's search box filters by.</summary>
     public string FilterText { get; private set; } = "";
@@ -1359,7 +1363,7 @@ public sealed class CutsceneEditor : IGraphEditor
     /// <summary>Shows the answer to a check of a text, unless the cutscene has changed since it was sent.</summary>
     public void ShowProblems(string text, PreviewResult result)
     {
-        if (text != Document.Text)
+        if (text != CookText)
         {
             return;
         }
@@ -1392,7 +1396,7 @@ public sealed class CutsceneEditor : IGraphEditor
     /// The file time of the blob in the preview area that the daemon cooked from the tab's text as it is now, or null
     /// when the text has changed since its last clean cook. The preview shows the text when it plays that blob.
     /// </summary>
-    public long? CleanBlob => _cleanBlob is { } clean && clean.Text == Document.Text ? clean.Blob : null;
+    public long? CleanBlob => _cleanBlob is { } clean && clean.Text == CookText ? clean.Blob : null;
 
     /// <summary>Whether the daemon cooked this tab's text clean, so its unsaved text is in the preview area.</summary>
     public bool CookedClean { get; private set; }
@@ -1422,25 +1426,47 @@ public sealed class CutsceneEditor : IGraphEditor
     {
         var possess = binding.Get("possess");
         var spawn = binding.Get("spawn");
-        if ((possess == null) == (spawn == null))
+        var provided = binding.Get("provided");
+        var kinds = (possess != null ? 1 : 0) + (spawn != null ? 1 : 0) + (provided != null ? 1 : 0);
+        if (kinds != 1)
         {
             return new(CutsceneBindingKind.Unknown, null, CutsceneBindingState.Broken,
-                possess == null ? "It has neither possess nor spawn." : "It has both possess and spawn.");
+                kinds == 0 ? "It has none of possess, spawn and provided." : "It has more than one of possess, spawn and provided.");
         }
-        if (spawn != null)
+        if (provided != null)
         {
-            if (CutsceneBindings.SpawnOf(binding) is { } guid && _shell.Assets.Find(guid) is { Kind: AssetKind.Prefab } prefab)
+            if (provided.Trim() != "true")
             {
-                return new(CutsceneBindingKind.Spawned, PrefabName(prefab), CutsceneBindingState.Bound);
+                return new(CutsceneBindingKind.Provided, null, CutsceneBindingState.Broken, $"Its provided, {provided.Trim()}, is not true.");
             }
-            // Before the cook daemon's first snapshot the index knows no asset, so a prefab is not known to be missing.
-            return AssetsKnown
-                ? new(CutsceneBindingKind.Spawned, null, CutsceneBindingState.Broken, $"Its prefab, {spawn.Trim()}, is missing.")
-                : new(CutsceneBindingKind.Spawned, null, CutsceneBindingState.Bound);
+            // A slot shows its stand-in, which only the preview uses: with none, its tracks do nothing there.
+            if (binding.Id is not { } id || StandInOf(id) is not { } standIn)
+            {
+                return new(CutsceneBindingKind.Provided, null, CutsceneBindingState.Bound);
+            }
+            var target = CutsceneStandIns.IsPrefab(standIn) ? SpawnInfo(standIn) : PossessInfo(standIn);
+            return target with { Kind = CutsceneBindingKind.Provided, Reason = target.Reason is { } why ? $"Its stand-in: {why}" : null };
         }
+        return spawn != null ? SpawnInfo(spawn) : PossessInfo(possess!);
+    }
+
+    CutsceneBindingInfo SpawnInfo(string spawn)
+    {
+        if (spawn.Trim() is ['$', .. var guid] && guid.Length > 0 && _shell.Assets.Find(guid) is { Kind: AssetKind.Prefab } prefab)
+        {
+            return new(CutsceneBindingKind.Spawned, PrefabName(prefab), CutsceneBindingState.Bound);
+        }
+        // Before the cook daemon's first snapshot the index knows no asset, so a prefab is not known to be missing.
+        return AssetsKnown
+            ? new(CutsceneBindingKind.Spawned, null, CutsceneBindingState.Broken, $"Its prefab, {spawn.Trim()}, is missing.")
+            : new(CutsceneBindingKind.Spawned, null, CutsceneBindingState.Bound);
+    }
+
+    CutsceneBindingInfo PossessInfo(string possess)
+    {
         if (PossessRef.Parse(possess) is not { } entity)
         {
-            return new(CutsceneBindingKind.Possessed, null, CutsceneBindingState.Broken, $"Its possess, {possess!.Trim()}, is not a scene link.");
+            return new(CutsceneBindingKind.Possessed, null, CutsceneBindingState.Broken, $"Its possess, {possess.Trim()}, is not a scene link.");
         }
         if (_shell.SceneOfGuid(entity.SceneGuid) is { } scene)
         {
@@ -1463,12 +1489,12 @@ public sealed class CutsceneEditor : IGraphEditor
     static string PrefabName(Link.Cook.Asset asset) => AssetIndex.IsSubasset(asset) ? asset.Subasset : System.IO.Path.GetFileNameWithoutExtension(AssetIndex.Name(asset.Path));
 
     /// <summary>
-    /// The entity in the game's world that a binding possesses, by handle, or null: for a spawned binding, and for one
-    /// whose scene is not open or lacks it.
+    /// The entity in the game's world that a binding possesses, or a slot's stand-in, by handle, or null: for a spawned
+    /// binding, a slot with a prefab or no stand-in, and one whose scene is not open or lacks it.
     /// </summary>
     public ulong? HandleOf(int binding)
     {
-        if (File.Bindings.FirstOrDefault(b => b.Id == binding) is not { } block || PossessRef.Parse(block.Get("possess")) is not { } entity
+        if (File.Bindings.FirstOrDefault(b => b.Id == binding) is not { } block || PossessedBy(block) is not { } entity
             || _shell.SceneOfGuid(entity.SceneGuid) is not { } scene || _shell.World.FindScene(scene.Number, entity.Id) is not { } node)
         {
             return null;
@@ -1478,7 +1504,7 @@ public sealed class CutsceneEditor : IGraphEditor
 
     // The IDs of the bindings that possess any of the entities.
     HashSet<int> BindingsOfEntities(IEnumerable<ulong> handles) =>
-        [.. handles.Select(_shell.Keying.PossessOf).OfType<PossessRef>().Select(e => CutsceneKeying.BindingOf(File, e)).OfType<int>()];
+        [.. handles.Select(_shell.Keying.PossessOf).OfType<PossessRef>().Select(BindingOfEntity).OfType<int>()];
 
     // The entities that a possess would add a binding for: each one that a scene names and that no binding possesses
     // yet, once, with its name.
@@ -1487,7 +1513,7 @@ public sealed class CutsceneEditor : IGraphEditor
         var found = new List<(PossessRef Entity, string Name)>();
         foreach (var handle in handles)
         {
-            if (_shell.Keying.PossessOf(handle) is { } entity && CutsceneKeying.BindingOf(File, entity) == null && found.All(f => f.Entity != entity))
+            if (_shell.Keying.PossessOf(handle) is { } entity && BindingOfEntity(entity) == null && found.All(f => f.Entity != entity))
             {
                 found.Add((entity, _shell.World.Find(handle)?.Name is { Length: > 0 } name ? name : $"Entity {entity.Id:x16}"));
             }
@@ -1585,9 +1611,11 @@ public sealed class CutsceneEditor : IGraphEditor
         {
             return "No binding is selected.";
         }
-        if (binding.Get("spawn") != null)
+        if (binding.Get("possess") == null)
         {
-            return "The binding spawns a prefab. Only a possessed binding can be pointed at an entity.";
+            return CutsceneBindings.IsProvided(binding)
+                ? "A script gives the binding's entity. Set its stand-in, or convert it to a possessed binding."
+                : "The binding spawns a prefab. Convert it to a possessed binding to point it at an entity.";
         }
         if (handle == 0)
         {
@@ -1597,7 +1625,7 @@ public sealed class CutsceneEditor : IGraphEditor
         {
             return "The entity is not one that a scene names: the game spawned it, or its scene has no GUID yet.";
         }
-        return CutsceneKeying.BindingOf(File, entity) is { } other
+        return BindingOfEntity(entity) is { } other
             ? other == binding.Id ? "The binding possesses that entity already." : "Another binding possesses that entity."
             : null;
     }
@@ -1727,6 +1755,17 @@ public sealed class CutsceneEditor : IGraphEditor
         if (SelectedOnly)
         {
             FilterChanged();
+        }
+        // An armed pick takes the entity, and the rebind it makes keeps the binding's row selected.
+        if (!_syncing && TakePick(next))
+        {
+            _entityBindings = BindingsOfEntities(next);
+            return;
+        }
+        // What a binding's convert and stand-in would take is the selected entity, which its details show.
+        if (SelectedBinding != null)
+        {
+            Changed?.Invoke();
         }
         var now = BindingsOfEntities(next);
         var ids = now.Except(_entityBindings).ToHashSet();

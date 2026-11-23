@@ -173,6 +173,29 @@ public sealed class CutsceneBlock
         Lines.Insert(at, new TextLine($"{indent}{key} = {value}", "", hashInWord: true));
     }
 
+    /// <summary>
+    /// Puts another setting on a setting's line, keeping its indent and its comment, so every line stays where it was.
+    /// False without the setting.
+    /// </summary>
+    public bool ReplaceSetting(string key, string newKey, string value)
+    {
+        if (SettingLines.FirstOrDefault(l => l.Key == key) is not { } line)
+        {
+            return false;
+        }
+        line.SetCode($"{newKey} = {value.ReplaceLineEndings(" ")}");
+        return true;
+    }
+
+    /// <summary>Makes a setting's lines comments, so the cooker skips them and every line stays where it was.</summary>
+    public void CommentOut(string key)
+    {
+        foreach (var line in SettingLines.Where(l => l.Key == key).ToList())
+        {
+            line.Text = $"{Indent(line)}# {line.Text.TrimStart()}";
+        }
+    }
+
     internal static string Indent(TextLine line) => line.Text[..(line.Text.Length - line.Text.TrimStart().Length)];
 
     /// <summary>Renames a binding, a track or a marker, keeping its ID and its kind or time.</summary>
