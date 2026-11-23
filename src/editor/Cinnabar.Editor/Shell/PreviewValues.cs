@@ -145,7 +145,8 @@ public sealed class PreviewValues(EditorShell shell)
         {
             return false;
         }
-        var live = State is PreviewValuesState.Live l && l.Ticket == open.Ticket && l.Tick == editor.Playhead ? l : null;
+        var tick = TickOf(open);
+        var live = State is PreviewValuesState.Live l && l.Ticket == open.Ticket && l.Tick == tick ? l : null;
         var set = live?.Values ?? ImmutableDictionary<ValueKey, SceneValue>.Empty;
         var components = live?.Components ?? ImmutableDictionary<(ulong, ulong), byte[]>.Empty;
         foreach (var (key, value) in values)
@@ -163,9 +164,13 @@ public sealed class PreviewValues(EditorShell shell)
             set = set.SetItem(key, value);
         }
         var serial = ++_last;
-        Become(new PreviewValuesState.Holding(open.Ticket, editor, editor.Playhead, serial, live?.First ?? serial, set, components));
+        Become(new PreviewValuesState.Holding(open.Ticket, editor, tick, serial, live?.First ?? serial, set, components));
         return true;
     }
+
+    // The time that a session shows at the tab's playhead: the game holds its time within the cutscene's range.
+    static int TickOf(CutscenePreviewState.Open open) =>
+        Math.Clamp(open.Editor.Playhead, open.RangeStart, Math.Max(open.RangeStart, open.RangeEnd));
 
     /// <summary>Puts back values as they were, as when a drag of them is cancelled.</summary>
     internal void Restore(PreviewValuesState state)
@@ -215,7 +220,7 @@ public sealed class PreviewValues(EditorShell shell)
             return;
         }
         if (shell.CutscenePreview.State is not CutscenePreviewState.Open { Playing: false } open || open.Ticket != live.Ticket
-            || open.Editor != live.Editor || live.Editor.Playhead != live.Tick || !shell.IsEditing)
+            || open.Editor != live.Editor || TickOf(open) != live.Tick || !shell.IsEditing)
         {
             Drop();
             return;

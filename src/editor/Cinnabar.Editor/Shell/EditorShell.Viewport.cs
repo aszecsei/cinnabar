@@ -229,10 +229,14 @@ public sealed partial class EditorShell
         // A drag of entities that a cutscene holds goes to it, from the poses that the world shows (see
         // docs/editor/cutscene-editor.md#gizmo-keys).
         var route = Keying.PoseRoute([.. handles.Values]);
-        if (route is FieldRoute.Refused refused)
+        switch (route)
         {
-            Keying.Refuse("move the selection", refused.Why);
-            return false;
+            case FieldRoute.Refused refused:
+                Keying.Refuse("move the selection", refused.Why);
+                return false;
+            case FieldRoute.Possess possess:
+                Keying.AskToPossess("move the selection", possess.Handle);
+                return false;
         }
         var poseEdit = route is FieldRoute.Scene
             ? new PoseEdit(flat, handles.Keys)
@@ -256,7 +260,7 @@ public sealed partial class EditorShell
 
     // The primary entity's pose as the world shows it, when a gizmo drag of it goes to the cutscene.
     Pose? CutscenePose(ulong handle) =>
-        Keying.Cutscene != null && Keying.PoseRoute([handle]) is not FieldRoute.Scene ? Keying.ShownWorldPose(handle) : null;
+        Keying.Cutscene != null && Keying.PoseRoute([handle]) is not (FieldRoute.Scene or FieldRoute.Possess) ? Keying.ShownWorldPose(handle) : null;
 
     /// <summary>Moves the drag to a pixel. <paramref name="invertSnap"/> is Ctrl, which snaps when snapping is off and the other way round.</summary>
     public void DragGizmo(Vec2 pixel, bool invertSnap) => _gizmo.Drag(pixel, Snap != invertSnap);

@@ -276,18 +276,21 @@ public sealed partial class Keying
         }
         if (KeyTransformRefusal() == null)
         {
-            Edit("Key Transform", file =>
-            {
-                foreach (var (handle, binding) in BoundSelection())
-                {
-                    foreach (var target in Parts(binding, PosePart.Position, PosePart.Rotation, PosePart.Scale))
-                    {
-                        SetKeys(file, handle, target, "Transform");
-                    }
-                }
-            });
+            KeyBoundTransforms();
         }
     }
+
+    void KeyBoundTransforms() =>
+        Edit("Key Transform", file =>
+        {
+            foreach (var (handle, binding) in BoundSelection())
+            {
+                foreach (var target in Parts(binding, PosePart.Position, PosePart.Rotation, PosePart.Scale))
+                {
+                    SetKeys(file, handle, target, "Transform");
+                }
+            }
+        });
 
     /// <summary>Why Key Tracked Fields cannot act now, or null when it can.</summary>
     public string? KeyTrackedFieldsRefusal() => Refusal(BoundSelection().Select(e => (e.Handle, Tracked(e.Handle, e.Binding))));
@@ -351,8 +354,17 @@ public sealed partial class Keying
         {
             _asking = false;
         }
-        if (!yes || Cutscene != cutscene)
+        if (Cutscene != cutscene)
         {
+            return;
+        }
+        if (!yes)
+        {
+            // Key Transform still keys the selected entities that a binding has.
+            if (pose && KeyTransformRefusal() == null && BoundSelection().Count > 0)
+            {
+                KeyBoundTransforms();
+            }
             return;
         }
         Edit(label, file =>

@@ -34,6 +34,12 @@ public abstract record FieldRoute
 
     /// <summary>Nowhere now, and why.</summary>
     public sealed record Refused(string Why) : FieldRoute;
+
+    /// <summary>
+    /// Nowhere until the designer says whether to possess the entity, which no binding has, as auto-key with Add Tracks
+    /// asks once. Routing does not ask: an edit or a gizmo's press does, with <see cref="Keying.AskToPossess"/>.
+    /// </summary>
+    public sealed record Possess(ulong Handle) : FieldRoute;
 }
 
 /// <summary>
@@ -89,10 +95,13 @@ public sealed class FieldSink
             case FieldRoute.Refused refused:
                 _keying.Refuse(label, refused.Why);
                 return false;
+            case FieldRoute.Possess possess:
+                _keying.AskToPossess(label, possess.Handle);
+                return false;
             case FieldRoute.Key:
-                return _keying.KeySet(label, Values(ops));
+                return _keying.KeySet(label, Values(ops)) || _keying.Refuse(label, NotShown);
             default:
-                return _keying.SetValues(Values(ops));
+                return _keying.SetValues(Values(ops)) || _keying.Refuse(label, NotShown);
         }
     }
 
@@ -109,12 +118,17 @@ public sealed class FieldSink
             case FieldRoute.Refused refused:
                 _keying.Refuse(label, refused.Why);
                 return (true, null);
+            case FieldRoute.Possess possess:
+                _keying.AskToPossess(label, possess.Handle);
+                return (true, null);
             case FieldRoute.Key:
                 return (true, _keying.BeginKeyDrag(label, Values));
             default:
                 return (true, _keying.BeginValueDrag(Values));
         }
     }
+
+    const string NotShown = "The value cannot show over the preview: its session is not open and paused at the playhead, or the field does not take it.";
 
     // The field's values in the operations, by entity. Other operations, such as a volume setting's flag, are the scene's.
     List<(ValueKey Key, SceneValue Value)> Values(IReadOnlyList<Operation> ops) =>
@@ -257,8 +271,7 @@ public sealed partial class Keying
             if (_autoKey && _autoKeyAddTracks && CandidateOf(handle, component, field) != null && PossessOf(handle) is { } entity
                 && !cutscene.DeclinedPossess.Contains(entity))
             {
-                _ = AskAutoPossess(handle);
-                return new FieldRoute.Refused("No binding possesses this entity. Answer whether to possess it, then edit it again.");
+                return new FieldRoute.Possess(handle);
             }
             return FieldRoute.Scene.Instance;
         }
@@ -306,8 +319,22 @@ public sealed partial class Keying
             ?? (ComponentHeld(handle, component, type) ? _shell.World.ShownOf(handle, component) : null);
     }
 
-    internal void Refuse(string label, string why) =>
+    // Says in the console why an edit did not apply. Always false, so a failed write can return it.
+    internal bool Refuse(string label, string why)
+    {
         _shell.Console.Add(LogLevel.Warning, $"edit: cannot {label.ToLowerInvariant()}: {why}");
+        return false;
+    }
+
+    /// <summary>
+    /// An edit of an entity that no binding possesses, with auto-key and Add Tracks on: asks once whether to possess it.
+    /// The edit itself does not apply, and the console says so.
+    /// </summary>
+    internal void AskToPossess(string label, ulong handle)
+    {
+        Refuse(label, "No binding possesses this entity. Answer whether to possess it, then edit it again.");
+        _ = AskAutoPossess(handle);
+    }
 
     // What the world shows of a component, as values over the preview start from: the document's for one that nothing holds.
     byte[]? Base(ulong handle, ulong component)

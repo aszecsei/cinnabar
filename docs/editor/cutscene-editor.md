@@ -360,6 +360,7 @@ While a cutscene holds the preview in Edit, an edit of a field of an entity in t
 | `Preview` | The preview or values over it hold the field, and auto-key is off | Sets a [preview value](#preview-values) |
 | `Key` | [Auto-key](#auto-key) is on, and the field has a track, or **Auto-Key: Add Tracks** is on | Keys the field at the playhead |
 | `Refused` | The field is held, but the preview plays, its values are not fresh, its track is locked, a drag is under way in the cutscene, or no track can key it | Nothing. The console says why. |
+| `Possess` | Auto-key and Add Tracks are on, and no binding possesses the entity | Nothing. The edit, or a gizmo's press, asks whether to possess it (see [Possessing](#possessing)). |
 
 **A field that the preview holds never goes to the scene.** It goes to the cutscene, or nowhere with a reason, so a change is never lost and never written to the scene without a word. Reset, Override, Stop Overriding and Apply to Prefab are always scene edits.
 
@@ -400,7 +401,7 @@ A gizmo drag of selected entities whose pose the cutscene holds goes to the cuts
 
 An entity that no binding possesses, in a scene that the cutscene can name by its GUID, has an empty key button. A click asks whether to possess it (`Keying.AskPossess`, which the main window answers with a dialog). **Possess** adds a binding, `possess = @<guid>/<id>`, named after the entity and made unique, after the last binding, and then its track and its key, all as one undo entry. **Cancel** changes nothing. **Key Transform** asks the same for the selected entities that no binding has, and keys them all.
 
-With auto-key and add tracks on, an edit of such an entity asks once. A yes adds the binding, as an undo entry of its own, and the edit is refused, so the next one keys. A no is remembered for the tab, and the entity's edits go to the scene.
+With auto-key and add tracks on, an edit or a gizmo drag of such an entity asks once (`FieldRoute.Possess`). A yes adds the binding, as an undo entry of its own, and the edit is refused, so the next one keys. A no is remembered for the tab, and the entity's edits go to the scene.
 
 ### Several entities
 
@@ -414,5 +415,5 @@ A transform track whose space is `relative <id>` keys the world's pose in the ot
 
 - After a key's value changes, the warning can show until the daemon cooks the text and the preview follows it.
 - A preview value of a child's pose in an absolute track, or one relative to another binding, keys once the world shows it, at most 20 times a second.
-- A possess names an entity by its scene's asset GUID and its folded scene ID. An entity of a sublevel's part, which a binding names by the part's GUID, is named by its base scene's GUID, as Key did before.
-- Auto-key asks to possess an entity once per edit that it refuses, while no other question is open.
+- A possess names an entity by its scene's asset GUID and its folded scene ID. An entity of a sublevel's part, which a binding names by the part's GUID, has no key button, as the editor does not name it by its part yet.
+- Auto-key asks to possess an entity at an edit or a gizmo's press, never while it only routes one, and not while another question is open.

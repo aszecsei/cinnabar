@@ -219,7 +219,13 @@ write_blob :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid, blob: []byte, 
 // cutscene_blob moves the hero from 0 m to `to` m over the first second, ramps its Bulb from 0 to 4, and spawns the
 // prop at 3 m.
 @(private = "file")
-cutscene_blob :: proc(f: ^Fixture, to: f32, key: u64 = 1, hero: u64 = HERO) -> []byte {
+cutscene_blob :: proc(
+	f: ^Fixture,
+	to: f32,
+	key: u64 = 1,
+	hero: u64 = HERO,
+	glow := true,
+) -> []byte {
 	ramp :: proc(name: string, from, to: f32) -> []format.Cutscene_Channel_Contents {
 		keys := make([]format.Cutscene_Key, 2, context.temp_allocator)
 		keys[0] = {
@@ -308,6 +314,10 @@ cutscene_blob :: proc(f: ^Fixture, to: f32, key: u64 = 1, hero: u64 = HERO) -> [
 		name    = "Beats",
 		binding = format.CUTSCENE_NONE,
 		events  = beat,
+	}
+	if !glow {
+		tracks[1] = tracks[2]
+		tracks = tracks[:2]
 	}
 	guids := make([]format.Guid, 1, context.temp_allocator)
 	guids[0] = PROP_GUID
@@ -882,5 +892,48 @@ preview_values_show_over_the_preview_until_a_time_drops_them :: proc(t: ^testing
 	step(f, values)
 	step(f, link.Cutscene_Preview_Close{ticket = 1})
 	testing.expect_value(t, x_of(f, f.hero), METER)
+	testing.expect_value(t, bulb_of(f), 1)
+}
+
+// A newer blob that starts to write a field that the editor's values hold, in the frame, does not take the values for the
+// document: Close gives the document back.
+@(test)
+a_new_blob_under_preview_values_gives_the_document_back :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	write_blob(t, f, CUTSCENE_GUID, cutscene_blob(f, 10, key = 2, glow = false), "preview")
+	step(f, open(1, SECOND / 2, unsaved = true))
+	testing.expect_value(t, bulb_of(f), 1)
+	hero := link.Override_Target {
+		kind   = .Scene_Entity,
+		scene  = 0,
+		entity = HERO,
+	}
+	step(
+		f,
+		link.Cutscene_Preview_Values {
+			ticket = 1,
+			tick = SECOND / 2,
+			serial = 1,
+			fields = {
+				{
+					target = hero,
+					component = f.bulb,
+					field = format.scene_field_hash("brightness"),
+					value = number(7),
+				},
+			},
+		},
+	)
+	testing.expect_value(t, bulb_of(f), 7)
+
+	write_blob(t, f, CUTSCENE_GUID, cutscene_blob(f, 10, key = 3), "preview")
+	(&f.editor.session.cutscene_previews.open.?).modified = 1
+	frame(f, 0)
+	testing.expect_value(t, bulb_of(f), 7)
+	step(f)
+	testing.expect_value(t, bulb_of(f), 7)
+
+	step(f, link.Cutscene_Preview_Close{ticket = 1})
 	testing.expect_value(t, bulb_of(f), 1)
 }

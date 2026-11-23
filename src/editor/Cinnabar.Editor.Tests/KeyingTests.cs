@@ -377,8 +377,17 @@ public sealed class KeyingTests : IDisposable
             return Task.FromResult(false);
         };
 
-        Assert.IsType<FieldRoute.Refused>(shell.Keying.Route([Door], LightId, Brightness));
+        // Routing asks nothing, so a gizmo's hover or a panel's build does not; an edit does, and does not apply.
+        Assert.Equal(new FieldRoute.Possess(Door), shell.Keying.Route([Door], LightId, Brightness));
+        shell.Selection.Select(Door);
+        shell.Viewports[0].Session.Show(new Avalonia.PixelSize(1600, 900));
+        Assert.NotNull(shell.GizmoPose());
+        Assert.Equal(0, asked);
+        var field = BrightnessEditor(shell, 2);
+        Assert.False(field.Commit(0, "3"));
         Assert.Equal(1, asked);
+        Assert.Empty(shell.Scene!.History);
+        // A no sends its edits to the scene, without asking again.
         Assert.IsType<FieldRoute.Scene>(shell.Keying.Route([Door], LightId, Brightness));
         Assert.Equal(1, asked);
 
@@ -388,7 +397,7 @@ public sealed class KeyingTests : IDisposable
         other.Keying.AutoKey = true;
         other.Keying.AutoKeyAddTracks = true;
         other.Keying.AskPossess = (_, _) => Task.FromResult(true);
-        Assert.IsType<FieldRoute.Refused>(other.Keying.Route([Door], LightId, Brightness));
+        Assert.False(BrightnessEditor(other, 2).Commit(0, "3"));
         Assert.Equal(["Possess Door"], otherEditor.Document.History);
         Assert.IsType<FieldRoute.Key>(other.Keying.Route([Door], LightId, Brightness));
         Assert.Empty(editor.Document.History);
@@ -767,5 +776,38 @@ public sealed class KeyingTests : IDisposable
         Assert.Empty(shell.PreviewValues.State is PreviewValuesState.Live live ? live.Values : []);
         editor.EndDrag(cancel: true);
         Assert.Empty(editor.Document.History);
+    }
+
+    [Fact]
+    public void AGizmoDragOfAHeldPoseStartsWhereTheWorldShowsItAndEnterKeysIt()
+    {
+        var (shell, editor, ticket) = NewShell(Cutscene + "track 1 transform \"Walk\"\n\tbinding = 1\n");
+        using var _ = shell;
+        shell.Selection.Select(Door);
+        shell.Viewports[0].Session.Show(new Avalonia.PixelSize(1600, 900));
+        shell.Camera.Place([0, 0, -(5L << 24)], 0, 0);
+        // The document has the door at 0 m; the preview shows it at 1 m on x.
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (Pose([1, 0, 0], Quat.Identity), null, new ShownPreview(ticket, 0, 0, 0)));
+        Assert.IsType<FieldRoute.Preview>(shell.Keying.PoseRoute([Door]));
+        var (width, height) = shell.FrameSize;
+        var (pivot, _) = shell.GizmoPose()!.Value;
+        Assert.Equal(1L << 24, pivot[0]);
+        var center = shell.Camera.RelativeTo(pivot);
+        var size = Tools.Gizmo.Size(shell.Camera, center, height);
+        Vec2 Along(double meters) => shell.Camera.Project(center + Vec3.UnitX * meters, width, height)!.Value;
+
+        Assert.True(shell.PressGizmo(Along(0.5 * size)));
+        shell.DragGizmo(Along(0.5 * size + 0.5), invertSnap: false);
+        shell.ReleaseGizmo();
+        var moved = Assert.Single(_sent.OfType<CutscenePreviewValues>().Last().Transforms);
+        Assert.InRange(moved.Position[0], (long)(1.49 * (1 << 24)), (long)(1.51 * (1 << 24)));
+        Assert.Empty(editor.Document.History);
+        Assert.Empty(shell.Scene!.History);
+
+        // Enter keys it from the document's pose, as a relative track does.
+        shell.Commands.Get(EditorCommands.CutsceneKeyPreviewValues).Execute();
+        Assert.Equal(["Key Preview Values"], editor.Document.History);
+        Assert.InRange(CutsceneKeying.KeysAt(editor.File, new KeyTarget.Pose(1, PosePart.Position), 0)[0]!.Value, 1.49, 1.51);
+        Assert.Empty(shell.Scene.History);
     }
 }

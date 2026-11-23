@@ -373,9 +373,8 @@ preview_values_serial :: proc(p: ^Cutscene_Preview) -> u64 {
 	return layer.id if shown else 0
 }
 
-// lay_preview_values writes the editor's values over the preview, while it stands at their tick. A value saves what
-// it writes over once, so the preview's own evaluation over the laid world in update_cutscene_preview leaves the lift
-// as it was.
+// lay_preview_values writes the editor's values over the preview, while it stands at their tick, and saves what they
+// write over. They are lifted before any evaluation of the preview, so what they save is the preview's.
 @(private)
 lay_preview_values :: proc(w: ^ecs.World, p: ^Cutscene_Preview) -> bool {
 	layer := preview_values_shown(p) or_return
@@ -454,7 +453,14 @@ update_cutscene_preview :: proc(
 			)
 		}
 	}
-	changed = evaluate_preview(e, w, p)
+	// The values come off for the evaluation, so a track that starts to write their field in this frame saves the
+	// document's value, not theirs, and go back on over it.
+	if v, has := &p.values.?; has && lift_saved(w, &v.layer) {
+		changed = true
+	}
+	if evaluate_preview(e, w, p) {
+		changed = true
+	}
 	if lay_preview_values(w, p) {
 		changed = true
 	}
