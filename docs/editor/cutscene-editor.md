@@ -485,7 +485,7 @@ These commands act on the active cutscene, or on the cutscene that holds the pre
   - the binding does not possess: to point it at an entity is a [convert](#convert);
   - another binding possesses the entity, or it is a slot's stand-in.
 - **Fix a broken binding.** The details strip of a broken possessed binding has these items:
-  - **Pick** arms a pick (`CutsceneEditor.Picking`). The next entity that you select in the viewport or the Outliner becomes the binding's, as one undo entry, and the row stays selected. The Outliner works without the game. Esc, in the viewport or the tab, cancels the pick. Another row cancels it too.
+  - **Pick** arms a pick (`CutsceneEditor.Picking`). The next entity that you select in the viewport or the Outliner becomes the binding's, as one undo entry, and the row stays selected. The Outliner works without the game. Esc, in the viewport or the tab, cancels the pick. Another row cancels it too. The selection is the shell's, so the shell holds the one pick, with its cutscene. Another cutscene's tab, or the close of the pick's own tab, cancels it, and a pick armed in one cutscene ends any other.
   - A button for each entity of the open scenes that has the binding's name, up to eight (`CutsceneEditor.CandidatesOf`). A new binding has its entity's name, so these are the entities that have the old name. A button rebinds to its entity.
 - **Delete.** Delete, while the timeline has the keyboard and a binding's row is selected, removes the binding and its tracks as one undo entry. A row that the filter hides is not deleted.
   - If the binding has tracks, the editor asks first (`EditorShell.AskDeleteBinding`). The main window answers with a dialog.

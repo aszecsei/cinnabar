@@ -167,6 +167,7 @@ public sealed partial class EditorShell
         {
             ActiveGraphEditor = active;
             CutscenePreview.OnActivated(active as CutsceneEditor);
+            EndBindingPickFor(active as CutsceneEditor, null);
             Commands.InvalidateAll();
             GraphEditorsChanged?.Invoke();
         }
@@ -224,6 +225,7 @@ public sealed partial class EditorShell
         if (editor is CutsceneEditor cutscene)
         {
             _cutscenes.Remove(cutscene);
+            EndBindingPickFor(null, cutscene);
             CutscenePreview.OnTabClosed(cutscene);
             ForgetKeyed();
         }

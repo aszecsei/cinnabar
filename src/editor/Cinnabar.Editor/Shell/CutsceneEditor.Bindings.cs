@@ -243,8 +243,14 @@ public sealed partial class CutsceneEditor
 
     // Pick (see docs/editor/cutscene-editor.md#rebind-and-delete).
 
-    /// <summary>The broken binding that the next entity selected becomes, or null when no pick is armed.</summary>
-    public BindingPick? Picking { get; private set; }
+    /// <summary>
+    /// The broken binding that the next entity selected becomes, or null when this cutscene has no pick armed. The shell
+    /// holds the one pick, so at most one cutscene has one.
+    /// </summary>
+    public BindingPick? Picking => _shell.BindingPickOf(this);
+
+    // The shell armed or ended this cutscene's pick.
+    internal void OnPickChanged() => Changed?.Invoke();
 
     /// <summary>Why the selected binding's entity cannot be picked, or null when it can.</summary>
     public string? PickRefusal()
@@ -272,7 +278,7 @@ public sealed partial class CutsceneEditor
         }
     }
 
-    /// <summary>Cancels an armed pick. False when none was armed.</summary>
+    /// <summary>Cancels this cutscene's armed pick. False when it had none.</summary>
     public bool CancelPick()
     {
         if (Picking == null)
@@ -283,23 +289,14 @@ public sealed partial class CutsceneEditor
         return true;
     }
 
-    void SetPicking(BindingPick? pick)
-    {
-        if (pick == Picking)
-        {
-            return;
-        }
-        Picking = pick;
-        Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
-    }
+    void SetPicking(BindingPick? pick) => _shell.SetBindingPick(this, pick);
 
     // An armed pick ends when its binding is no longer the selected one, or no longer possesses.
     void EndStalePick()
     {
         if (Picking is { } pick && (SelectedBinding?.Id != pick.Binding || File.Bindings.FirstOrDefault(b => b.Id == pick.Binding)?.Get("possess") == null))
         {
-            Picking = null;
+            SetPicking(null);
         }
     }
 
@@ -310,10 +307,8 @@ public sealed partial class CutsceneEditor
         {
             return false;
         }
-        Picking = null;
+        SetPicking(null);
         RebindTo(pick.Binding, entity);
-        Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
         return true;
     }
 

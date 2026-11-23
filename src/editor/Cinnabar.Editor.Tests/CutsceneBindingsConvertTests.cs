@@ -18,6 +18,7 @@ public sealed class CutsceneBindingsConvertTests : IDisposable
 {
     const string SceneGuid = "5ce5ce5ce5ce5ce5ce5ce5ce5ce5ce51";
     const string CutsceneGuid = "0123456789abcdef0123456789abcdef";
+    const string OtherCutsceneGuid = "0123456789abcdef0123456789abcde2";
     const string PrefabGuid = "cafecafecafecafecafecafecafecafe";
     // A door and a lamp, an instance of the crate prefab at (1, 0, 2) meters, and an instance of only a part of it.
     const string SceneText = "scene 2\n\n"
@@ -44,11 +45,13 @@ public sealed class CutsceneBindingsConvertTests : IDisposable
         var options = new EditorOptions("host.exe", "game.dll", _temp.Combine("yard.scene")) { AutosaveDirectory = _temp.Combine("autosave") };
         var shell = new EditorShell(options with { Cook = options.Cook with { CachePath = _temp.Combine("cache") } }, new EditorSettings(_temp.Combine("settings")));
         File.WriteAllText(_temp.Combine("yard.cutscene"), cutscene);
+        File.WriteAllText(_temp.Combine("other.cutscene"), cutscene);
         shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], [], []));
         shell.Assets.Apply(new AssetSnapshot(
         [
             TestAssets.Make(SceneGuid, AssetKind.Scene, "yard.scene"),
             TestAssets.Make(CutsceneGuid, AssetKind.Cutscene, "yard.cutscene"),
+            TestAssets.Make(OtherCutsceneGuid, AssetKind.Cutscene, "other.cutscene"),
             TestAssets.Make(PrefabGuid, AssetKind.Prefab, "crate.prefab"),
         ], []));
         shell.Host.LinkForTests(_ => { });
@@ -242,6 +245,34 @@ public sealed class CutsceneBindingsConvertTests : IDisposable
         Assert.Null(editor.Picking);
         shell.Selection.Set([Lamp]);
         Assert.Equal(broken, editor.Document.Text);
+    }
+
+    [Fact]
+    public void OneCutsceneHoldsThePickAndAnotherCutscenesTabEndsIt()
+    {
+        var broken = Possessed.Replace("0000000000000003\n", "0000000000000009\n", StringComparison.Ordinal);
+        var (shell, first) = NewShell(broken);
+        using var _ = shell;
+        first.Select(Binding(first, 1));
+        first.ArmPick();
+        Assert.NotNull(first.Picking);
+
+        // The other cutscene's tab ends the first's pick, and the selection there rebinds neither.
+        var second = shell.OpenCutscene(shell.Assets.Find(OtherCutsceneGuid)!)!;
+        Assert.Same(second, shell.ActiveCutscene);
+        Assert.Null(first.Picking);
+        second.Select(Binding(second, 1));
+        second.ArmPick();
+        Assert.NotNull(second.Picking);
+        // Arming one cutscene's pick ends any other's: the first arms again, and the second's goes.
+        first.Select(Binding(first, 1));
+        first.ArmPick();
+        Assert.Null(second.Picking);
+        Assert.NotNull(first.Picking);
+
+        shell.Selection.Set([Lamp]);
+        Assert.Equal(["Rebind"], first.Document.History);
+        Assert.Empty(second.Document.History);
     }
 
     [Fact]

@@ -22,8 +22,57 @@ public sealed partial class EditorShell
     /// </summary>
     public Func<string, string, int, Task<bool>>? AskDeleteBinding { get; set; }
 
-    /// <summary>Cancels every cutscene's armed pick of a binding's entity, as Esc does. False when none was armed.</summary>
-    public bool CancelBindingPicks() => _cutscenes.Count(c => c.CancelPick()) > 0;
+    // The one armed pick of a binding's entity, with its cutscene: the selection is the shell's, so only one cutscene
+    // takes the next entity selected (see docs/editor/cutscene-editor.md#rebind-and-delete).
+    (CutsceneEditor Owner, BindingPick Pick)? _bindingPick;
+
+    /// <summary>A cutscene's armed pick, or null when none is armed or another cutscene's is.</summary>
+    internal BindingPick? BindingPickOf(CutsceneEditor editor) => _bindingPick is { } armed && armed.Owner == editor ? armed.Pick : null;
+
+    /// <summary>
+    /// Arms a cutscene's pick, in place of any other cutscene's, or with null, cancels the cutscene's own. The one writer
+    /// of the pick.
+    /// </summary>
+    internal void SetBindingPick(CutsceneEditor owner, BindingPick? pick)
+    {
+        var old = _bindingPick?.Owner;
+        if (pick == null && old != owner)
+        {
+            return;
+        }
+        if (pick != null && _bindingPick is { } armed && armed.Owner == owner && armed.Pick == pick)
+        {
+            return;
+        }
+        _bindingPick = pick == null ? null : (owner, pick);
+        if (old != null && old != owner)
+        {
+            old.OnPickChanged();
+        }
+        owner.OnPickChanged();
+        Commands.InvalidateAll();
+    }
+
+    /// <summary>Cancels the armed pick of a binding's entity, as Esc does. False when none was armed.</summary>
+    public bool CancelBindingPicks()
+    {
+        if (_bindingPick is not { } armed)
+        {
+            return false;
+        }
+        SetBindingPick(armed.Owner, null);
+        return true;
+    }
+
+    // Another cutscene's tab, or the close of the pick's own, ends the pick. The viewport and other documents do not:
+    // the designer picks there.
+    void EndBindingPickFor(CutsceneEditor? active, CutsceneEditor? closed)
+    {
+        if (_bindingPick is { } armed && (armed.Owner == closed || (active != null && active != armed.Owner)))
+        {
+            SetBindingPick(armed.Owner, null);
+        }
+    }
 
     /// <summary>
     /// What the timeline's last copy or cut holds, which a paste in the tab of the cutscene that it came from puts at its
