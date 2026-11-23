@@ -103,6 +103,17 @@ public sealed class PropertiesView : ScrollViewer
                 () => keying.RemoveKey(entity, component, f), () => keying.CanRemoveKey(entity, component, f), () => keying.GoToTrack(entity, component, f));
     }
 
+    // A field of several entities that the previewed cutscene binds has one key button, which keys them all.
+    FieldKey? KeyOf(IReadOnlyList<ulong> entities, ulong component, Link.Protocol.FieldInfo f)
+    {
+        var keying = _shell.Keying;
+        return entities.Any(e => keying.TargetOf(e, component, f) == null)
+            ? null
+            : new FieldKey(() => keying.StateOf(entities, component, f), () => keying.Key(entities, component, f), () => keying.AddTrack(entities, component, f),
+                () => keying.RemoveKey(entities, component, f), () => entities.Any(e => keying.CanRemoveKey(e, component, f)),
+                () => keying.GoToTrack(entities[^1], component, f));
+    }
+
     // The playhead, the cutscene or the preview moved: the key buttons show their new states, and a binding that came or
     // went builds the panel again.
     void OnKeysChanged()
@@ -359,7 +370,8 @@ public sealed class PropertiesView : ScrollViewer
         if (_selection.Count > 1)
         {
             var documents = _shell.SelectedSceneEntities;
-            return string.Join(";", _selection.Entities.Select(e => _world.Find(e) is { } n ? $"{n.Handle}|{n.Active}|{n.Parent}|{string.Join(",", n.Components)}" : "-")) +
+            var keyedMany = $"{_shell.Keying.Cutscene?.Guid}:{string.Join(",", _selection.Entities.Select(e => _shell.Keying.BindingOf(e)))}";
+            return keyedMany + "|" + string.Join(";", _selection.Entities.Select(e => _world.Find(e) is { } n ? $"{n.Handle}|{n.Active}|{n.Parent}|{string.Join(",", n.Components)}" : "-")) +
                 $"|{_world.Types.Count}|" + string.Join(";", documents.Select(d => $"{d.Id}:{string.Join(",", d.Components.Select(c => c.Id))}"));
         }
         var behaviours = _world.Values(node.Handle)?.Behaviours ?? [];
@@ -404,12 +416,18 @@ public sealed class PropertiesView : ScrollViewer
             }
             var editable = everywhere && !WorldWritten.Contains(id) && !(id == SceneEdits.TransformId && nodes.Any(n => n.Parent != 0));
             var owner = id.ToString("x16");
+            var handles = nodes.Select(n => n.Handle).ToList();
             var fields = type.Fields.Select(f =>
             {
                 var editor = editable ? FieldEditor.ForComponent(_shell, ids!, id, f) : null;
+                if (editor != null)
+                {
+                    // The documents are the selection's, in its order, so each scene ID's handle is at its index.
+                    editor.Sink = _shell.Keying.Sink(ids!.Zip(handles).ToDictionary(p => p.First, p => p.Second), id, f);
+                }
                 return FieldRow.Of(owner, f, editor,
                     editor != null ? () => ids!.Any(e => ComponentSet(e, id, f)()) : null,
-                    () => editor?.Reset());
+                    () => editor?.Reset()) with { Key = KeyOf(handles, id, f) };
             });
             _content.Children.Add(Group(title, fields, remove: remove));
         }
@@ -426,6 +444,7 @@ public sealed class PropertiesView : ScrollViewer
 
     void ShowManyValues()
     {
+        _grid.ShowKeys();
         var values = _selection.Entities.Select(_world.Values).ToList();
         if (values.Any(v => v == null))
         {
@@ -439,7 +458,8 @@ public sealed class PropertiesView : ScrollViewer
             {
                 continue;
             }
-            var data = values.Select(v => v!.Components.FirstOrDefault(c => c.Id == id)?.Data).ToList();
+            // While a cutscene holds the preview, a held field's edits go there, so its row shows what the world shows.
+            var data = values.Select(v => _shell.Keying.ShownComponent(v!.Entity, id) ?? v.Components.FirstOrDefault(c => c.Id == id)?.Data).ToList();
             if (data.Any(d => d == null))
             {
                 continue;

@@ -597,4 +597,37 @@ public sealed class KeyingTests : IDisposable
     }
 
     static long[]? KeyValuesOf(byte[]? transform) => transform == null ? null : KeyValues.Units(Transform.Fields[0], transform);
+
+    [Fact]
+    public void SeveralSelectedEntitiesShareOneKeyButtonThatKeysThemAllInOneEntry()
+    {
+        const ulong gate = 2UL << 32;
+        var (shell, editor, _) = NewShell(Cutscene + $"binding 2 \"Gate\"\n\tpossess = @{SceneGuid}/0000000000000002\n");
+        using var _ = shell;
+        shell.OnGameMessage(new EntitySnapshot(
+        [
+            new EntityInfo(Door, "Door", 1, 1, 0, true, [SceneEdits.TransformId, LightId]),
+            new EntityInfo(gate, "Gate", 2, 1, 0, true, [SceneEdits.TransformId, LightId]),
+        ]));
+        shell.OnGameMessage(new EntityValues(gate, [new ComponentValue(SceneEdits.TransformId, Pose([0, 0, 0], Quat.Identity)), new ComponentValue(LightId, Lamp(5))], [],
+            [], [], new ShownPreview(0, 0, 0, 0)));
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2);
+        ulong[] both = [Door, gate];
+
+        Assert.Equal(KeyState.None, shell.Keying.StateOf(both, LightId, Brightness)!.State);
+        shell.Keying.Key(both, LightId, Brightness);
+        Assert.Equal(["Key Brightness"], editor.Document.History);
+        Assert.Equal([2.0], CutsceneKeying.KeysAt(editor.File, new KeyTarget.Property(1, LightId, "brightness", PropertyShape.Number), 0));
+        Assert.Equal([5.0], CutsceneKeying.KeysAt(editor.File, new KeyTarget.Property(2, LightId, "brightness", PropertyShape.Number), 0));
+        Assert.Equal(KeyState.Keyed, shell.Keying.StateOf(both, LightId, Brightness)!.State);
+
+        // When they differ, the button shows a track, and says so.
+        shell.Keying.RemoveKey(Door, LightId, Brightness);
+        var mixed = shell.Keying.StateOf(both, LightId, Brightness)!;
+        Assert.Equal(KeyState.Track, mixed.State);
+        Assert.Contains("differ", mixed.Tip);
+        shell.Keying.RemoveKey(both, LightId, Brightness);
+        Assert.Equal(KeyState.Track, shell.Keying.StateOf(both, LightId, Brightness)!.State);
+        Assert.Equal("Remove Key", editor.Document.History[^1]);
+    }
 }

@@ -147,6 +147,77 @@ public sealed partial class Keying
         }
     }
 
+    /// <summary>
+    /// What a field's key button shows for several entities, the primary one last: their state when they agree, and
+    /// otherwise a track's, with a tooltip that says so. Null unless a track can key the field of each.
+    /// </summary>
+    public KeyButton? StateOf(IReadOnlyList<ulong> handles, ulong component, FieldInfo field)
+    {
+        if (handles.Count == 1)
+        {
+            return StateOf(handles[0], component, field);
+        }
+        var states = handles.Select(h => StateOf(h, component, field)).ToList();
+        if (states.Count == 0 || states.Any(s => s == null))
+        {
+            return null;
+        }
+        var refusal = states.Select(s => s!.Refusal).FirstOrDefault(r => r != null);
+        var same = states.Select(s => s!.State).Distinct().Count() == 1;
+        var state = same ? states[0]!.State : KeyState.Track;
+        var tip = same
+            ? $"{states[^1]!.Tip.Split('\n')[0]} For each of the {handles.Count} selected entities."
+            : $"The {handles.Count} selected entities' keys differ at the playhead. Click to key the field of each.";
+        return new KeyButton(state, refusal, refusal == null ? tip : $"{tip}\n{refusal}");
+    }
+
+    /// <summary>Keys a field of several entities at the playhead, adding tracks where they have none, as one undo entry.</summary>
+    public void Key(IReadOnlyList<ulong> handles, ulong component, FieldInfo field)
+    {
+        if (StateOf(handles, component, field) is not { Refusal: null })
+        {
+            return;
+        }
+        Edit($"Key {FieldValues.Humanize(field.Name)}", file =>
+        {
+            foreach (var handle in handles)
+            {
+                if (TargetOf(handle, component, field) is { } target)
+                {
+                    SetKeys(file, handle, target, TrackName(target, field));
+                }
+            }
+        });
+    }
+
+    /// <summary>Adds the tracks that key a field of several entities, where they have none, as one undo entry.</summary>
+    public void AddTrack(IReadOnlyList<ulong> handles, ulong component, FieldInfo field)
+    {
+        if (Cutscene is not { } cutscene)
+        {
+            return;
+        }
+        var targets = handles.Select(h => TargetOf(h, component, field)).OfType<KeyTarget>().Where(t => CutsceneKeying.TrackOf(cutscene.File, t) == null).ToList();
+        if (targets.Count > 0)
+        {
+            Edit("Add Track", file => targets.ForEach(t => CutsceneKeying.AddTrack(file, t, TrackName(t, field))));
+        }
+    }
+
+    /// <summary>Removes a field's keys at the playhead from several entities, as one undo entry.</summary>
+    public void RemoveKey(IReadOnlyList<ulong> handles, ulong component, FieldInfo field)
+    {
+        if (Cutscene is not { } cutscene)
+        {
+            return;
+        }
+        var targets = handles.Where(h => CanRemoveKey(h, component, field)).Select(h => TargetOf(h, component, field)).OfType<KeyTarget>().ToList();
+        if (targets.Count > 0)
+        {
+            Edit("Remove Key", file => targets.ForEach(t => CutsceneKeying.RemoveKeys(file, t, cutscene.Playhead, cutscene.Locked)));
+        }
+    }
+
     /// <summary>Why Key Transform cannot act now, or null when it can.</summary>
     public string? KeyTransformRefusal() => Refusal(BoundSelection().Select(e => (e.Handle, Parts(e.Binding, PosePart.Position, PosePart.Rotation, PosePart.Scale))));
 
