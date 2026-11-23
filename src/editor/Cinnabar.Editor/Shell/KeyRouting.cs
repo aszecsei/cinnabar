@@ -386,38 +386,54 @@ public sealed partial class Keying
     /// </summary>
     internal IFieldEdit? BeginKeyDrag(string label, Func<IReadOnlyList<Operation>, List<(ValueKey Key, SceneValue Value)>> values)
     {
-        if (Cutscene is not { } cutscene || !cutscene.BeginDrag(label))
+        if (Cutscene?.BeginHeldDrag(label) is not { } drag)
         {
             return null;
         }
-        return new ValueDrag(this, _shell.PreviewValues.State, values, cutscene);
+        return new ValueDrag(this, _shell.PreviewValues.State, values, drag);
     }
 
-    // A drag of values over the preview, and with a cutscene, of keys from them. Each step sets the values from where the
-    // drag began, which show over the preview at once, as the cutscene does not cook a drag's steps.
-    sealed class ValueDrag(Keying keying, PreviewValuesState before, Func<IReadOnlyList<Operation>, List<(ValueKey Key, SceneValue Value)>> values, CutsceneEditor? keys)
-        : IFieldEdit
+    // A drag of values over the preview, and with a cutscene's drag, of keys from them. Each step sets the values from
+    // where the drag began, which show over the preview at once, as the cutscene does not cook a drag's steps. A drag of
+    // keys lasts as long as the cutscene's drag: one that another ends, as Esc in the timeline does, ends it too, and its
+    // values go back as they were.
+    sealed class ValueDrag : IFieldEdit
     {
+        readonly Keying _keying;
+        readonly PreviewValuesState _before;
+        readonly Func<IReadOnlyList<Operation>, List<(ValueKey Key, SceneValue Value)>> _values;
+        readonly CutsceneDrag? _keys;
+        readonly int _position;
         bool _open = true;
 
-        public bool IsOpen => _open;
+        public ValueDrag(Keying keying, PreviewValuesState before, Func<IReadOnlyList<Operation>, List<(ValueKey Key, SceneValue Value)>> values, CutsceneDrag? keys)
+        {
+            (_keying, _before, _values, _keys) = (keying, before, values, keys);
+            if (keys != null)
+            {
+                _position = keys.Editor.Document.Position;
+                keys.Ended += OnKeysEnded;
+            }
+        }
+
+        public bool IsOpen => _open && (_keys == null || _keys.IsOpen);
 
         public event Action<bool>? Ended;
 
         public bool Preview(IReadOnlyList<Operation> ops)
         {
-            if (!_open || keys is { Document.InTransaction: false })
+            if (!IsOpen)
             {
                 return false;
             }
-            var set = values(ops);
-            if (!keying.SetValues(set))
+            var set = _values(ops);
+            if (!_keying.SetValues(set))
             {
                 return false;
             }
-            keys?.StepDrag(file =>
+            _keys?.Step(file =>
             {
-                keying.SetValueKeys(file, set);
+                _keying.SetValueKeys(file, set);
                 return [];
             });
             return true;
@@ -433,25 +449,54 @@ public sealed partial class Keying
             {
                 return;
             }
-            _open = false;
-            if (keys != null)
+            if (_keys != null)
             {
-                var position = keys.Document.Position;
-                keys.EndDrag(cancel: !commit);
-                if (keys.Document.Position != position)
+                // The cutscene's drag ends, and its Ended finishes this one.
+                if (_keys.IsOpen)
                 {
-                    keying._shell.Edited(new UndoTarget.Cutscene(keys));
+                    _keys.End(cancel: !commit);
                 }
+                else
+                {
+                    Finish(committed: false);
+                }
+                return;
             }
-            if (!commit)
+            Finish(commit);
+        }
+
+        void OnKeysEnded(bool committed)
+        {
+            if (_open && committed && _keys!.Editor.Document.Position != _position)
             {
-                keying._shell.PreviewValues.Restore(before);
+                _keying._shell.Edited(new UndoTarget.Cutscene(_keys.Editor));
             }
-            else if (keys != null)
+            Finish(committed);
+        }
+
+        // The one end: values that were keyed settle; values of a cancelled drag go back as they were, unless they have
+        // gone since, with the session or the playhead that they were set at.
+        void Finish(bool committed)
+        {
+            if (!_open)
             {
-                keying._shell.PreviewValues.Keyed();
+                return;
             }
-            Ended?.Invoke(commit);
+            _open = false;
+            if (_keys != null)
+            {
+                _keys.Ended -= OnKeysEnded;
+            }
+            if (committed && _keys != null)
+            {
+                _keying._shell.PreviewValues.Keyed();
+            }
+            else if (!committed && _keying._shell.PreviewValues.State is PreviewValuesState.Live now
+                && (_before is not PreviewValuesState.Live was || (was.Ticket == now.Ticket && was.Tick == now.Tick)))
+            {
+                _keying._shell.PreviewValues.Restore(_before);
+            }
+            Ended?.Invoke(committed);
         }
     }
 }

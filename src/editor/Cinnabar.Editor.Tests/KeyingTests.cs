@@ -741,4 +741,31 @@ public sealed class KeyingTests : IDisposable
         shell.CloseGraph(editor, discard: true);
         Assert.False(shell.Keying.Watches(gate));
     }
+
+    [Fact]
+    public void AKeyDragThatTheTimelineEndsEndsTooAndCommitsNoOtherDrag()
+    {
+        var (shell, editor, _) = NewShell();
+        using var _ = shell;
+        shell.Keying.AutoKey = true;
+        shell.Keying.AutoKeyAddTracks = true;
+        var field = BrightnessEditor(shell, 2);
+
+        field.BeginScrub(-1);
+        field.SetNumbers([5]);
+        Assert.IsType<PreviewValuesState.Holding>(shell.PreviewValues.State);
+        // Esc in the timeline cancels the cutscene's drag under the field's: the field's drag ends with it.
+        editor.EndField(cancel: true);
+        Assert.Empty(editor.Document.History);
+        Assert.IsType<PreviewValuesState.Empty>(shell.PreviewValues.State);
+
+        // The field's release then ends nothing, not even a drag that the timeline began since.
+        Assert.True(editor.BeginDrag("Move Section"));
+        field.SetNumbers([6]);
+        field.EndScrub();
+        Assert.True(editor.Document.InTransaction);
+        Assert.Empty(shell.PreviewValues.State is PreviewValuesState.Live live ? live.Values : []);
+        editor.EndDrag(cancel: true);
+        Assert.Empty(editor.Document.History);
+    }
 }
