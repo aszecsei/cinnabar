@@ -213,14 +213,9 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         {
             OpenScene(options.ScenePath);
         }
-        _pendingMaterials.AddRange(options.MaterialPaths);
-        _pendingMaterials.AddRange(options.EffectPaths);
-        _pendingMaterials.AddRange(options.AnimationGraphPaths);
-        _pendingMaterials.AddRange(options.UiDocumentPaths);
-        _pendingMaterials.AddRange(options.DecisionPaths);
-        _pendingMaterials.AddRange(options.CutscenePaths);
-        Assets.Changed += OpenPendingMaterials;
-        Assets.Changed += OpenPendingUi;
+        _pendingOpens.AddRange(new[] { options.MaterialPaths, options.EffectPaths, options.AnimationGraphPaths, options.UiDocumentPaths, options.DecisionPaths,
+            options.CutscenePaths }.SelectMany(paths => paths).Select(path => new PendingOpen.ByPath(path)));
+        Assets.Changed += OpenPending;
         Content.AssetCreated += OnAssetCreated;
         Assets.Changed += ExpandArrivedPrefabs;
         Assets.Changed += ReloadChangedPrefabs;

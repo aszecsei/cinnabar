@@ -1,6 +1,6 @@
 # UI editor
 
-The UI editor edits a UI document (see [Content: UI documents](../content/kinds/ui-documents.md#ui-documents)) and shows it as the game draws it (see [UI: Design](../ui/design.md#design)). Each open one is a document beside the viewport, `UiEditorDocument`, over a `UiEditor` in the shell, which holds its state, so docking can rebuild the view, and tests drive the editor without a window.
+The UI editor edits a UI document (see [Content: UI documents](../content/kinds/ui-documents.md#ui-documents)) and shows it as the game draws it (see [UI: Design](../ui/design.md#design)). Each open one is a document beside the viewport, a `GraphEditorDocument` with the ID `ui.{guid}`, over a `UiEditor` in the shell, which holds its state, so docking can rebuild the view, and tests drive the editor without a window.
 
 **In this document:** [The file](#the-file) · [The canvas](#the-canvas) · [The tree](#the-tree) · [Properties](#properties) · [Styles](#styles) · [Bindings](#bindings) · [The game's side](#the-games-side)
 

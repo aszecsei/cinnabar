@@ -52,13 +52,17 @@ public abstract class EditorDocument : Dock.Model.Mvvm.Controls.Document
     public Control CreateView() => _createView();
 }
 
-/// <summary>A graph in its editor: a document beside the viewport, which closes, and asks first when it has unsaved changes.</summary>
-public abstract class GraphEditorDocument : EditorDocument
+/// <summary>
+/// A graph in its editor: a document beside the viewport, which closes, and asks first when it has unsaved changes. Its ID
+/// is its kind's prefix and its GUID, such as <c>cutscene.{guid}</c>.
+/// </summary>
+public sealed class GraphEditorDocument : EditorDocument
 {
-    protected GraphEditorDocument(Shell.IGraphEditor editor, string id, Func<Control> createView) : base(editor, createView)
+    public GraphEditorDocument(Shell.IGraphEditor editor, Shell.IGraphEditorKind kind, Func<Control> createView) : base(editor, createView)
     {
         GraphEditor = editor;
-        Id = id;
+        Kind = kind;
+        Id = $"{kind.IdPrefix}.{editor.Guid}";
         Title = editor.Document.Title;
         CanFloat = false;
         CanPin = false;
@@ -66,19 +70,10 @@ public abstract class GraphEditorDocument : EditorDocument
     }
 
     public Shell.IGraphEditor GraphEditor { get; }
+
+    /// <summary>The row of the shell's table of graph editor kinds that opened it.</summary>
+    public Shell.IGraphEditorKind Kind { get; }
 }
-
-/// <summary>A material or a material function in the material editor (see docs/editor/material-editor.md#material-editor).</summary>
-public sealed class MaterialEditorDocument(Shell.MaterialEditor editor, Func<Control> createView)
-    : GraphEditorDocument(editor, $"material.{editor.Guid}", createView);
-
-/// <summary>An animation graph in its editor (see docs/editor/animation-graph-editor.md#animation-graph-editor).</summary>
-public sealed class AnimationGraphEditorDocument(Shell.AnimationGraphEditor editor, Func<Control> createView)
-    : GraphEditorDocument(editor, $"animation_graph.{editor.Guid}", createView);
-
-/// <summary>A UI document in the UI editor (see docs/editor/ui-editor.md#ui-editor).</summary>
-public sealed class UiEditorDocument(Shell.UiEditor editor, Func<Control> createView)
-    : GraphEditorDocument(editor, $"ui.{editor.Guid}", createView);
 
 /// <summary>An effect's preview (see docs/rendering/particles.md#previews): a document beside the viewport, which closes.</summary>
 public sealed class EffectPreviewDocument : EditorDocument
@@ -122,19 +117,3 @@ public sealed class ViewportDocument : Dock.Model.Mvvm.Controls.Document
     /// <summary>Docking can template a document more than once, so each call makes a new view over the same viewports.</summary>
     public Control CreateView() => _createView();
 }
-
-/// <summary>A decision in the decision editor (see docs/editor/decision-editor.md#decision-editor).</summary>
-public sealed class DecisionEditorDocument(Shell.DecisionEditor editor, Func<Control> createView)
-    : GraphEditorDocument(editor, $"decision.{editor.Guid}", createView);
-
-/// <summary>A blackboard in the blackboard editor (see docs/editor/decision-editor.md#blackboards).</summary>
-public sealed class BlackboardEditorDocument(Shell.BlackboardEditor editor, Func<Control> createView)
-    : GraphEditorDocument(editor, $"blackboard.{editor.Guid}", createView);
-
-/// <summary>A world in the World editor (see docs/editor/world-view.md#the-world-editor).</summary>
-public sealed class WorldEditorDocument(Shell.WorldEditor editor, Func<Control> createView)
-    : GraphEditorDocument(editor, $"world.{editor.Guid}", createView);
-
-/// <summary>A cutscene in the cutscene editor (see docs/editor/cutscene-editor.md#the-tab).</summary>
-public sealed class CutsceneEditorDocument(Shell.CutsceneEditor editor, Func<Control> createView)
-    : GraphEditorDocument(editor, $"cutscene.{editor.Guid}", createView);

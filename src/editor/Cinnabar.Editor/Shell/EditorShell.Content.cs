@@ -4,7 +4,6 @@ using System.Text.Json;
 using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Model;
-using Cinnabar.Editor.Panels;
 using AssetKind = Cinnabar.Editor.Link.Cook.AssetKind;
 
 namespace Cinnabar.Editor.Shell;
@@ -62,35 +61,16 @@ public sealed partial class EditorShell
             case AssetKind.Scene or AssetKind.Prefab:
                 RequestOpenScene(path);
                 break;
-            case AssetKind.MaterialFunction:
-                OpenMaterial(asset);
-                break;
-            case AssetKind.Material when !IsHlslMaterial(path):
-                OpenMaterial(asset);
-                break;
             case AssetKind.Effect:
                 OpenEffect(asset);
                 break;
-            case AssetKind.AnimationGraph:
-                OpenAnimationGraph(asset);
+            case AssetKind.Material when IsHlslMaterial(path):
+                OpenScript(path);
                 break;
-            case AssetKind.Ui:
-                OpenUiDocument(asset);
+            case var kind when GraphEditorKindOf(kind) != null:
+                OpenEditor(asset);
                 break;
-            case AssetKind.Decision:
-                OpenDecision(asset);
-                break;
-            case AssetKind.Blackboard:
-                OpenBlackboard(asset);
-                break;
-            case AssetKind.World:
-                OpenWorld(asset);
-                break;
-            case AssetKind.Cutscene:
-                OpenCutscene(asset);
-                break;
-            case AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance
-                or AssetKind.Perception:
+            case AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.MaterialInstance or AssetKind.Perception:
                 OpenScript(path);
                 break;
         }
@@ -110,24 +90,18 @@ public sealed partial class EditorShell
 
     /// <summary>Whether a double click opens the asset (see <see cref="OpenAsset"/>).</summary>
     public static bool CanOpen(Link.Cook.Asset asset) =>
-        asset.Kind is AssetKind.Scene or AssetKind.Prefab or AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance
-            or AssetKind.MaterialFunction or AssetKind.Effect or AssetKind.AnimationGraph or AssetKind.Ui or AssetKind.Blackboard or AssetKind.Decision
-            or AssetKind.Perception or AssetKind.World or AssetKind.Cutscene;
+        asset.Kind is AssetKind.Scene or AssetKind.Prefab or AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.MaterialInstance
+            or AssetKind.Effect or AssetKind.Perception
+        || GraphEditorKindOf(asset.Kind) != null;
 
     /// <summary>What opening an asset is called in its menu.</summary>
     public string OpenLabel(Link.Cook.Asset asset) => asset.Kind switch
     {
         AssetKind.Scene => "Open Scene",
         AssetKind.Prefab => "Open Prefab",
-        AssetKind.MaterialFunction => "Open in Material Editor",
         AssetKind.Effect => "Open Preview",
-        AssetKind.Material when Assets.FullPath(asset) is { } path && !IsHlslMaterial(path) => "Open in Material Editor",
-        AssetKind.AnimationGraph => "Open in Animation Graph Editor",
-        AssetKind.Ui => "Open in UI Editor",
-        AssetKind.Decision => "Open in Decision Editor",
-        AssetKind.Blackboard => "Open in Blackboard Editor",
-        AssetKind.World => "Open in World Editor",
-        AssetKind.Cutscene => "Open in Cutscene Editor",
+        AssetKind.Material when Assets.FullPath(asset) is not { } path || IsHlslMaterial(path) => "Open in Script Editor",
+        var kind when GraphEditorKindOf(kind) is { } editor => editor.OpenLabel,
         _ => "Open in Script Editor",
     };
 
