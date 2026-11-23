@@ -2041,11 +2041,11 @@ viewports_of_both_kinds_open_resize_and_close :: proc(t: ^testing.T) {
 	with_targets(f)
 	with_renderer(f)
 	step(f, 1, viewport_camera(1, 5 << 24))
-	testing.expect_value(t, len(frame_viewports(&f.editor)), 0)
+	testing.expect_value(t, len(frame_viewports(&f.editor, &f.world)), 0)
 
 	// A scene view and the Game view, each with the target of its own number.
 	step(f, 1, open_viewport(1, .Scene, 640, 360), open_viewport(2, .Game, 320, 180))
-	views := frame_viewports(&f.editor)
+	views := frame_viewports(&f.editor, &f.world)
 	testing.expect_value(t, len(views), 2)
 	if len(views) == 2 {
 		// The Game view is the frame's own view, so it is first.
@@ -2077,14 +2077,14 @@ viewports_of_both_kinds_open_resize_and_close :: proc(t: ^testing.T) {
 		}
 	}
 	testing.expect_value(t, told, [MAX_VIEWPORTS]int{0, 1, 1, 0, 0})
-	frame_viewports(&f.editor)
+	frame_viewports(&f.editor, &f.world)
 	for m in step(f, 1) {
 		_, is_target := m.(link.Viewport_Target)
 		testing.expect(t, !is_target)
 	}
 	targets.generation[1] = 1
 	step(f, 1, open_viewport(1, .Scene, 800, 600))
-	views = frame_viewports(&f.editor)
+	views = frame_viewports(&f.editor, &f.world)
 	testing.expect_value(t, len(views), 2)
 	if len(views) == 2 {
 		testing.expect_value(t, views[1].size, [2]u32{800, 600})
@@ -2100,7 +2100,7 @@ viewports_of_both_kinds_open_resize_and_close :: proc(t: ^testing.T) {
 
 	// A side beyond the largest is clamped, and a size of nothing is a pixel.
 	step(f, 1, open_viewport(3, .Game, gpu.MAX_VIEWPORT_SIZE + 5, 0))
-	views = frame_viewports(&f.editor)
+	views = frame_viewports(&f.editor, &f.world)
 	testing.expect_value(t, len(views), 3)
 	for v in views {
 		if v.viewport == 3 {
@@ -2111,7 +2111,7 @@ viewports_of_both_kinds_open_resize_and_close :: proc(t: ^testing.T) {
 	// Closing a viewport ends its drawing, releases its target and frees its state, and nothing else's.
 	freed := objects.freed
 	step(f, 1, link.Close_Viewport{viewport = 1})
-	expect_viewports(t, frame_viewports(&f.editor)[:], 2, 3)
+	expect_viewports(t, frame_viewports(&f.editor, &f.world)[:], 2, 3)
 	testing.expect_value(t, targets.released, [gpu.MAX_VIEWPORT_TARGETS]int{0, 1, 0, 0, 0})
 	testing.expect_value(t, objects.freed, freed + 1)
 	// A viewport that is not open, and one that is not there, close nothing.
@@ -2129,7 +2129,7 @@ viewports_of_both_kinds_open_resize_and_close :: proc(t: ^testing.T) {
 	step(f, 2)
 	testing.expect_value(t, targets.released, [gpu.MAX_VIEWPORT_TARGETS]int{0, 1, 1, 1, 0})
 	testing.expect_value(t, objects.freed, objects.made)
-	testing.expect_value(t, len(frame_viewports(&f.editor)), 0)
+	testing.expect_value(t, len(frame_viewports(&f.editor, &f.world)), 0)
 }
 
 @(test)
@@ -2141,28 +2141,28 @@ a_scene_view_needs_a_camera_and_the_game_view_does_not :: proc(t: ^testing.T) {
 
 	// Open without a camera, and a camera without being open, draw nothing; the Game view draws from the game's camera.
 	step(f, 1, open_viewport(0, .Scene), viewport_camera(2, 7), open_viewport(3, .Game))
-	views := frame_viewports(&f.editor)
+	views := frame_viewports(&f.editor, &f.world)
 	expect_viewports(t, views, 3)
 	step(f, 1, viewport_camera(0, 0))
-	expect_viewports(t, frame_viewports(&f.editor), 3, 0)
+	expect_viewports(t, frame_viewports(&f.editor, &f.world), 3, 0)
 
 	// The camera is a scene view's: the Game view stores the editor's messages for it, and draws without them.
 	step(f, 1, viewport_camera(3, 9), link.Gizmo_State{viewport = 3, kind = .Scale, size = 2})
-	views = frame_viewports(&f.editor)
+	views = frame_viewports(&f.editor, &f.world)
 	testing.expect(t, len(views) == 2 && views[0].view == nil)
 	testing.expect_value(t, f.editor.session.view.viewports[3].gizmo.kind, link.Gizmo_Kind.Scale)
 
 	// The editor's cameras draw in every mode, so in Play the scene views show the game from outside.
 	for mode in ([]link.Editor_Mode{.Play, .Paused, .Edit}) {
 		step(f, 1, link.Set_Mode{mode = mode})
-		expect_viewports(t, frame_viewports(&f.editor), 3, 0)
+		expect_viewports(t, frame_viewports(&f.editor, &f.world), 3, 0)
 	}
 
 	// A viewport of another kind is another camera, with a state of its own.
 	freed := objects.freed
 	step(f, 1, open_viewport(0, .Game))
 	testing.expect_value(t, objects.freed, freed + 1)
-	views = frame_viewports(&f.editor)
+	views = frame_viewports(&f.editor, &f.world)
 	expect_viewports(t, views, 0, 3)
 	testing.expect(t, views[0].view == nil)
 }
@@ -2177,31 +2177,31 @@ the_first_viewport_that_draws_is_the_frames_own_and_the_others_follow :: proc(t:
 
 	// Scene views alone are in viewport order, the first one being the frame's own.
 	step(f, 1, open_viewport(3, .Scene), open_viewport(1, .Scene))
-	expect_viewports(t, frame_viewports(&f.editor), 1, 3)
+	expect_viewports(t, frame_viewports(&f.editor, &f.world), 1, 3)
 	// The Game view takes the role, as the view model and the particles' collisions are the game camera's; the others keep
 	// their order.
 	step(f, 1, open_viewport(2, .Game), open_viewport(0, .Scene))
-	expect_viewports(t, frame_viewports(&f.editor), 2, 0, 1, 3)
+	expect_viewports(t, frame_viewports(&f.editor, &f.world), 2, 0, 1, 3)
 	// The Game view with the lowest number, when there are two.
 	step(f, 1, open_viewport(3, .Game))
-	expect_viewports(t, frame_viewports(&f.editor), 2, 0, 1, 3)
+	expect_viewports(t, frame_viewports(&f.editor, &f.world), 2, 0, 1, 3)
 	step(f, 1, link.Close_Viewport{viewport = 2})
-	expect_viewports(t, frame_viewports(&f.editor), 3, 0, 1)
+	expect_viewports(t, frame_viewports(&f.editor, &f.world), 3, 0, 1)
 	step(f, 1, link.Close_Viewport{viewport = 3})
-	expect_viewports(t, frame_viewports(&f.editor), 0, 1)
+	expect_viewports(t, frame_viewports(&f.editor, &f.world), 0, 1)
 
 	// A viewport whose target the editor still reads skips the frame, and the next one is the frame's own.
 	targets.busy[0] = true
-	expect_viewports(t, frame_viewports(&f.editor), 1)
+	expect_viewports(t, frame_viewports(&f.editor, &f.world), 1)
 	targets.busy[0] = false
-	expect_viewports(t, frame_viewports(&f.editor), 0, 1)
+	expect_viewports(t, frame_viewports(&f.editor, &f.world), 0, 1)
 
 	// No linked editor, and no renderer, draw no viewport: the game draws its own camera into the frame target.
 	f.editor.renderer = nil
-	testing.expect_value(t, len(frame_viewports(&f.editor)), 0)
+	testing.expect_value(t, len(frame_viewports(&f.editor, &f.world)), 0)
 	f.editor.renderer = f.renderer
 	step(f, 0)
-	testing.expect_value(t, len(frame_viewports(&f.editor)), 0)
+	testing.expect_value(t, len(frame_viewports(&f.editor, &f.world)), 0)
 }
 
 @(test)
@@ -2219,14 +2219,14 @@ a_viewport_keeps_its_view_state_while_the_others_open_and_close :: proc(t: ^test
 		open_viewport(1, .Scene),
 	)
 
-	views := frame_viewports(&f.editor)
+	views := frame_viewports(&f.editor, &f.world)
 	testing.expect_value(t, len(views), 2)
 	first, second := views[0].state, views[1].state
 	testing.expect_value(t, objects.made, 2)
 
 	// The states are made once, when a viewport first draws, and last while it is open, whichever viewport is the frame's own.
 	step(f, 1, open_viewport(2, .Game))
-	views = frame_viewports(&f.editor)
+	views = frame_viewports(&f.editor, &f.world)
 	expect_viewports(t, views, 2, 0, 1)
 	testing.expect(
 		t,
@@ -2234,7 +2234,7 @@ a_viewport_keeps_its_view_state_while_the_others_open_and_close :: proc(t: ^test
 		"a state moved when another viewport opened",
 	)
 	step(f, 1, link.Close_Viewport{viewport = 2})
-	views = frame_viewports(&f.editor)
+	views = frame_viewports(&f.editor, &f.world)
 	testing.expect(
 		t,
 		views[0].state == first && views[1].state == second,
@@ -2245,15 +2245,15 @@ a_viewport_keeps_its_view_state_while_the_others_open_and_close :: proc(t: ^test
 
 	// A viewport that the editor still reads skips a frame and keeps its state.
 	targets.busy[1] = true
-	testing.expect_value(t, len(frame_viewports(&f.editor)), 1)
+	testing.expect_value(t, len(frame_viewports(&f.editor, &f.world)), 1)
 	targets.busy[1] = false
-	views = frame_viewports(&f.editor)
+	views = frame_viewports(&f.editor, &f.world)
 	testing.expect(t, views[1].state == second)
 	testing.expect_value(t, objects.made, 3)
 
 	// Closed and open again, it starts anew; the end of the session frees the rest.
 	step(f, 1, link.Close_Viewport{viewport = 0}, open_viewport(0, .Scene))
-	views = frame_viewports(&f.editor)
+	views = frame_viewports(&f.editor, &f.world)
 	testing.expect_value(t, objects.made, 4)
 	testing.expect_value(t, objects.freed, 2)
 	destroy(&f.editor)
@@ -2401,7 +2401,7 @@ the_game_view_draws_the_frame_as_described_and_a_scene_view_adds_the_editor :: p
 		&f.editor,
 		&f.world,
 		desc,
-		frame_viewports(&f.editor),
+		frame_viewports(&f.editor, &f.world),
 		f.renderer.quality,
 		f.renderer.caps,
 	)
@@ -2465,7 +2465,7 @@ the_game_view_draws_the_frame_as_described_and_a_scene_view_adds_the_editor :: p
 		&f.editor,
 		&f.world,
 		desc,
-		frame_viewports(&f.editor),
+		frame_viewports(&f.editor, &f.world),
 		f.renderer.quality,
 		f.renderer.caps,
 	)
@@ -2482,7 +2482,7 @@ the_game_view_draws_the_frame_as_described_and_a_scene_view_adds_the_editor :: p
 		&f.editor,
 		&f.world,
 		desc,
-		frame_viewports(&f.editor),
+		frame_viewports(&f.editor, &f.world),
 		f.renderer.quality,
 		f.renderer.caps,
 	)
@@ -2501,7 +2501,7 @@ the_game_view_draws_the_frame_as_described_and_a_scene_view_adds_the_editor :: p
 		&f.editor,
 		&f.world,
 		desc,
-		frame_viewports(&f.editor),
+		frame_viewports(&f.editor, &f.world),
 		f.renderer.quality,
 		f.renderer.caps,
 	)
@@ -2513,7 +2513,7 @@ the_game_view_draws_the_frame_as_described_and_a_scene_view_adds_the_editor :: p
 		&f.editor,
 		&f.world,
 		desc,
-		frame_viewports(&f.editor),
+		frame_viewports(&f.editor, &f.world),
 		f.renderer.quality,
 		f.renderer.caps,
 	)
@@ -2542,7 +2542,7 @@ the_frame_with_no_viewport_to_draw_is_the_games_with_the_editors_additions :: pr
 		&f.editor,
 		&f.world,
 		desc,
-		frame_viewports(&f.editor),
+		frame_viewports(&f.editor, &f.world),
 		f.renderer.quality,
 		f.renderer.caps,
 	)
@@ -2560,7 +2560,7 @@ the_frame_with_no_viewport_to_draw_is_the_games_with_the_editors_additions :: pr
 		&f.editor,
 		&f.world,
 		desc,
-		frame_viewports(&f.editor),
+		frame_viewports(&f.editor, &f.world),
 		f.renderer.quality,
 		f.renderer.caps,
 	)
@@ -2573,7 +2573,7 @@ the_frame_with_no_viewport_to_draw_is_the_games_with_the_editors_additions :: pr
 		&f.editor,
 		&f.world,
 		desc,
-		frame_viewports(&f.editor),
+		frame_viewports(&f.editor, &f.world),
 		f.renderer.quality,
 		f.renderer.caps,
 	)
@@ -2597,7 +2597,7 @@ the_games_hidden_entities_and_the_editors_are_together_in_every_view :: proc(t: 
 			&f.editor,
 			&f.world,
 			desc,
-			frame_viewports(&f.editor),
+			frame_viewports(&f.editor, &f.world),
 			f.renderer.quality,
 			f.renderer.caps,
 		)
@@ -2650,7 +2650,7 @@ a_view_starts_from_the_games_quality_when_it_has_one :: proc(t: ^testing.T) {
 		&f.editor,
 		&f.world,
 		desc,
-		frame_viewports(&f.editor),
+		frame_viewports(&f.editor, &f.world),
 		f.renderer.quality,
 		f.renderer.caps,
 	)
@@ -3404,7 +3404,7 @@ the_game_view_draws_the_games_views_in_rects_before_the_scene_views :: proc(t: ^
 		&f.editor,
 		&f.world,
 		desc,
-		frame_viewports(&f.editor),
+		frame_viewports(&f.editor, &f.world),
 		f.renderer.quality,
 		f.renderer.caps,
 	)
@@ -3460,7 +3460,7 @@ without_a_game_view_the_games_views_in_rects_are_dropped :: proc(t: ^testing.T) 
 		&f.editor,
 		&f.world,
 		desc,
-		frame_viewports(&f.editor),
+		frame_viewports(&f.editor, &f.world),
 		f.renderer.quality,
 		f.renderer.caps,
 	)

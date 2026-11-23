@@ -55,7 +55,7 @@ public static class CinematicCameraText
         var focal = values.GetValueOrDefault("focal_length") is > 0 and var f ? f : DefaultFocalLength;
         var width = values.GetValueOrDefault("sensor_width") is > 0 and var w ? w : DefaultSensorWidth;
         var height = values.GetValueOrDefault("sensor_height") is > 0 and var h ? h : DefaultSensorHeight;
-        var fov = 2 * Math.Atan(height / (2 * focal));
+        var fov = Tools.Lens.VerticalFov(focal, height);
         var preset = SensorName(width, height) is { } name ? $" ({name})" : "";
         var lens = $"A {Mm(focal)} lens on a {Number(width, "0.##")} × {Mm(height)} sensor{preset}: {Degrees(fov)} vertical, {Number(width / height, "0.##")}:1.";
         var aperture = values.GetValueOrDefault("aperture");

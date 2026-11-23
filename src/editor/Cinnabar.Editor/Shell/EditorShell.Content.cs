@@ -219,7 +219,11 @@ public sealed partial class EditorShell
         Host.StateChanged += _ => Thumbnails.Restart(DateTime.UtcNow);
         ModeChanged += () => Thumbnails.Pump(DateTime.UtcNow);
         // A cook can change any prefab's text.
-        Cook.Cooked += _ => _prefabTrees.Clear();
+        Cook.Cooked += _ =>
+        {
+            _prefabTrees.Clear();
+            _prefabRoots.Clear();
+        };
         LoadContentView();
         Content.Model.ViewSettingsChanged += () => WriteSetting("content view", EditorSettings.ContentViewFileName,
             JsonSerializer.Serialize(new ContentViewSettings(Content.Model.ViewMode, Content.Model.TileSize)));

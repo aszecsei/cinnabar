@@ -649,6 +649,55 @@ public static class CutsceneEdits
         return new CutsceneClip(items, anchor, items.Max(i => i.End) - anchor);
     }
 
+    /// <summary>The IDs of the bindings that a camera cut section names as its <c>camera</c>.</summary>
+    public static HashSet<int> CutCameras(CutsceneFile file) =>
+        [.. file.Tracks.Where(t => t.TrackKind == "camera_cut")
+            .SelectMany(t => t.Children.Where(c => c.Kind == CutsceneBlockKind.Section))
+            .Select(s => s.Get("camera") is { } text && CutsceneFile.TryParseTicks(text.Trim(), out var id) ? id : (int?)null)
+            .OfType<int>()];
+
+    /// <summary>
+    /// Adds a cut to a camera at a time (see docs/editor/cutscene-editor.md#new-camera-from-view), on the cutscene's camera
+    /// cut track, which it adds when there is none. The cut runs to the next cut's start, else to the range's end, else to
+    /// the length, else for a second. False, and nothing changes, when a cut is over the time already, or the time is at
+    /// the length or past it, where a cut would show nothing.
+    /// </summary>
+    public static bool AddCut(CutsceneFile file, int tick, int camera)
+    {
+        if (file.Length is { } last && tick >= last)
+        {
+            return false;
+        }
+        var track = file.Tracks.FirstOrDefault(t => t.TrackKind == "camera_cut");
+        var sections = track?.Children.Where(s => s.Kind == CutsceneBlockKind.Section && s.Start != null && s.End != null).ToList() ?? [];
+        if (sections.Any(s => s.Start <= tick && tick < s.End))
+        {
+            return false;
+        }
+        var end = sections.Where(s => s.Start > tick).Select(s => s.Start!.Value).DefaultIfEmpty(int.MaxValue).Min();
+        if (end == int.MaxValue)
+        {
+            end = RangeEnd(file) is { } range && range > tick ? range : file.Length is { } length && length > tick ? length : tick + CutsceneFile.TicksPerSecond;
+        }
+        if (track == null)
+        {
+            var id = file.NextId(CutsceneBlockKind.Track);
+            track = CutsceneBlock.Of(CutsceneBlockKind.Track, $"track {id.ToString(CultureInfo.InvariantCulture)} camera_cut \"Cuts\"");
+            file.Insert(file.Root, file.Root.Children.Count, track);
+        }
+        var sectionId = file.NextId(CutsceneBlockKind.Section);
+        var section = CutsceneBlock.Of(CutsceneBlockKind.Section,
+            $"{CutsceneKeying.IndentUnder(track)}section {sectionId.ToString(CultureInfo.InvariantCulture)} {tick.ToString(CultureInfo.InvariantCulture)} {end.ToString(CultureInfo.InvariantCulture)}");
+        file.Insert(track, track.Children.Count, section);
+        section.Set("camera", camera.ToString(CultureInfo.InvariantCulture));
+        CutsceneFile.SortChildren(track);
+        return true;
+    }
+
+    // The end of the cutscene's range, from its range = [start, end], or null.
+    static int? RangeEnd(CutsceneFile file) =>
+        file.Root.Get("range")?.Trim().TrimStart('[').TrimEnd(']').Split(',') is [_, var end] && CutsceneFile.TryParseTicks(end.Trim(), out var ticks) ? ticks : null;
+
     /// <summary>The ID of the binding that a track is for, or null for a track of the cutscene's own, such as camera cuts.</summary>
     public static int? BindingOf(CutsceneBlock? track) =>
         track?.Get("binding") is { } text && CutsceneFile.TryParseTicks(text.Trim(), out var id) ? id : null;

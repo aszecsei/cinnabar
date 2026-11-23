@@ -271,6 +271,9 @@ public sealed class CutsceneTimelineInput
             case CutsceneHitKind.Fold:
                 _editor.ToggleFold(hit.Row!.Path);
                 return false;
+            case CutsceneHitKind.LookThrough when _editor.File.Find(hit.Row!.Path) is { Id: { } binding }:
+                _editor.ToggleLookThrough(binding);
+                return false;
             case CutsceneHitKind.Lock when hit.Row!.TrackId is { } track:
                 _editor.SetLocked(track, !_editor.Locked.Contains(track));
                 return false;

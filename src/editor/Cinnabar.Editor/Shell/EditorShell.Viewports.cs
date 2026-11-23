@@ -87,7 +87,9 @@ public sealed partial class EditorShell
         SceneViewSet? Views = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Layout = null,
         // The scene views' projections, by their names, in the views' order.
-        List<string>? Projections = null);
+        List<string>? Projections = null,
+        // Each viewport's frame guides, in the viewports' order (see docs/editor/cutscene-editor.md#frame-guides).
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] List<FrameGuideSettings>? Guides = null);
 
     /// <summary>
     /// Whether the game's world has an entity with a <c>Camera</c>, which the Game view draws from: false with no world.
@@ -121,9 +123,9 @@ public sealed partial class EditorShell
     // Makes the viewports with the user's settings, and connects each to the host.
     void CreateViewports()
     {
-        var (settings, views, projections) = LoadViewportFile();
+        var (settings, views, projections, guides) = LoadViewportFile();
         SceneViews = views;
-        Viewports = [.. Enumerable.Range(0, EditorViewport.Max).Select(i => new EditorViewport(i, settings[i]))];
+        Viewports = [.. Enumerable.Range(0, EditorViewport.Max).Select(i => new EditorViewport(i, settings[i]) { Guides = i < guides.Count ? guides[i] ?? new() : new() })];
         ActiveViewport = SettingsViewport = Viewports[0];
         foreach (var viewport in Viewports)
         {
@@ -183,6 +185,7 @@ public sealed partial class EditorShell
         SettingsViewport = viewport;
         Commands.InvalidateAll();
         ActiveViewportChanged?.Invoke();
+        LooksChanged();
         // The viewport commands show the settings of the viewport that they act on.
         ViewportSettingsChanged?.Invoke();
     }
@@ -303,6 +306,7 @@ public sealed partial class EditorShell
         {
             return false;
         }
+        LeaveLook(viewport);
         var chosen = viewport.Projection != projection;
         viewport.Projection = projection;
         viewport.Camera.SetProjection(projection);
@@ -346,6 +350,7 @@ public sealed partial class EditorShell
         {
             return false;
         }
+        LeaveLook(viewport);
         // A view that has not been shown turns about the pivot that it would start at, the first view's.
         PlaceCamera(viewport);
         var (yaw, pitch) = ViewGizmo.Angles(axis);
@@ -462,12 +467,12 @@ public sealed partial class EditorShell
     }
 
     /// <summary>The settings for the viewports and the scene views in the Scene document, from <c>viewport.json</c>.</summary>
-    (List<ViewportSettings> Settings, SceneViewSet Views, List<CameraProjection?> Projections) LoadViewportFile()
+    (List<ViewportSettings> Settings, SceneViewSet Views, List<CameraProjection?> Projections, List<FrameGuideSettings?> Guides) LoadViewportFile()
     {
         var defaults = Enumerable.Range(0, EditorViewport.Max).Select(i => DefaultSettingsOf(i, DefaultViewportSettings)).ToList();
         if (Settings.Read(EditorSettings.ViewportFileName) is not { } json)
         {
-            return (defaults, SceneViewSet.Perspective, []);
+            return (defaults, SceneViewSet.Perspective, [], []);
         }
         try
         {
@@ -479,16 +484,16 @@ public sealed partial class EditorShell
                 // A file without the views has the earlier editor's layout: Quad is all four, anything else the first.
                 var views = file?.Views is { } kept && (kept & SceneViewSet.All) != SceneViewSet.None ? kept & SceneViewSet.All
                     : string.Equals(file?.Layout, "Quad", StringComparison.OrdinalIgnoreCase) ? SceneViewSet.All : SceneViewSet.Perspective;
-                return ([.. defaults.Select((d, i) => i < all.Count ? all[i] : d)], views, ProjectionsOf(file?.Projections));
+                return ([.. defaults.Select((d, i) => i < all.Count ? all[i] : d)], views, ProjectionsOf(file?.Projections), [.. file?.Guides ?? []]);
             }
             // An editor with one viewport wrote that viewport's settings alone, which every viewport then starts from.
             var shared = JsonSerializer.Deserialize<ViewportSettings>(json) ?? DefaultViewportSettings;
-            return ([.. defaults.Select((_, i) => DefaultSettingsOf(i, shared))], SceneViewSet.Perspective, []);
+            return ([.. defaults.Select((_, i) => DefaultSettingsOf(i, shared))], SceneViewSet.Perspective, [], []);
         }
         catch (JsonException)
         {
             Console.Add(LogLevel.Warning, $"viewport: {Path.Combine(Settings.Directory, EditorSettings.ViewportFileName)} is not the viewports' settings, so the defaults are used");
-            return (defaults, SceneViewSet.Perspective, []);
+            return (defaults, SceneViewSet.Perspective, [], []);
         }
     }
 
@@ -502,5 +507,31 @@ public sealed partial class EditorShell
 
     void SaveViewportFile() =>
         WriteSetting("viewport", EditorSettings.ViewportFileName, JsonSerializer.Serialize(new ViewportFile([.. Viewports.Select(v => v.Settings)], SceneViews,
-            Projections: [.. Viewports.Where(v => v.HasCamera).Select(v => v.Projection.ToString())])));
+            Projections: [.. Viewports.Where(v => v.HasCamera).Select(v => v.Projection.ToString())],
+            Guides: Viewports.Any(v => v.Guides != new FrameGuideSettings()) ? [.. Viewports.Select(v => v.Guides)] : null)));
+
+    // A command that moves a view's editor camera shows it: the view stops looking through a cutscene's camera.
+    void LeaveLook(EditorViewport viewport)
+    {
+        if (viewport.HasCamera)
+        {
+            Looks.LookThroughEditor(viewport.Index);
+        }
+    }
+
+    /// <summary>A viewport's frame guides changed.</summary>
+    public event Action<EditorViewport>? GuidesChanged;
+
+    /// <summary>Changes the frame guides that a viewport draws, which viewport.json keeps (see docs/editor/cutscene-editor.md#frame-guides).</summary>
+    public void SetGuides(EditorViewport viewport, FrameGuideSettings guides)
+    {
+        if (viewport.Guides == guides)
+        {
+            return;
+        }
+        viewport.Guides = guides;
+        SaveViewportFile();
+        GuidesChanged?.Invoke(viewport);
+        Commands.InvalidateAll();
+    }
 }

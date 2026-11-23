@@ -386,6 +386,17 @@ public sealed partial class Keying
         {
             return "No values over the preview wait for a key.";
         }
+        foreach (var binding in holding.Bindings.Keys)
+        {
+            if (PilotKeys.Refusal(holding.Editor.File, binding, holding.Editor.Locked) is { } why)
+            {
+                return why;
+            }
+        }
+        if (holding.Values.IsEmpty)
+        {
+            return null;
+        }
         return Refusal(holding.Values.Keys.GroupBy(k => k.Handle).Select(g => (g.Key, Targets(g))));
 
         List<KeyTarget> Targets(IEnumerable<ValueKey> keys) =>
@@ -398,7 +409,14 @@ public sealed partial class Keying
     {
         if (KeyPreviewValuesRefusal() == null && _shell.PreviewValues.State is PreviewValuesState.Holding holding)
         {
-            Edit("Key Preview Values", file => SetValueKeys(file, holding.Values.Select(v => (v.Key, v.Value))));
+            Edit("Key Preview Values", file =>
+            {
+                SetValueKeys(file, holding.Values.Select(v => (v.Key, v.Value)));
+                foreach (var (binding, pose) in holding.Bindings)
+                {
+                    PilotKeys.Set(file, binding, pose.Position, pose.Rotation, holding.Tick, holding.Editor.Locked);
+                }
+            });
             _shell.PreviewValues.Keyed();
         }
     }

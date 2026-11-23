@@ -502,6 +502,15 @@ override_target :: proc(
 				return s.root, true
 			}
 		}
+	case .Binding:
+		// Only the cutscene preview's values name a binding, and they resolve it on each lay (see
+		// write_preview_values).
+		log.warnf(
+			"editor: override %d names binding %d, which only the cutscene preview's values can",
+			o.id,
+			target.entity,
+		)
+		return 0, false
 	}
 	log.warnf("editor: override %d writes %v, which the world does not have", o.id, target)
 	return 0, false

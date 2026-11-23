@@ -59,7 +59,7 @@ public sealed class WorkflowTests : IDisposable
         // A viewport's own: its settings, its view and the Scene's views (see docs/editor/viewport.md#toolbar).
         string[] viewport =
         [
-            .. ViewportOptions.Toggles.Select(t => t.Command), .. ViewportOptions.Choices.Select(c => c.Command),
+            .. ViewportOptions.Toggles.Select(t => t.Command), .. ViewportOptions.Choices.Select(c => c.Command), .. ViewportOptions.Guides.Select(g => g.Command),
             EditorCommands.DebugView, EditorCommands.ExposureUp, EditorCommands.ExposureDown, EditorCommands.ExposureReset,
             EditorCommands.ViewProjection, EditorCommands.View2D, EditorCommands.SceneLayout, EditorCommands.ViewportScale, EditorCommands.Stats,
             EditorCommands.FrameSelected, EditorCommands.FrameScene, EditorCommands.OrbitSelection,
@@ -76,7 +76,12 @@ public sealed class WorkflowTests : IDisposable
         // A cutscene's timeline's own, which act while it has the keyboard (see docs/editor/cutscene-editor.md#the-timeline).
         // And its keys, which act on the selection wherever the keyboard is (see docs/editor/cutscene-editor.md#keying).
         // And its bindings', which act between the selected entities and the cutscene (see docs/editor/cutscene-editor.md#bindings).
-        string[] timeline = [.. EditorCommands.CutsceneTimelineCommands, .. EditorCommands.CutsceneKeyCommands, .. EditorCommands.CutsceneBindingCommands];
+        // And its cameras', which act between the active scene view and the cutscene (see docs/editor/cutscene-editor.md#cameras).
+        string[] timeline =
+        [
+            .. EditorCommands.CutsceneTimelineCommands, .. EditorCommands.CutsceneKeyCommands, .. EditorCommands.CutsceneBindingCommands,
+            .. EditorCommands.CutsceneCameraCommands,
+        ];
 
         Assert.All(viewport, id => Assert.DoesNotContain(id, ribbon));
         Assert.All(scene, id => Assert.DoesNotContain(id, ribbon));

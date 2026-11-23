@@ -12,6 +12,15 @@ public sealed partial class EditorShell
 
     public IReadOnlyList<CutsceneEditor> Cutscenes => _cutscenes;
 
+    // A view's look changed, or the active view: each cutscene's camera rows read it again.
+    void LooksChanged()
+    {
+        foreach (var cutscene in _cutscenes)
+        {
+            cutscene.OnLooksChanged();
+        }
+    }
+
     /// <summary>The cutscene editor whose document is active, or null when the viewport or another document is.</summary>
     public CutsceneEditor? ActiveCutscene => ActiveGraphEditor as CutsceneEditor;
 

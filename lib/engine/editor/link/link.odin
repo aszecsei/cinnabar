@@ -139,6 +139,9 @@ Message :: union {
 	Cutscene_Preview_Opened,
 	Cutscene_Preview_Ended,
 	Cutscene_Preview_Tick,
+	Viewport_Look,
+	Viewport_Look_Shown,
+	Cutscene_Preview_Shown,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -2002,6 +2005,9 @@ Override_Target_Kind :: enum u8 {
 	Scene_Entity,
 	// An entity that the override spawned, by the key of its Override_Spawn.
 	Spawned,
+	// The entity of a binding of the open cutscene preview, by the binding's ID. Only Cutscene_Preview_Values takes
+	// it, so the editor can move a binding that it has no entity for, as a spawned camera that it pilots.
+	Binding,
 }
 
 // An entity that an override writes. scene is the number of the scene whose IDs entity (for a Scene_Entity) and the
@@ -2159,7 +2165,7 @@ Cutscene_Preview_Settings :: struct {
 // editor keys them or drops them (see docs/editor/cutscene-editor.md#preview-values). They show only while the preview
 // is paused at tick, and a Time, a Play or a Close drops them. Each message replaces the last; one with no fields and
 // no transforms clears them. serial names them in Shown_Preview.values, and only goes up in a session. Their targets
-// are Scene_Entity targets.
+// are Scene_Entity targets, and a transform's may be a Binding target.
 Cutscene_Preview_Values :: struct {
 	ticket:     u64,
 	tick:       i32,
@@ -2207,4 +2213,52 @@ Cutscene_Preview_Tick :: struct {
 	ticket:  u64,
 	tick:    i32,
 	playing: bool,
+}
+
+// A scene view that looks through a camera of the cutscene preview (see docs/editor/cutscene-editor.md#cameras). The
+// view draws from the camera's entity, with its lens, in place of its Editor_Camera, while the preview with the ticket
+// is open and the camera is a live Camera. Otherwise it draws from its Editor_Camera.
+Viewport_Look_Source :: enum u8 {
+	// The view's Editor_Camera.
+	Editor_Camera,
+	// The entity of the binding with the ID.
+	Binding,
+	// The camera of the camera cut track's section at the preview's time, which changes as the time moves.
+	Cuts,
+}
+
+// Editor to game: what a scene view draws from. The editor sends it when it changes, and again after each
+// Cutscene_Preview_Open and when the link connects. serial only goes up in a session, and an older one is dropped.
+Viewport_Look :: struct {
+	viewport: u32,
+	serial:   u64,
+	ticket:   u64,
+	source:   Viewport_Look_Source,
+	// A binding ID, for Binding.
+	binding:  u32,
+}
+
+// Game to editor: what a scene view whose look is not its Editor_Camera drew, sent when it changes. serial is the
+// Viewport_Look's. With camera false, it drew its Editor_Camera, because the camera is not there or no section shows.
+// The pose and the lens are the ones the world shows, with the preview's layer on it.
+Viewport_Look_Shown :: struct {
+	viewport:     u32,
+	serial:       u64,
+	camera:       bool,
+	// The binding whose camera it drew.
+	binding:      u32,
+	// A World_Position, and camera to world (x, y, z, w), as in Editor_Camera.
+	position:     [3]i64,
+	rotation:     [4]f32,
+	// Vertical, in radians.
+	vertical_fov: f32,
+	// The Cinematic_Camera's focal length and sensor in millimeters, with its defaults, or 0 without one.
+	focal_length: f32,
+	sensor:       [2]f32,
+}
+
+// Game to editor: what the world shows of the cutscene preview, when it changes (see Shown_Preview). The editor keys
+// values that have no entity of its own, as a binding's pose, against it.
+Cutscene_Preview_Shown :: struct {
+	shown: Shown_Preview,
 }

@@ -650,7 +650,7 @@ Scripts read and change them with the `Subtitles` library ([Scripting: Subtitles
 
 - Fields blend track by track: each track blends its sections over the field's own value, and the later track wins. So two shots that overlap cross-fade an `Animator`'s pose, but a transform or a property that both write takes the later shot's value at its weight over the own value, not over the other shot's.
 - The cutscene editor's preview sets `audition`: `.Preview` while it plays and `.Scrub` while it is scrubbed (see [Cutscene editor: Preview](../editor/cutscene-editor.md#preview)). Its waveforms are [#556](https://github.com/aszecsei/cinnabar/issues/556).
-- In the editor, only the Game view follows the cut track. A viewport that pilots a camera waits for [#555](https://github.com/aszecsei/cinnabar/issues/555).
+- In the editor, a scene view follows the cut track only while it looks through the cuts (see [Cutscene editor: Look through](../editor/cutscene-editor.md#look-through)).
 
 ## Procedures
 

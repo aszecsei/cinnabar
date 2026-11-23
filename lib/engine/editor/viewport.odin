@@ -75,6 +75,10 @@ Viewport :: struct {
 	settings:    link.Viewport_Settings,
 	// From the viewport's Open_Viewport to its Close_Viewport.
 	open:        Maybe(Viewport_Open),
+	// What a scene view draws from, from Viewport_Look: its camera, or a camera of the cutscene preview.
+	look:        link.Viewport_Look,
+	// The last Viewport_Look_Shown that went to the editor for the look, so a report goes only when it changes.
+	look_sent:   Maybe(link.Viewport_Look_Shown),
 }
 
 // Viewport_Open is an open viewport: its kind, the size that the editor asked for, what the editor knows of the target that
@@ -86,6 +90,9 @@ Viewport_Open :: struct {
 	size:     [2]u32,
 	announce: Target_Announce,
 	state:    Maybe(render.View_State),
+	// The camera entity that a scene view that looks through a camera drew last, or 0 for its Editor_Camera. Another
+	// one is a cut, which the view's histories do not cross.
+	drawn:    ecs.Entity,
 }
 
 // Target_Announce is what the editor knows of a viewport's target: nothing before the first frame that takes it, then a
@@ -172,8 +179,11 @@ camera_view :: proc(c: link.Editor_Camera) -> render.View {
 Frame_Viewport :: struct {
 	viewport: int,
 	kind:     link.Viewport_Kind,
-	// The editor's camera, for a scene view. A Game view has none: it draws from the game's own camera.
+	// The editor's camera, or the camera that it looks through, for a scene view. A Game view has none: it draws from
+	// the game's own camera.
 	view:     Maybe(render.View),
+	// The scene view looks through another camera than last frame, so its histories start again.
+	cut:      bool,
 	size:     [2]u32,
 	target:   gpu.Texture,
 	state:    ^render.View_State,
@@ -188,7 +198,7 @@ Frame_Viewport :: struct {
 // target, as it does without an editor. Call it once per frame: it takes the targets for the frame, and makes the state of
 // a viewport that draws for the first time.
 @(private)
-frame_viewports :: proc(e: ^Editor) -> []Frame_Viewport {
+frame_viewports :: proc(e: ^Editor, w: ^ecs.World) -> []Frame_Viewport {
 	if !active(e) || e.renderer == nil || e.platform.gpu_viewport_target == nil {
 		return nil
 	}
@@ -199,16 +209,29 @@ frame_viewports :: proc(e: ^Editor) -> []Frame_Viewport {
 			continue
 		}
 		camera: Maybe(render.View)
+		cut := false
+		drawn: ecs.Entity
 		if open.kind == .Scene {
-			c, has_camera := v.camera.?
-			if !has_camera {
-				continue
+			if entity, _, looks := look_camera(e, w, &v); looks {
+				if view, ok := render.camera_view(w, entity); ok {
+					camera, drawn = view, entity
+				}
 			}
-			camera = camera_view(c)
+			if camera == nil {
+				c, has_camera := v.camera.?
+				if !has_camera {
+					continue
+				}
+				camera = camera_view(c)
+			}
+			cut = drawn != open.drawn
 		}
 		shared, ok := e.platform.gpu_viewport_target(i, open.size)
 		if !ok {
 			continue
+		}
+		if open.kind == .Scene {
+			open.drawn = drawn
 		}
 		known: Maybe(u32)
 		switch a in open.announce {
@@ -236,6 +259,7 @@ frame_viewports :: proc(e: ^Editor) -> []Frame_Viewport {
 				viewport = i,
 				kind = open.kind,
 				view = camera,
+				cut = cut,
 				size = shared.size,
 				target = shared.texture,
 				state = &open.state.?,
@@ -794,6 +818,11 @@ handle_viewport_message :: proc(e: ^Editor, message: link.Message) -> bool {
 	case link.Editor_Camera:
 		if p := viewport(v, m.viewport); p != nil {
 			p.camera = m
+		}
+	case link.Viewport_Look:
+		if p := viewport(v, m.viewport); p != nil && m.serial > p.look.serial {
+			p.look = m
+			p.look_sent = nil
 		}
 	case link.Open_Viewport:
 		if p := viewport(v, m.viewport); p != nil {

@@ -23,7 +23,11 @@ draw_frame :: proc(
 		return render.draw_frame(r, w, desc)
 	}
 	draw_helpers(e, w, &r.debug)
-	return render.draw_frame(r, w, plan_frame(e, w, desc, frame_viewports(e), r.quality, r.caps))
+	return render.draw_frame(
+		r,
+		w,
+		plan_frame(e, w, desc, frame_viewports(e, w), r.quality, r.caps),
+	)
 }
 
 // Tools is the data of a scene view's overlay: what the editor's tools need to add their passes to that view.
@@ -80,6 +84,7 @@ plan_frame :: proc(
 	extras := make([dynamic]render.Extra_View, e.platform.frame_allocator)
 	for v, i in views {
 		view := plan_view(e, w, desc, v, base, caps)
+		view.cut = v.cut
 		if i > 0 {
 			append(&extras, view)
 			continue

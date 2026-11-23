@@ -24,6 +24,8 @@ public class LinkWireTests
         new CutscenePreviewOpened(3, 12000, 0, 600000),
         new CutscenePreviewEnded(4, CutscenePreviewEndReason.CodeReloaded),
         new CutscenePreviewTick(3, 1001, true),
+        new ViewportLook(2, 7, 3, ViewportLookSource.Binding, 12),
+        new CutscenePreviewShown(new ShownPreview(3, 1001, 99, 5)),
     ];
 
     [Theory]
@@ -55,6 +57,19 @@ public class LinkWireTests
         var open = Assert.IsType<CutscenePreviewOpen>(LinkFrame.Decode(header.Kind, frame.AsSpan(LinkFrame.HeaderSize), LinkMessages.Read));
         Assert.Equal((3UL, true, 12000), (open.Ticket, open.Unsaved, open.Tick));
         Assert.Equal(guid, open.Cutscene);
+    }
+
+    [Fact]
+    public void WhatALookingViewDrewRoundTripsWithItsPoseAndLens()
+    {
+        var message = new ViewportLookShown(2, 7, true, 12, [1, -2, 3], [0, 0.5f, 0, 0.8660254f], 0.6f, 50, [36, 24]);
+        var frame = LinkFrame.Encode(message);
+        var header = LinkFrame.ReadHeader(frame);
+        var read = Assert.IsType<ViewportLookShown>(LinkFrame.Decode(header.Kind, frame.AsSpan(LinkFrame.HeaderSize), LinkMessages.Read));
+        Assert.Equal((2u, 7UL, true, 12u, 0.6f, 50f), (read.Viewport, read.Serial, read.Camera, read.Binding, read.VerticalFov, read.FocalLength));
+        Assert.Equal([1L, -2L, 3L], read.Position);
+        Assert.Equal([0, 0.5f, 0, 0.8660254f], read.Rotation);
+        Assert.Equal([36f, 24f], read.Sensor);
     }
 
     [Fact]

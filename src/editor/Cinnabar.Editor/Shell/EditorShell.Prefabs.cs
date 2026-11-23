@@ -310,6 +310,28 @@ public sealed partial class EditorShell
         return tree;
     }
 
+    // The components of each prefab's root, as its file has them, by the prefab's GUID: read once, until the next cook.
+    readonly Dictionary<string, List<SceneComponent>> _prefabRoots = [];
+
+    List<SceneComponent> PrefabRoot(string guid)
+    {
+        if (!_prefabRoots.TryGetValue(guid, out var components))
+        {
+            var root = SceneOfPrefab(guid)?.Entities.FirstOrDefault(e => e.Parent == 0 && e.ParentPath == null);
+            components = root == null ? [] : [.. root.Components];
+            _prefabRoots[guid] = components;
+        }
+        return components;
+    }
+
+    /// <summary>Whether a prefab's root entity has a component, as its file has it. False for a prefab that is not there.</summary>
+    public bool PrefabRootHas(string guid, ulong component) => PrefabRoot(guid).Any(c => c.Id == component);
+
+    /// <summary>A number field of a component of a prefab's root, as its file has it, or null when the file does not set it.</summary>
+    public double? PrefabRootNumber(string guid, ulong component, string field) =>
+        PrefabRoot(guid).FirstOrDefault(c => c.Id == component)?.Fields.FirstOrDefault(f => f.Name == field)?.Value is { Kind: SceneValueKind.Number, Numbers: [var n] }
+            ? n.Float : null;
+
     // A prefab's scene as its file has it, or null. A USD stage's prefab is text that the cooker generates.
     Scene? SceneOfPrefab(string guid)
     {

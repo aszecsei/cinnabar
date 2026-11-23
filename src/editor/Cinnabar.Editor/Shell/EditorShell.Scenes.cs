@@ -911,6 +911,12 @@ public sealed partial class EditorShell
             case Link.Protocol.CutscenePreviewTick tick:
                 CutscenePreview.OnTick(tick);
                 return;
+            case Link.Protocol.ViewportLookShown shown:
+                Looks.OnShown(shown);
+                return;
+            case Link.Protocol.CutscenePreviewShown preview:
+                PreviewValues.OnPreviewShown(preview.Shown);
+                return;
         }
         if (message is not EditProblems problems)
         {

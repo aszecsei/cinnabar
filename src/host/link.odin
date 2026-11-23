@@ -442,7 +442,10 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 	     link.Cutscene_Preview_Close,
 	     link.Cutscene_Preview_Opened,
 	     link.Cutscene_Preview_Ended,
-	     link.Cutscene_Preview_Tick:
+	     link.Cutscene_Preview_Tick,
+	     link.Viewport_Look,
+	     link.Viewport_Look_Shown,
+	     link.Cutscene_Preview_Shown:
 	// is_host_message sends these to the game.
 	}
 }

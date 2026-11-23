@@ -35,6 +35,9 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
 
     /// <summary>The values that the world shows over the cutscene preview, outside the document and the cutscene.</summary>
     public PreviewValues PreviewValues { get; }
+
+    /// <summary>What each scene view draws from: its editor camera, or a camera of the cutscene that holds the preview.</summary>
+    public ViewLooks Looks { get; }
     public ResourceStats Stats { get; } = new();
     public Selection Selection { get; } = new();
     public OutlinerState Outliner { get; } = new();
@@ -95,6 +98,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Overrides = new WorldOverrides(this);
         CutscenePreview = new CutscenePreview(this);
         PreviewValues = new PreviewValues(this);
+        Looks = new ViewLooks(this);
+        Looks.Changed += _ => LooksChanged();
         // A gizmo drag that goes to the cutscene moves with the values over the preview.
         PreviewValues.Changed += SendGizmo;
         Keying = new Keying(this);
