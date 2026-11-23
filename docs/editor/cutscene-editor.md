@@ -2,11 +2,11 @@
 
 The cutscene editor edits a cutscene (see [Content: Cutscenes](../content/kinds/cutscenes.md)), which the game plays as [Cinematics](../cinematics/README.md) describes. Each open one is a tab, `CutsceneEditorDocument`, over a `CutsceneEditor` in the shell, which holds its state. Docking can rebuild the view, and tests drive the editor without a window.
 
-The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, and the bindings. These come next:
-- a scene view that looks through the cut camera, and the camera tools ([#555](https://github.com/aszecsei/cinnabar/issues/555));
+The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, the bindings, and the cameras. These come next:
+- the lens controls, focus picking, the cut strip and the frustums' colours ([#555](https://github.com/aszecsei/cinnabar/issues/555));
 - the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)).
 
-**In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Preview](#preview) · [Keying](#keying) · [Bindings](#bindings) · [Curves](#curves)
+**In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Preview](#preview) · [Keying](#keying) · [Bindings](#bindings) · [Curves](#curves) · [Cameras](#cameras)
 
 ## The file
 
@@ -637,3 +637,77 @@ A property track whose field is an integer, a bool or an enum steps, as the runt
 
 - **Value snapping is for drags.** A typed value is exact.
 - **A curve per section.** A track with several sections has a curve for each section's channel, named with the section's ID.
+
+## Cameras
+
+A designer works as a camera operator: they look through a camera of the cutscene in a scene view, fly it into place, key it, and check the framing against the final aspect. The scene views draw from the editor camera until a designer asks for a camera. The Game view always draws from the game's camera, which shows the cut camera while a session is open (see [Preview](#preview)). `ViewLooks` in the shell holds what each scene view draws from. `CutsceneEditor.Cameras.cs` holds the cutscene's side.
+
+### Which bindings are cameras
+
+A binding is a camera when one of these is true (`CutsceneEditor.IsCamera`):
+- a camera cut section names it as its `camera`;
+- the entity that it possesses has a `Camera`;
+- the root of the prefab that it spawns has a `Camera`, as the prefab's file has it.
+
+A camera binding's row has a small camera at its right end. It is lit while the active scene view looks through the camera. A click on it starts or ends the look.
+
+### Look through
+
+A scene view looks through a camera of the cutscene that holds the preview, in place of its editor camera. There are three ways to start it:
+- the View menu's **Look Through** submenu: **Editor Camera**, **Cuts**, and each camera binding;
+- the camera on a binding's row, for the active scene view, or the first scene view while the Game view is active;
+- the commands **Look Through Camera**, on the selected binding, **Look Through Cuts** and **Editor Camera**.
+
+A look starts the cutscene's preview session when another tab holds it.
+
+- **One state.** Each scene view's look is one value (`ViewLook`): `Editor`, `Cuts`, or `Camera` with its binding. `ViewLooks.Become` is the one writer, and it tells the game.
+- **By binding.** The editor names the camera by its binding's ID, and the game finds the entity, because the editor has no entity for a spawned binding. `Viewport_Look` carries the view, the look's serial, the session's ticket and the source.
+- **Cuts.** With **Look Through Cuts**, the view draws from the camera of the camera cut section at the playhead, as the Game view does. It changes as the playhead moves.
+- **The game draws it.** `frame_viewports` draws the view from `render.camera_view` of the camera's entity, with its lens and depth of field. When the drawn camera changes, the view's histories start again. Picks use the drawn camera's projection, so a click selects what is under it.
+- **The game answers.** `Viewport_Look_Shown` tells the editor what the view drew: the binding, the pose and the lens, as the world shows them with the preview's layer on. The game sends it only when it changes. The editor takes an answer only when its serial is the look's.
+- **Sessions.** A look follows the tab that holds the preview. The editor tells the game again for each new session of that tab, as after a cook, a reconnect or a new game state. When another tab takes the preview, or the tab closes, the view draws from its editor camera again.
+- **No camera.** When the camera is not there, or no cut section is over the playhead, the game draws the view from its editor camera. The view's look stays, and it draws through the camera again when the camera is back.
+- **The editor camera stays.** A look never moves the editor camera. Frame Selected, Frame Scene, a turn to an axis, a change of the projection and the 2D view move it, so each of them ends the look first.
+
+### Pilot
+
+While a scene view looks through a spawned camera, its fly, orbit and pan controls move the camera, not the editor camera (`ViewLooks.Move`). The pilot's camera is an `EditorCamera` that starts at the pose that the game reported, with the camera's field of view.
+
+- **The world shows it at once.** Each move sets the binding's pose as a [preview value](#preview-values), by its binding's ID (`Override_Target_Kind.Binding`). The game finds the binding's entity at each lay, so the value stays when a new blob spawns the camera again. The scene view and the Game view both show the move.
+- **Auto-key.** With [auto-key](#auto-key) on, the first move of a mouse gesture starts a drag in the cutscene. Each move keys the pose at the playhead, and the release commits it: one key and one undo entry, "Pilot <name>". A click with no move keys nothing.
+- **Without auto-key.** The pose holds over the preview until Enter keys it, or the playhead moves and drops it. It stays held when the look ends, so Enter still keys it.
+- **The keys.** `PilotKeys` keys the pose in the camera's transform track's space. A relative track, the default, keys the offset from the pose that the binding spawns with, in its axes, and the turn after its rotation. An absolute track keys the pose from its origin, which the first key sets. The rotation's angles turn the short way from the keys next to them.
+- **Settling.** Keyed values stay until the preview shows the text that keyed them. The game's `Cutscene_Preview_Shown` says which blob and values the world shows, so a binding's pose settles without an entity of the editor's.
+- **Play.** A gesture pauses a playing preview first, as values show only at a paused playhead.
+- **Esc.** During a gesture, Esc takes the gesture back: no undo entry, the values as they were, and the pilot's camera where it started. Otherwise, Esc ends the look, and the view draws from its editor camera again.
+- **The speed line** says "Piloting", with the flying speed. A view that cannot pilot says why.
+
+### New camera from view
+
+**New Camera from View** (Ctrl+Shift+C) adds a camera where the active scene view looks from, as one undo entry, "New Camera":
+- a binding, "Camera", that spawns the camera prefab with the view's position and rotation;
+- a transform key with no offset at the playhead;
+- a `focal_length` key at the playhead, from the view's field of view on the prefab's sensor (`Lens.FocalLength`);
+- a cut to the camera at the playhead, when no cut is over it (`CutsceneEdits.AddCut`). The cut runs to the next cut's start, else to the range's end, else to the length, else for a second. It adds the camera cut track when there is none.
+
+The view's pose is the one that it draws: the camera that it looks through, or its editor camera. An orthographic editor camera has no lens, so the command does not run there.
+
+The camera prefab is the engine's `lib/engine/content/prefabs/cinematic_camera.prefab`: a Camera with a 35 mm lens on a 36 by 24 mm sensor, with no depth of field. When the asset index does not have it, the command takes the first prefab, by name, whose root has a Cinematic_Camera.
+
+### Frame guides
+
+Each viewport, the Game view too, has a **Guides** menu on its toolbar (see [Viewport: Toolbar](viewport.md#toolbar)). The editor draws the guides over the frame that the game shares (`FrameGuidesOverlay`), so no capture has them and they cost the game nothing.
+- **Aspect Mask** shades the frame outside an aspect. The aspect is **Camera**, the drawn camera's sensor aspect, which the presentation track's letterbox uses too, or 2.39:1, 1.85:1, 16:9, 4:3, or a custom value from 1 to 4. A view without a camera's lens takes 16:9 for Camera.
+- **Safe Areas** draws the action safe area, 93% of the framed shot, and the title safe area, 90%.
+- **Rule of Thirds** draws a grid of thirds and a centre mark over the framed shot.
+- **Camera Info** writes the camera's name, its focal length and the shot's name while a scene view looks through a camera. The Game view writes the shot's name.
+
+The guides are each user's, for each viewport, in `viewport.json`. `FrameGuides` in `Cinnabar.Editor.Tools` gives their rectangles in the frame's pixels, which `FrameGuidesTests` checks for each aspect.
+
+### Limits
+
+- **Pilot moves only a spawned camera with no parent binding.** A possessed camera moves with the gizmo, and its keys go as [Gizmo keys](#gizmo-keys) says. A camera whose track is relative to another binding is not piloted.
+- **No roll.** The pilot's camera has a yaw and a pitch, so a rolled camera loses its roll at the first move.
+- **The wheel changes the flying speed.** It does not dolly, because a pilot's move ends with a mouse release. Alt and the right button dolly.
+- **The editing tools are off in a view that looks through a camera.** The gizmo, a box select, mesh mode, the landscape brush and drops act in the editor camera's view. A click still selects.
+- **Lens controls, focus picking, the cut strip and the frustums' colours are next** ([#555](https://github.com/aszecsei/cinnabar/issues/555)).

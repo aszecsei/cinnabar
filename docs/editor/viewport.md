@@ -88,9 +88,10 @@ Each viewport has a toolbar at its top left, with a menu for each part of what i
 
 | Menu | Viewports | Contents |
 |---|---|---|
-| View | The scene views | Top, Bottom, Front, Back, Right and Left, which turn the view (see [View gizmo](#view-gizmo)). Perspective, Orthographic and 2D View (see [Projection](#projection)). Frame Selected, Frame Scene and Orbit Selection. |
+| View | The scene views | Top, Bottom, Front, Back, Right and Left, which turn the view (see [View gizmo](#view-gizmo)). Perspective, Orthographic and 2D View (see [Projection](#projection)). Look Through: Editor Camera, Cuts and each camera of the cutscene (see [Cutscene editor: Look through](cutscene-editor.md#look-through)). Frame Selected, Frame Scene and Orbit Selection. |
 | Shading | All | Lit, then the debug views in groups. |
 | Show | All | A toggle for each feature that the viewport draws. Icons and Shapes. Exposure, with Brighter, Darker and Reset. Frame Statistics and Shading Stats. |
+| Guides | All | Aspect Mask, Safe Areas, Rule of Thirds and Camera Info, and the mask's Aspect: Camera, 2.39:1, 1.85:1, 16:9, 4:3 or a custom value (see [Cutscene editor: Frame guides](cutscene-editor.md#frame-guides)). |
 | Quality | All | Quality, Anti-Aliasing, Global Illumination, Reflections, Reflections Level and Render Scale (see [Quality](#quality)). Frame Size, which is Fit or 100%. |
 | Layout | The scene views | Single, Two Side by Side and Quad, and a toggle for each of the four views (see [Views](#views)). |
 
@@ -111,8 +112,9 @@ Each viewport has a toolbar at its top left, with a menu for each part of what i
   | Cost | `Transparent_Overdraw`, `Quad_Overdraw` |
 
 - **Show's features** are Temporal AA, Bloom, Tone Mapping, Fog, Clouds, Ambient Occlusion, Global Illumination, Shadows, Post Effects, Occlusion Culling and Meshlet Hierarchy, each on until turned off. Shapes is None, Selected or All. Exposure shows the viewport's offset in stops when it is not 0. Frame Statistics shows the frame rates and the adapter over the viewport.
-- **The settings are data.** `ViewportOptions` in `Cinnabar.Editor.Shell` has each toggle and each choice of `Viewport_Settings` once: its command's ID, its label, and how it reads and changes the settings. The toolbar builds its Show and Quality menus from this data, so the menus and the commands offer the same.
-- **The commands** with the same IDs, such as `view.bloom` and `view.quality`, change the settings viewport (see [Views](#views)), for the command palette and key bindings. So do `view.debugView`, which picks the view, and `view.exposureUp`, `view.exposureDown` and `view.exposureReset`. `viewport.projection` and `viewport.view2d` act on a scene view's projection (see [Projection](#projection)), and `viewport.layout` and `viewport.view.<number>` on the Scene's views. `view.stats` shows or hides the frame statistics of every viewport, and `viewport.scale` sets the frame size of every viewport.
+- **The settings are data.** `ViewportOptions` in `Cinnabar.Editor.Shell` has each toggle and each choice of `Viewport_Settings` once: its command's ID, its label, and how it reads and changes the settings. The toolbar builds its Show and Quality menus from this data, so the menus and the commands offer the same. The frame guides are data there too (`ViewportOptions.Guides`), but only the editor draws them, so they are in `viewport.json` and not in `Viewport_Settings`.
+- **Look through.** A scene view that looks through a camera of the cutscene draws from that camera, and its fly, orbit and pan move the camera (see [Cutscene editor: Pilot](cutscene-editor.md#pilot)). Frame Selected, Frame Scene, a turn to an axis, a projection and 2D View give the view its own camera back first.
+- **The commands** with the same IDs, such as `view.bloom` and `view.quality`, change the settings viewport (see [Views](#views)), for the command palette and key bindings. So do `view.debugView`, which picks the view, and `view.exposureUp`, `view.exposureDown` and `view.exposureReset`. `viewport.projection` and `viewport.view2d` act on a scene view's projection (see [Projection](#projection)), and `viewport.layout` and `viewport.view.<number>` on the Scene's views. `view.stats` shows or hides the frame statistics of every viewport, and `viewport.scale` sets the frame size of every viewport. `view.aspectMask`, `view.safeAreas`, `view.thirds` and `view.cameraInfo` toggle the settings viewport's guides.
 - **The ribbon has none of these commands,** which a test checks (see [Shell: Ribbon](shell-and-panels.md#ribbon)).
 
 ## Tool strip

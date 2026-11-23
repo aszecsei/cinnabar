@@ -11,9 +11,10 @@ namespace Cinnabar.Editor.Viewport;
 
 /// <summary>
 /// A viewport's toolbar, at its top left (see docs/editor/viewport.md#toolbar): a menu for each part of what is the
-/// viewport's own. A scene view has View, which names how its camera looks and turns it; every viewport has Shading,
-/// which names what it shows in place of the lit scene, Show, the features and helpers that it draws, and Quality,
-/// which draws it at a quality in place of the game's; and a scene view has Layout, the views that the Scene shows.
+/// viewport's own. A scene view has View, which names how its camera looks and turns it, and what it looks through;
+/// every viewport has Shading, which names what it shows in place of the lit scene, Show, the features and helpers that
+/// it draws, Guides, which the editor draws over its frame, and Quality, which draws it at a quality in place of the
+/// game's; and a scene view has Layout, the views that the Scene shows.
 /// Each menu reads the viewport's state as it opens, and changes this viewport and no other. The Game view has no
 /// camera of the editor's, so it has no View and no Layout.
 /// </summary>

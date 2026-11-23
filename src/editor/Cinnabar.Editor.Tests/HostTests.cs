@@ -441,6 +441,46 @@ public abstract class HostTests : IAsyncDisposable
         Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
     }
 
+    // A scene view looks through a spawned camera of the cutscene by its binding (see docs/editor/cutscene-editor.md#cameras):
+    // the game reports the pose and the lens that the world shows, and the editor's values move the camera by the binding's
+    // ID, as a pilot does.
+    [Fact]
+    public async Task AViewLooksThroughASpawnedCameraAndTheValuesMoveItByItsBinding()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        await Load(editor, Scene(Entity(Fox, "Fox")), guid: AnimationScene);
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Drained(editor);
+
+        editor.Link.Send(new CutscenePreviewOpen(1, Convert.FromHexString(IntroCutscene), false, 100000));
+        await editor.Next<CutscenePreviewOpened>(o => o.Ticket == 1);
+        // The Wide Shot, binding 3, spawns at [149999999998, 1.6, -5], with the shot camera's 35 mm lens on a Super 35 sensor.
+        editor.Link.Send(new ViewportLook(0, 1, 1, ViewportLookSource.Binding, 3));
+        var shown = await editor.Next<ViewportLookShown>(s => s.Serial == 1 && s.Camera);
+        Assert.Equal(3u, shown.Binding);
+        Assert.Equal(149999999998L << 24, shown.Position[0]);
+        Assert.Equal(-5L << 24, shown.Position[2]);
+        Assert.Equal(35f, shown.FocalLength);
+        Assert.Equal([24.89f, 18.66f], shown.Sensor);
+        Assert.Equal(2 * Math.Atan(18.66 / 70), shown.VerticalFov, 5);
+
+        long[] moved = [shown.Position[0] + (2L << 24), shown.Position[1], shown.Position[2]];
+        editor.Link.Send(new CutscenePreviewValues(1, 100000, 7, [],
+            [new OverrideTransform(new OverrideTarget(OverrideTargetKind.Binding, 0, 3), moved, [0, 0, 0, 1], [1, 1, 1])]));
+        var after = await editor.Next<ViewportLookShown>(s => s.Serial == 1 && s.Camera && s.Position[0] == moved[0]);
+        Assert.Equal(moved, after.Position);
+        await editor.Next<CutscenePreviewShown>(s => s.Shown.Ticket == 1 && s.Shown.Values == 7);
+
+        // Its own camera again: the game reports nothing more for the view.
+        editor.Link.Send(new ViewportLook(0, 2, 0, ViewportLookSource.EditorCamera, 0));
+        editor.Link.Send(new CutscenePreviewClose(1));
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(Drained(editor), m => m is ViewportLookShown { Serial: 2 });
+        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+    }
+
     [Fact]
     public async Task ACutscenePreviewTakesItsMixAndPlaysBackwardInALoop()
     {
