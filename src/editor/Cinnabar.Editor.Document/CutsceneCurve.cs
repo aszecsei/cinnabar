@@ -2,6 +2,12 @@ using System.Globalization;
 
 namespace Cinnabar.Editor.Document;
 
+/// <summary>
+/// What a channel's curve does before its first key or after its last: <c>Cutscene_Infinity</c>, and a channel's
+/// <c>pre_infinity</c> and <c>post_infinity</c> (see docs/cinematics/tracks.md#curves).
+/// </summary>
+public enum CurveInfinity { Constant, Linear, Cycle, CycleOffset, Oscillate }
+
 /// <summary>A key's interpolation: how its value goes to the next key's (see docs/cinematics/tracks.md#curves).</summary>
 public enum CurveInterp
 {
@@ -160,16 +166,113 @@ public static class CutsceneCurve
     public const int SolveSteps = 48;
 
     /// <summary>
-    /// The curve's value at a tick on its own time: <c>curve_value</c>. Before the first key and after the last, the
-    /// curve holds. Between keys, the first key's interpolation decides. An empty curve is 0.
+    /// The curve's value at a tick on its own time: <c>curve_value</c>. Before the first key, <paramref name="pre"/>
+    /// decides, and after the last, <paramref name="post"/> does (see <see cref="Wrap"/>). Between keys, the first key's
+    /// interpolation decides. An empty curve is 0.
     /// </summary>
-    public static float Value(IReadOnlyList<CurveKey> keys, int t)
+    public static float Value(IReadOnlyList<CurveKey> keys, int t, CurveInfinity pre, CurveInfinity post)
     {
         var n = keys.Count;
         if (n == 0)
         {
             return 0;
         }
+        if (t >= keys[0].Time && t <= keys[n - 1].Time)
+        {
+            return Inside(keys, t);
+        }
+        var before = t < keys[0].Time;
+        if ((before ? pre : post) == CurveInfinity.Linear && n > 1)
+        {
+            return (float)Extend(keys, t, before);
+        }
+        var (local, cycles) = Wrap(keys, t, pre, post);
+        return Offset(keys, Inside(keys, local), cycles);
+    }
+
+    /// <summary>
+    /// The curve's value at a tick as if each key were constant: <c>curve_step</c>, for fields that step. Its infinity
+    /// is as <see cref="Value"/>'s, except that linear holds.
+    /// </summary>
+    public static float Step(IReadOnlyList<CurveKey> keys, int t, CurveInfinity pre, CurveInfinity post)
+    {
+        var n = keys.Count;
+        if (n == 0)
+        {
+            return 0;
+        }
+        if (t >= keys[0].Time && t <= keys[n - 1].Time)
+        {
+            return StepInside(keys, t);
+        }
+        var (local, cycles) = Wrap(keys, t, pre, post);
+        return Offset(keys, StepInside(keys, local), cycles);
+    }
+
+    /// <summary>
+    /// <c>curve_wrap</c>: the tick inside a non-empty curve's keys that gives a tick's value outside them, by the mode of
+    /// its side, and how many spans a cycle with offset moves the value by. Constant and linear hold the end key's tick.
+    /// The division is floored, written out, since % truncates toward 0.
+    /// </summary>
+    public static (int Local, long Cycles) Wrap(IReadOnlyList<CurveKey> keys, int t, CurveInfinity pre, CurveInfinity post)
+    {
+        int first = keys[0].Time, last = keys[keys.Count - 1].Time;
+        if (t >= first && t <= last)
+        {
+            return (t, 0);
+        }
+        var mode = t < first ? pre : post;
+        var span = (long)last - (long)first;
+        if (span == 0 || mode == CurveInfinity.Constant || mode == CurveInfinity.Linear)
+        {
+            return (Math.Clamp(t, first, last), 0);
+        }
+        var d = (long)t - (long)first;
+        var whole = d / span;
+        var r = d - whole * span;
+        if (r < 0)
+        {
+            r += span;
+            whole -= 1;
+        }
+        return mode switch
+        {
+            CurveInfinity.Cycle => (first + (int)r, 0),
+            CurveInfinity.CycleOffset => (first + (int)r, whole),
+            CurveInfinity.Oscillate when whole % 2 != 0 => (first + (int)(span - r), 0),
+            CurveInfinity.Oscillate => (first + (int)r, 0),
+            _ => (Math.Clamp(t, first, last), 0),
+        };
+    }
+
+    // curve_offset: a value moved by cycles times the change from the first key's value to the last's.
+    static float Offset(IReadOnlyList<CurveKey> keys, float v, long cycles) =>
+        cycles == 0 ? v : (float)((double)v + (double)cycles * ((double)keys[keys.Count - 1].Value - (double)keys[0].Value));
+
+    // curve_extend: a linear side's value, on along the curve's slope at its end key. At least two keys.
+    static double Extend(IReadOnlyList<CurveKey> keys, int t, bool before)
+    {
+        var n = keys.Count;
+        var (end, a, b) = before ? (0, 0, 1) : (n - 1, n - 2, n - 1);
+        var slope = 0.0;
+        switch (keys[a].Interp)
+        {
+            case CurveInterp.Constant:
+                break;
+            case CurveInterp.Linear:
+                slope = ((double)keys[b].Value - (double)keys[a].Value) / ((double)(keys[b].Time - keys[a].Time) / TicksPerSecond);
+                break;
+            default:
+                slope = before ? OutSlope(keys, 0) : InSlope(keys, n - 1);
+                break;
+        }
+        return (double)keys[end].Value + slope * ((double)((long)t - (long)keys[end].Time) / TicksPerSecond);
+    }
+
+    // curve_inside: the value at a tick from the first key's to the last's.
+    static float Inside(IReadOnlyList<CurveKey> keys, int t)
+    {
+        var n = keys.Count;
         if (t <= keys[0].Time)
         {
             return keys[0].Value;
@@ -193,14 +296,10 @@ public static class CutsceneCurve
         };
     }
 
-    /// <summary>The curve's value at a tick as if each key were constant: <c>curve_step</c>, for fields that step.</summary>
-    public static float Step(IReadOnlyList<CurveKey> keys, int t)
+    // curve_step_inside: the stepped value at a tick from the first key's to the last's.
+    static float StepInside(IReadOnlyList<CurveKey> keys, int t)
     {
         var n = keys.Count;
-        if (n == 0)
-        {
-            return 0;
-        }
         if (t <= keys[0].Time)
         {
             return keys[0].Value;

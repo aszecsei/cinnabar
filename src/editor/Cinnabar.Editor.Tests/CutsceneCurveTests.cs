@@ -28,11 +28,17 @@ public sealed class CutsceneCurveTests
             InSlope: F(w[5]), InWeight: F(w[6]), OutSlope: F(w[7]), OutWeight: F(w[8]));
     }
 
+    static CurveInfinity Mode(string name) => (CurveInfinity)Array.IndexOf(CutsceneCurveEdits.InfinityNames, name);
+
     [Fact]
     public void TheCurveGivesTheRuntimesBitsAtEveryTick()
     {
         var keys = new List<CurveKey>();
         var count = 0;
+        // Each infinity block's modes and keys, and how many ticks it has.
+        var blocks = new List<(CurveInfinity Pre, CurveInfinity Post, int Count)>();
+        IReadOnlyList<CurveKey> curve = keys;
+        var (pre, post) = (CurveInfinity.Constant, CurveInfinity.Constant);
         foreach (var line in Golden())
         {
             var w = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -45,13 +51,35 @@ public sealed class CutsceneCurveTests
                 keys.Add(GoldenKey(w));
                 continue;
             }
+            if (w[0] == "infinity")
+            {
+                // infinity <pre> <post> <from> <to>: the at lines after it are of those keys, with those modes.
+                (pre, post) = (Mode(w[1]), Mode(w[2]));
+                curve = keys[int.Parse(w[3], CultureInfo.InvariantCulture)..int.Parse(w[4], CultureInfo.InvariantCulture)];
+                blocks.Add((pre, post, 0));
+                continue;
+            }
             Assert.Equal("at", w[0]);
             var tick = int.Parse(w[1], CultureInfo.InvariantCulture);
             var want = uint.Parse(w[2], NumberStyles.HexNumber, CultureInfo.InvariantCulture);
-            var got = BitConverter.SingleToUInt32Bits(CutsceneCurve.Value(keys, tick));
-            Assert.True(got == want, $"at {tick}: {got:x8}, not {want:x8}");
-            count++;
+            var got = BitConverter.SingleToUInt32Bits(CutsceneCurve.Value(curve, tick, pre, post));
+            Assert.True(got == want, $"at {tick} ({pre}, {post}): {got:x8}, not {want:x8}");
+            if (blocks.Count == 0)
+            {
+                count++;
+            }
+            else
+            {
+                blocks[^1] = blocks[^1] with { Count = blocks[^1].Count + 1 };
+            }
         }
+        // Each mode but constant is on each side, and every block has its ticks.
+        foreach (var mode in Enum.GetValues<CurveInfinity>().Where(m => m != CurveInfinity.Constant))
+        {
+            Assert.Contains(blocks, b => b.Pre == mode);
+            Assert.Contains(blocks, b => b.Post == mode);
+        }
+        Assert.All(blocks, b => Assert.Equal((180000 + 60000) / 250 + 1 + 12, b.Count));
         // Every interpolation and both tangent options are in the curve.
         Assert.Equal(10, keys.Count);
         Assert.Contains(keys, k => k.Interp == CurveInterp.Constant);

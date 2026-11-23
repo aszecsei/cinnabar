@@ -26,6 +26,23 @@ public readonly record struct ValueAxis(double Top, double PerPixel)
         return new ValueAxis(at + y * scale, scale);
     }
 
+    /// <summary>
+    /// The value between the curve editor's grid lines: a round step, 1, 2 or 5 times a power of ten, of at least 40
+    /// pixels. A value drag snaps to it while value snapping is on.
+    /// </summary>
+    public double GridStep => NiceStep(PerPixel, 40);
+
+    /// <summary>A round step for lines about pixels apart: 1, 2 or 5 times a power of ten.</summary>
+    public static double NiceStep(double perPixel, double pixels)
+    {
+        var raw = perPixel * pixels;
+        var power = Math.Pow(10, Math.Floor(Math.Log10(raw)));
+        return raw / power < 2 ? 2 * power : raw / power < 5 ? 5 * power : 10 * power;
+    }
+
+    /// <summary>A value at the nearest multiple of a step.</summary>
+    public static double SnapTo(double value, double step) => step > 0 && double.IsFinite(step) ? Math.Round(value / step) * step : value;
+
     /// <summary>Moves the axis by dy pixels: a drag down shows higher values.</summary>
     public ValueAxis Pan(double dy) => this with { Top = Top + dy * PerPixel };
 
@@ -76,11 +93,20 @@ public sealed class CurveRow
 
     public double Max { get; init; }
 
-    /// <summary>The curve's value at a tick on the cutscene's time, clamped to its section, as the runtime samples it.</summary>
+    /// <summary>What the curve does before its first key, inside its section.</summary>
+    public CurveInfinity Pre { get; init; }
+
+    /// <summary>What the curve does after its last key, inside its section.</summary>
+    public CurveInfinity Post { get; init; }
+
+    /// <summary>
+    /// The curve's value at a tick on the cutscene's time, clamped to its section, as the runtime samples it, with its
+    /// infinity between the section's edges and its end keys.
+    /// </summary>
     public double ValueAt(int tick)
     {
         var local = Math.Clamp(tick, Start, End) - Start;
-        return Stepped ? CutsceneCurve.Step(Keys, local) : CutsceneCurve.Value(Keys, local);
+        return Stepped ? CutsceneCurve.Step(Keys, local, Pre, Post) : CutsceneCurve.Value(Keys, local, Pre, Post);
     }
 
     /// <summary>A value as it shows: itself, or normalized, from −1 at Min to 1 at Max, and 0 for a flat curve.</summary>
@@ -130,8 +156,14 @@ public sealed class CutsceneCurveLayout
     /// <summary>How near a curve a double-click adds a key to it, in pixels.</summary>
     public const double CurveGrab = 5;
 
-    /// <summary>A handle's length on screen, in pixels: it shows the slope's direction, not a weight.</summary>
+    /// <summary>
+    /// The length on screen, in pixels, of a handle of a key without weights: it shows the slope's direction, as the
+    /// key's reach is the evaluator's third of the segment. A weighted key's handle is its true control point.
+    /// </summary>
     public const double HandleLength = 40;
+
+    /// <summary>The shortest a weighted handle shows, in pixels, so that a small weight's handle does not sit on its key.</summary>
+    public const double MinHandleLength = 12;
 
     /// <summary>How many samples set a curve's span for the normalized view and framing.</summary>
     const int SpanSamples = 256;
@@ -188,7 +220,8 @@ public sealed class CutsceneCurveLayout
             var label = $"{track?.Name ?? "track"} · {name}" + (sections > 1 ? $" ({section.Id})" : "");
             List<CurveKey> curve = [.. keys.Select(k => k.Key)];
             var isStepped = stepped?.Invoke(channel) == true;
-            var (min, max) = SpanOf(curve, isStepped);
+            var (pre, post) = CutsceneCurveEdits.InfinityOf(channel);
+            var (min, max) = SpanOf(curve, isStepped, end - start, pre, post);
             rows.Add(new CurveRow
             {
                 Path = path,
@@ -202,13 +235,16 @@ public sealed class CutsceneCurveLayout
                 Locked = CutsceneEdits.IsLocked(channel, locked),
                 Min = min,
                 Max = max,
+                Pre = pre,
+                Post = post,
             });
         }
         return new CutsceneCurveLayout(rows);
     }
 
-    // A curve's least and most value from its first key to its last: at its keys, and at even ticks between them.
-    static (double Min, double Max) SpanOf(List<CurveKey> keys, bool stepped)
+    // A curve's least and most value in its section: at its keys, at even ticks between them, and at even ticks from the
+    // section's edges to the end keys on a side whose infinity is not constant.
+    static (double Min, double Max) SpanOf(List<CurveKey> keys, bool stepped, int duration, CurveInfinity pre, CurveInfinity post)
     {
         double min = double.MaxValue, max = double.MinValue;
         foreach (var key in keys)
@@ -219,8 +255,17 @@ public sealed class CutsceneCurveLayout
         var last = keys[^1].Time;
         for (var i = 0; i <= SpanSamples && last > first && !stepped; i++)
         {
-            double v = CutsceneCurve.Value(keys, first + (int)((long)(last - first) * i / SpanSamples));
+            double v = CutsceneCurve.Value(keys, first + (int)((long)(last - first) * i / SpanSamples), pre, post);
             (min, max) = (Math.Min(min, v), Math.Max(max, v));
+        }
+        foreach (var (from, to) in (ReadOnlySpan<(int, int)>)[(pre == CurveInfinity.Constant ? first : 0, first), (last, post == CurveInfinity.Constant ? last : duration)])
+        {
+            for (var i = 0; i <= SpanSamples && to > from; i++)
+            {
+                var t = from + (int)((long)(to - from) * i / SpanSamples);
+                double v = stepped ? CutsceneCurve.Step(keys, t, pre, post) : CutsceneCurve.Value(keys, t, pre, post);
+                (min, max) = (Math.Min(min, v), Math.Max(max, v));
+            }
         }
         return (min, max);
     }
@@ -230,19 +275,68 @@ public sealed class CutsceneCurveLayout
         (CutsceneTimelineLayout.Gutter + view.Time.X(row.TickOf(index)), view.Value.Y(row.Shown(row.Keys[index].Value, view.Normalized)));
 
     /// <summary>
-    /// The end of a key's handle on a side, in the control: <see cref="HandleLength"/> pixels from the key, along the
-    /// slope that the curve has there as it shows on screen.
+    /// The end of a key's handle on a side, in the control. A weighted key's is its control point, as
+    /// <c>curve_bezier</c> builds it: the weight's part of the segment's duration across, and the slope over that time up,
+    /// but at least <see cref="MinHandleLength"/> pixels from the key. Any other key's is <see cref="HandleLength"/>
+    /// pixels from the key, along the slope that the curve has there as it shows on screen.
     /// </summary>
     public static (double X, double Y) HandlePoint(CurveRow row, int index, TangentSide side, CurveView view)
     {
         var slope = side == TangentSide.In ? CutsceneCurve.InSlope(row.Keys, index) : CutsceneCurve.OutSlope(row.Keys, index);
+        if (Weight(row, index, side) is { } weight)
+        {
+            var (kx, ky) = KeyPoint(row, index, view);
+            var sign = side == TangentSide.In ? -1 : 1;
+            var reach = weight * SegmentTicks(row, index, side);
+            var px = sign * reach / view.Time.PerPixel;
+            var py = -sign * slope * (reach / CutsceneCurve.TicksPerSecond) / row.Scale(view.Normalized) / view.Value.PerPixel;
+            var length = Math.Sqrt(px * px + py * py);
+            if (length >= MinHandleLength && double.IsFinite(length))
+            {
+                return (kx + px, ky + py);
+            }
+        }
+        return Direction(row, index, side, view, slope, ShownLength(row, index, side));
+    }
+
+    // The length of a handle that shows only a direction: the fixed length, or a weighted handle's shortest.
+    static double ShownLength(CurveRow row, int index, TangentSide side) => Weight(row, index, side) != null ? MinHandleLength : HandleLength;
+
+    /// <summary>A weighted key's weight on a side, or null for a key without weights.</summary>
+    public static double? Weight(CurveRow row, int index, TangentSide side) => row.Keys[index] is { Interp: CurveInterp.Bezier, Weighted: true } key
+        ? side == TangentSide.In ? key.InWeight : key.OutWeight
+        : null;
+
+    // The ticks of the segment that a key's handle on a side reaches into.
+    static int SegmentTicks(CurveRow row, int index, TangentSide side) => side == TangentSide.In
+        ? row.Keys[index].Time - row.Keys[index - 1].Time
+        : row.Keys[index + 1].Time - row.Keys[index].Time;
+
+    // A point length pixels from a key along a slope as it shows on screen.
+    static (double X, double Y) Direction(CurveRow row, int index, TangentSide side, CurveView view, double slope, double handleLength)
+    {
         // A second across, and the slope's value over a second up, in pixels.
         var dx = CutsceneCurve.TicksPerSecond / view.Time.PerPixel;
         var dy = -slope / row.Scale(view.Normalized) / view.Value.PerPixel;
         var length = Math.Sqrt(dx * dx + dy * dy);
         var sign = side == TangentSide.In ? -1 : 1;
         var (x, y) = KeyPoint(row, index, view);
-        return length > 0 && double.IsFinite(length) ? (x + sign * dx / length * HandleLength, y + sign * dy / length * HandleLength) : (x + sign * HandleLength, y);
+        return length > 0 && double.IsFinite(length) ? (x + sign * dx / length * handleLength, y + sign * dy / length * handleLength) : (x + sign * handleLength, y);
+    }
+
+    /// <summary>
+    /// The weight of a weighted key's handle that a drag puts at a point: how far across the pointer is from the key, as a
+    /// part of the segment's duration, from 0 to 1. Null for a key without weights, whose handle sets only a slope.
+    /// </summary>
+    public static double? WeightAt(CurveRow row, int index, TangentSide side, CurveView view, double x)
+    {
+        if (Weight(row, index, side) == null)
+        {
+            return null;
+        }
+        var (kx, _) = KeyPoint(row, index, view);
+        var across = side == TangentSide.In ? kx - x : x - kx;
+        return Math.Clamp(across * view.Time.PerPixel / SegmentTicks(row, index, side), 0, 1);
     }
 
     /// <summary>
@@ -337,7 +431,8 @@ public sealed class CutsceneCurveLayout
 
     /// <summary>
     /// What F fits (see docs/editor/cutscene-editor.md#curves): the times and shown values of the selected keys, or with
-    /// none of them shown, of every curve over its keys. Null when there is no curve.
+    /// none of them shown, of every curve over its keys, and to its section's edge on a side whose infinity is not
+    /// constant. Null when there is no curve.
     /// </summary>
     public (int Start, int End, double Min, double Max)? FrameSpan(IReadOnlySet<string> selected, bool normalized)
     {
@@ -351,18 +446,20 @@ public sealed class CutsceneCurveLayout
         {
             return null;
         }
-        return (Rows.Min(r => r.TickOf(0)), Rows.Max(r => r.TickOf(r.Keys.Count - 1)),
+        return (Rows.Min(r => r.Pre == CurveInfinity.Constant ? r.TickOf(0) : r.Start),
+            Rows.Max(r => r.Post == CurveInfinity.Constant ? r.TickOf(r.Keys.Count - 1) : r.End),
             Rows.Min(r => r.Shown(r.Min, normalized)), Rows.Max(r => r.Shown(r.Max, normalized)));
     }
 
     /// <summary>
     /// A curve's points to draw across the time area's width: one sample at a whole tick for each pixel of its section
-    /// that is in view, and one at each end of what is in view, as the runtime would give them.
+    /// that is in view, and one at each end of what is in view, as the runtime would give them. A part, from and to on
+    /// the cutscene's time, limits them to it, as the curve editor draws the parts outside the keys apart.
     /// </summary>
-    public static IEnumerable<(double X, double Y)> Samples(CurveRow row, CurveView view, double width)
+    public static IEnumerable<(double X, double Y)> Samples(CurveRow row, CurveView view, double width, (int From, int To)? part = null)
     {
-        var from = Math.Max(row.Start, (int)Math.Floor(view.Time.At(0)));
-        var to = Math.Min(row.End, (int)Math.Ceiling(view.Time.At(width)));
+        var from = Math.Max(Math.Max(row.Start, part?.From ?? int.MinValue), (int)Math.Floor(view.Time.At(0)));
+        var to = Math.Min(Math.Min(row.End, part?.To ?? int.MaxValue), (int)Math.Ceiling(view.Time.At(width)));
         if (to < from)
         {
             yield break;

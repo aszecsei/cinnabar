@@ -154,7 +154,7 @@ public sealed class CutsceneCurveEditorTests : IDisposable
         var row = input.Layout.Rows[0];
         var value = row.ValueAt(300000);
         Assert.False(input.Press(X(300000), Y(value), MouseButton.Left, KeyModifiers.None, clicks: 2));
-        var line = $"\t\t\tkey 300000 {CutsceneKeying.Format(CutsceneCurve.Value(row.Keys, 300000))} auto\n";
+        var line = $"\t\t\tkey 300000 {CutsceneKeying.Format(CutsceneCurve.Value(row.Keys, 300000, CurveInfinity.Constant, CurveInfinity.Constant))} auto\n";
         Assert.Equal(text.Replace(Peak + "\n", Peak + "\n" + line), editor.Document.Text);
         Assert.Equal([$"{Gain}/key:2"], editor.SelectedPaths);
 
@@ -270,5 +270,161 @@ public sealed class CutsceneCurveEditorTests : IDisposable
         input.Press(X(300000), y, MouseButton.Left, KeyModifiers.None, clicks: 2);
         input.Release(X(300000), y, KeyModifiers.None);
         Assert.Equal(text, editor.Document.Text);
+    }
+
+    [Fact]
+    public void TheInfinityCommandsStepTheShownCurvesModesAsUndoEntries()
+    {
+        var (shell, editor, _, text) = Intro();
+        var post = shell.Commands.Get(EditorCommands.CutscenePostInfinity);
+        editor.SetKeyboardPane(CutscenePane.Timeline);
+        Assert.False(post.CanExecute);
+        editor.SetKeyboardPane(CutscenePane.Curves);
+        Assert.True(post.CanExecute);
+        Assert.Equal([Gain], editor.InfinityCurves);
+        Assert.Equal(CurveInfinity.Constant, editor.Infinity(InfinitySide.Post));
+        post.Execute();
+        var linear = text.Replace("\t\tchannel gain\n", "\t\tchannel gain\n\t\t\tpost_infinity = linear\n");
+        Assert.Equal(linear, editor.Document.Text);
+        post.Execute();
+        Assert.Equal(text.Replace("\t\tchannel gain\n", "\t\tchannel gain\n\t\t\tpost_infinity = cycle\n"), editor.Document.Text);
+        shell.Commands.Get(EditorCommands.CutscenePreInfinity).Execute();
+        Assert.Equal(CurveInfinity.Linear, editor.Infinity(InfinitySide.Pre));
+        Assert.Equal(CurveInfinity.Cycle, editor.Infinity(InfinitySide.Post));
+        Assert.Equal(["Post-Infinity", "Post-Infinity", "Pre-Infinity"], editor.Document.History.TakeLast(3));
+        shell.Commands.Get("edit.undo").Execute();
+        shell.Commands.Get("edit.undo").Execute();
+        Assert.Equal(linear, editor.Document.Text);
+        // Oscillate, and after it constant again, which writes nothing.
+        editor.SetInfinity(InfinitySide.Post, CurveInfinity.Oscillate);
+        post.Execute();
+        Assert.Equal(text, editor.Document.Text);
+    }
+
+    [Fact]
+    public void WeightedTangentsWeighTheSelectedKeyAndAHandleDragSetsItsWeight()
+    {
+        var (shell, editor, input, text) = Intro();
+        Click(input, X(200000), Y(1));
+        editor.SetKeyboardPane(CutscenePane.Curves);
+        var weighted = shell.Commands.Get(EditorCommands.CutsceneTangentWeighted);
+        weighted.Execute();
+        var third = text.Replace(Peak + "\n", "\t\t\tkey 200000 1 bezier 0 weights 0.33333334 0.33333334\n");
+        Assert.Equal(third, editor.Document.Text);
+        // The out handle reaches a third of the 200000-tick segment: 66.7 pixels right, flat. Dragged to 100 right and
+        // 50 up: a weight of a half, and 0.5 over 5/3 of a second, 0.3 a second, on both sides, as the key is unbroken.
+        Drag(input, X(200000) + 200.0 / 3, Y(1), X(200000) + 100, Y(1) - 50);
+        var dragged = text.Replace(Peak + "\n", "\t\t\tkey 200000 1 bezier 0.3 weights 0.33333334 0.5\n");
+        Assert.Equal(dragged, editor.Document.Text);
+        Assert.Equal(["Weighted Tangents", "Drag Tangent"], editor.Document.History.TakeLast(2));
+        // Again, with every selected key weighted, it takes the weights away.
+        weighted.Execute();
+        Assert.Equal(text.Replace(Peak + "\n", "\t\t\tkey 200000 1 bezier 0.3\n"), editor.Document.Text);
+        shell.Commands.Get("edit.undo").Execute();
+        shell.Commands.Get("edit.undo").Execute();
+        Assert.Equal(third, editor.Document.Text);
+    }
+
+    [Fact]
+    public void AnEntryReadsASetOrAnOffsetAndRefusesTheRest()
+    {
+        Assert.Equal(new CurveEntry(CurveEntryOp.Set, 1.5), CurveEntry.ParseValue("1.5"));
+        Assert.Equal(new CurveEntry(CurveEntryOp.Set, -2), CurveEntry.ParseValue(" = -2 "));
+        Assert.Equal(new CurveEntry(CurveEntryOp.Add, 0.5), CurveEntry.ParseValue("+=0.5"));
+        Assert.Equal(new CurveEntry(CurveEntryOp.Subtract, 3), CurveEntry.ParseValue("-= 3"));
+        Assert.Null(CurveEntry.ParseValue("abc"));
+        Assert.Null(CurveEntry.ParseValue("+="));
+        Assert.Null(CurveEntry.ParseValue("NaN"));
+        Assert.Null(CurveEntry.ParseValue("1e400"));
+        // Times are frames or timecode at the rate: 10 frames at 30 are 20000 ticks.
+        Assert.Equal(new CurveEntry(CurveEntryOp.Add, 20000), CurveEntry.ParseTime("+=10", 30));
+        Assert.Equal(new CurveEntry(CurveEntryOp.Set, 60000), CurveEntry.ParseTime("00:01:00", 30));
+        Assert.Null(CurveEntry.ParseTime("+=-10", 30));
+        Assert.Equal(4.5, new CurveEntry(CurveEntryOp.Subtract, 0.5).Apply(5));
+    }
+
+    [Fact]
+    public void AValueTypedForThreeSelectedKeysSetsThemAllAndAnOffsetMovesEach()
+    {
+        var (shell, editor, _, text) = Intro();
+        editor.Select([$"{Gain}/key:0", $"{Gain}/key:1", $"{Gain}/key:2"], SelectMode.Replace);
+        Assert.Null(editor.CurveKeyValue);
+        Assert.Null(editor.CurveKeyTime);
+        Assert.Null(editor.SetCurveKeyValue("0.5"));
+        var set = text.Replace("\t\t\tkey 0 0.6 auto\n\t\t\tkey 200000 1 auto\n\t\t\tkey 400000 0.8 auto\n",
+            "\t\t\tkey 0 0.5 auto\n\t\t\tkey 200000 0.5 auto\n\t\t\tkey 400000 0.5 auto\n");
+        Assert.Equal(set, editor.Document.Text);
+        Assert.Equal(0.5f, editor.CurveKeyValue);
+        Assert.Null(editor.SetCurveKeyValue("+=1"));
+        Assert.Equal(text.Replace("\t\t\tkey 0 0.6 auto\n\t\t\tkey 200000 1 auto\n\t\t\tkey 400000 0.8 auto\n",
+            "\t\t\tkey 0 1.5 auto\n\t\t\tkey 200000 1.5 auto\n\t\t\tkey 400000 1.5 auto\n"), editor.Document.Text);
+        Assert.Equal(["Set Key Value", "Set Key Value"], editor.Document.History.TakeLast(2));
+        // An entry that does not read changes nothing and leaves no entry.
+        var entries = editor.Document.History.Count();
+        Assert.NotNull(editor.SetCurveKeyValue("louder"));
+        Assert.Equal(entries, editor.Document.History.Count());
+        shell.Commands.Get("edit.undo").Execute();
+        Assert.Equal(set, editor.Document.Text);
+        shell.Commands.Get("edit.undo").Execute();
+        Assert.Equal(text, editor.Document.Text);
+    }
+
+    [Fact]
+    public void ATypedTimeMovesTheSelectedKeysAndRefusesTwoOfACurveAtOneTime()
+    {
+        var (_, editor, _, text) = Intro();
+        editor.Select([$"{Gain}/key:1"], SelectMode.Replace);
+        Assert.Equal(200000, editor.CurveKeyTime);
+        // 30 frames later at 30 a second: 260000.
+        Assert.Null(editor.SetCurveKeyTime("+=30"));
+        Assert.Equal(text.Replace(Peak + "\n", "\t\t\tkey 260000 1 auto\n"), editor.Document.Text);
+        Assert.Equal([$"{Gain}/key:1"], editor.SelectedPaths);
+        // Past the key after it, it sorts, and the selection follows it.
+        Assert.Null(editor.SetCurveKeyTime("00:08:00"));
+        Assert.Equal(text.Replace(Peak + "\n", "").Replace("\t\t\tkey 400000 0.8 auto\n", "\t\t\tkey 400000 0.8 auto\n\t\t\tkey 480000 1 auto\n"), editor.Document.Text);
+        Assert.Equal([$"{Gain}/key:2"], editor.SelectedPaths);
+        Assert.Equal(480000, editor.CurveKeyTime);
+        // Two keys of the gain at one time: nothing changes, and there is no entry.
+        editor.Select([$"{Gain}/key:0", $"{Gain}/key:1"], SelectMode.Replace);
+        var before = editor.Document.Text;
+        var entries = editor.Document.History.Count();
+        Assert.NotNull(editor.SetCurveKeyTime("00:05:00"));
+        Assert.Equal(before, editor.Document.Text);
+        Assert.Equal(entries, editor.Document.History.Count());
+        Assert.NotNull(editor.SetCurveKeyTime("soon"));
+        Assert.Equal(entries, editor.Document.History.Count());
+        // An offset moves each by the same time.
+        Assert.Null(editor.SetCurveKeyTime("+=1"));
+        Assert.Equal([2000, 402000], editor.CurveKeys.Select(p => editor.File.Find(p)!.Start!.Value).Order());
+        // Together, as a drag: 2 frames earlier stops both at the section's start, 1 frame on, and keeps their spacing.
+        Assert.Null(editor.SetCurveKeyTime("-=2"));
+        Assert.Equal([0, 400000], editor.CurveKeys.Select(p => editor.File.Find(p)!.Start!.Value).Order());
+    }
+
+    [Fact]
+    public void ValueSnapPutsADraggedKeyOnTheGridAndCtrlDoesNotSnap()
+    {
+        var (shell, editor, input, text) = Intro();
+        // A hundredth of a value a pixel: grid lines every 0.5.
+        Assert.Equal(0.5, input.View.Value.GridStep, 9);
+        Assert.False(editor.ValueSnap);
+        Click(input, X(200000), Y(1));
+        // Off, a drag 30 pixels up moves the key 0.3.
+        Drag(input, X(200000), Y(1), X(200000), Y(1.3));
+        Assert.Equal(text.Replace(Peak + "\n", "\t\t\tkey 200000 1.3 auto\n"), editor.Document.Text);
+        shell.Commands.Get("edit.undo").Execute();
+        editor.SetKeyboardPane(CutscenePane.Curves);
+        shell.Commands.Get(EditorCommands.CutsceneCurveValueSnap).Execute();
+        Assert.True(editor.ValueSnap);
+        // On, it goes to the nearest line, 1.5.
+        Drag(input, X(200000), Y(1), X(200000), Y(1.3));
+        Assert.Equal(text.Replace(Peak + "\n", "\t\t\tkey 200000 1.5 auto\n"), editor.Document.Text);
+        shell.Commands.Get("edit.undo").Execute();
+        // Ctrl during the drag does not snap.
+        Assert.True(input.Press(X(200000), Y(1), MouseButton.Left, KeyModifiers.None));
+        input.Move(X(200000), Y(1.2), KeyModifiers.Control);
+        input.Move(X(200000), Y(1.3), KeyModifiers.Control);
+        input.Release(X(200000), Y(1.3), KeyModifiers.Control);
+        Assert.Equal(text.Replace(Peak + "\n", "\t\t\tkey 200000 1.3 auto\n"), editor.Document.Text);
     }
 }

@@ -58,6 +58,10 @@ static partial class EditorCommands
     public const string CutsceneTangentLinear = "cutscene.tangentLinear";
     public const string CutsceneTangentConstant = "cutscene.tangentConstant";
     public const string CutsceneTangentFlatten = "cutscene.tangentFlatten";
+    public const string CutsceneTangentWeighted = "cutscene.tangentWeighted";
+    public const string CutsceneCurveValueSnap = "cutscene.curveValueSnap";
+    public const string CutscenePreInfinity = "cutscene.preInfinity";
+    public const string CutscenePostInfinity = "cutscene.postInfinity";
 
     /// <summary>The timeline's commands, which act on the active cutscene while its timeline has the keyboard.</summary>
     public static readonly string[] CutsceneTimelineCommands =
@@ -69,7 +73,8 @@ static partial class EditorCommands
         CutsceneShuttleBack, CutsceneShuttlePause, CutsceneShuttleForward, CutsceneSetIn, CutsceneSetOut, CutsceneClearInOut, CutsceneLoop,
         CutscenePreviousKey, CutsceneNextKey, CutsceneGoToTime, CutsceneScrubSound, CutscenePreviewEvents,
         CutsceneCurves, CutsceneCurvesNormalized, CutsceneTangentAuto, CutsceneTangentUnify, CutsceneTangentBreak, CutsceneTangentLinear,
-        CutsceneTangentConstant, CutsceneTangentFlatten,
+        CutsceneTangentConstant, CutsceneTangentFlatten, CutsceneTangentWeighted, CutscenePreInfinity, CutscenePostInfinity,
+        CutsceneCurveValueSnap,
     ];
 
     /// <summary>
@@ -185,6 +190,8 @@ static partial class EditorCommands
             e => e.CurvesOpen, (e, on) => e.CurvesOpen = on);
         Toggle(CutsceneCurvesNormalized, "Normalized Curves", "Scale each curve to -1 to 1 in the curve editor, to compare curves of different sizes. The keys keep their values.", "Alt+N",
             e => e.CurvesNormalized, (e, on) => e.CurvesNormalized = on);
+        Toggle(CutsceneCurveValueSnap, "Value Snap", "Snap a key that a drag in the curve editor moves to the value grid's lines. Ctrl during the drag does not snap.", "Alt+V",
+            e => e.ValueSnap, (e, on) => e.ValueSnap = on);
         void Tangent(string id, string label, string description, string shortcut, TangentMode mode) =>
             Register(id, label, "cutscene", description, shortcut, e => e.SetTangents(mode),
                 e => e.KeyboardPane == CutscenePane.Curves && !e.Document.InTransaction && e.TangentKeys.Count > 0);
@@ -194,6 +201,13 @@ static partial class EditorCommands
         Tangent(CutsceneTangentLinear, "Linear", "Join the selected keys to the next keys with straight lines.", "D4", TangentMode.Linear);
         Tangent(CutsceneTangentConstant, "Constant", "Hold the selected keys' values until the next keys: a step.", "D5", TangentMode.Constant);
         Tangent(CutsceneTangentFlatten, "Flatten Tangents", "Make the selected keys' slopes flat.", "D6", TangentMode.Flatten);
+        Register(CutsceneTangentWeighted, "Weighted Tangents", "cutscene", "Weight the selected keys' tangents, so that a drag of a handle sets how far it reaches as well as its slope, or when all are weighted, take their weights away.", "D7",
+            e => e.ToggleWeighted(), e => e.KeyboardPane == CutscenePane.Curves && !e.Document.InTransaction && e.WeighableKeys.Count > 0);
+        void Infinity(string id, string label, string description, string shortcut, InfinitySide side) =>
+            Register(id, label, "cutscene", description, shortcut, e => e.NextInfinity(side),
+                e => e.KeyboardPane == CutscenePane.Curves && !e.Document.InTransaction && e.InfinityCurves.Count > 0);
+        Infinity(CutscenePreInfinity, "Next Pre-Infinity", "Step what the curves of the selected keys, or the shown curves, do before their first key: constant, linear, cycle, cycle with offset, oscillate.", "D8", InfinitySide.Pre);
+        Infinity(CutscenePostInfinity, "Next Post-Infinity", "Step what the curves of the selected keys, or the shown curves, do after their last key: constant, linear, cycle, cycle with offset, oscillate.", "D9", InfinitySide.Post);
         Register(CutsceneGoToStart, "Go to Start", "cutscene", "Move the playhead to the cutscene's start.", "Home", e => e.SetPlayhead(0));
         Register(CutsceneGoToEnd, "Go to End", "cutscene", "Move the playhead to the cutscene's end.", "End", e => e.SetPlayhead(e.File.Length ?? 0));
         Register(CutscenePreviousEdge, "Previous Edge", "cutscene", "Move the playhead back to the marker or the edge of a section, a range or a trigger before it.", "Ctrl+Left",

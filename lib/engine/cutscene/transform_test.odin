@@ -332,8 +332,12 @@ a_track_far_from_the_origin_loses_no_precision_beyond_its_offsets :: proc(t: ^te
 	for moment in ([]i32{0, 1, 7777, SECOND / 2, 41234, SECOND - 1, SECOND, 0}) {
 		scrub_to(f, scrub, moment)
 		raw := pose_of(f, e).position.raw
-		want_x := origin.raw.x + i64(math.round(curve_value(xs, moment) * f32(1 << 24)))
-		want_y := origin.raw.y + i64(math.round(curve_value(ys, moment) * f32(1 << 24)))
+		want_x :=
+			origin.raw.x +
+			i64(math.round(curve_value(xs, moment, .Constant, .Constant) * f32(1 << 24)))
+		want_y :=
+			origin.raw.y +
+			i64(math.round(curve_value(ys, moment, .Constant, .Constant) * f32(1 << 24)))
 		testing.expectf(t, raw.x == want_x, "x at %d: %d, not %d", moment, raw.x, want_x)
 		testing.expectf(t, raw.y == want_y, "y at %d: %d, not %d", moment, raw.y, want_y)
 		testing.expectf(t, raw.z == own_z, "z, which no channel keys, at %d: %d", moment, raw.z)

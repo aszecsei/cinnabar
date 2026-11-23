@@ -37,10 +37,11 @@ public sealed class CutsceneEditorView : DockPanel
     readonly TextBlock _status = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
     readonly TextBox _search = new() { PlaceholderText = "Filter tracks (Ctrl+F)", Classes = { "value-edit" }, MinWidth = 200, FontSize = 12 };
     readonly ToggleButton _curves = new() { Content = "Curves", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(8, 0, 0, 0) };
-    readonly ToggleButton _normalized = new() { Content = "Normalized", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(4, 0, 0, 0) };
     readonly RowDefinition _curveRow = new(0, GridUnitType.Pixel);
     readonly RowDefinition _curveSplitRow = new(0, GridUnitType.Pixel);
     readonly CutsceneCurveEditor _curveEditor;
+    // The curve editor under its own toolbar, which show and hide together.
+    readonly DockPanel _curvePane = new() { IsVisible = false };
     readonly CutsceneTimeline _timeline;
     readonly GridSplitter _curveSplit = new() { ResizeDirection = GridResizeDirection.Rows, IsVisible = false };
     readonly ToggleButton _keysUnder = new() { Content = "Keys under selection", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(8, 0, 0, 0) };
@@ -84,10 +85,6 @@ public sealed class CutsceneEditorView : DockPanel
         _curves.IsCheckedChanged += (_, _) => editor.CurvesOpen = _curves.IsChecked == true;
         DockPanel.SetDock(_curves, DockSide.Left);
         toolbar.Children.Add(_curves);
-        ToolTip.SetTip(_normalized, "Scale each curve to -1 to 1, to compare curves of different sizes. The keys keep their values (Alt+N).");
-        _normalized.IsCheckedChanged += (_, _) => editor.CurvesNormalized = _normalized.IsChecked == true;
-        DockPanel.SetDock(_normalized, DockSide.Left);
-        toolbar.Children.Add(_normalized);
         // The playhead's time: a click, or Go to Time, swaps in a box to type a time. Enter jumps there, and Enter or
         // Esc gives the keyboard back to the timeline.
         _playheadButton.Content = _playhead;
@@ -165,9 +162,13 @@ public sealed class CutsceneEditorView : DockPanel
         panes.Children.Add(timeline);
         Grid.SetRow(_curveSplit, 1);
         panes.Children.Add(_curveSplit);
-        _curveEditor = new CutsceneCurveEditor(editor) { IsVisible = false };
-        Grid.SetRow(_curveEditor, 2);
-        panes.Children.Add(_curveEditor);
+        _curveEditor = new CutsceneCurveEditor(editor);
+        var curveBar = new CutsceneCurveBar(editor, () => _curveEditor.Focus());
+        DockPanel.SetDock(curveBar, DockSide.Top);
+        _curvePane.Children.Add(curveBar);
+        _curvePane.Children.Add(_curveEditor);
+        Grid.SetRow(_curvePane, 2);
+        panes.Children.Add(_curvePane);
         timelinePane.Children.Add(panes);
         // Red around the timeline while auto-key keys this cutscene's bound entities' edits.
         _autoKeyFrame = new Border { Child = timelinePane, Classes = { "auto-key-frame" }, BorderThickness = new Thickness(2) };
@@ -291,16 +292,11 @@ public sealed class CutsceneEditorView : DockPanel
         {
             _curves.IsChecked = open;
         }
-        if (_normalized.IsChecked != _editor.CurvesNormalized)
-        {
-            _normalized.IsChecked = _editor.CurvesNormalized;
-        }
-        _normalized.IsVisible = open;
-        if (_curveEditor.IsVisible == open)
+        if (_curvePane.IsVisible == open)
         {
             return;
         }
-        _curveEditor.IsVisible = open;
+        _curvePane.IsVisible = open;
         _curveSplit.IsVisible = open;
         _curveSplitRow.Height = new GridLength(open ? 4 : 0, GridUnitType.Pixel);
         _curveRow.Height = open ? new GridLength(1, GridUnitType.Star) : new GridLength(0, GridUnitType.Pixel);

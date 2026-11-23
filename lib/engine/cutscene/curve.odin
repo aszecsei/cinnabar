@@ -7,17 +7,137 @@ import format "cinnabar:engine/asset/format"
 CURVE_SOLVE_STEPS :: 48
 
 // curve_value is a curve's value at a time, in ticks on the curve's own time (see docs/cinematics/tracks.md#curves).
-// The keys are in rising time, as cutscene_view checks. Before the first key and after the last, the curve holds. At a
-// key's time, the value is the key's value, exactly. Between keys, the first key's interpolation decides. hint, when
-// given, is where the last call found the time, and makes playback that moves forward a little each call find the
-// segment at once; it never changes the value. An empty curve is 0.
+// The keys are in rising time, as cutscene_view checks. Before the first key, pre decides, and after the last, post does:
+// the curve holds, goes on along its end's slope, repeats, repeats offset by the change over its keys, or repeats back
+// and forth (see curve_wrap). At a key's time, the value is the key's value, exactly. Between keys, the first key's
+// interpolation decides. hint, when given, is where the last call found the time, and makes playback that moves forward
+// a little each call find the segment at once; it never changes the value. An empty curve is 0.
 //
 // The arithmetic is f64, + - * / only, in a fixed order, so the editor's evaluator gives the same values.
-curve_value :: proc "contextless" (keys: []format.Cutscene_Key, t: i32, hint: ^int = nil) -> f32 {
+curve_value :: proc "contextless" (
+	keys: []format.Cutscene_Key,
+	t: i32,
+	pre, post: format.Cutscene_Infinity,
+	hint: ^int = nil,
+) -> f32 {
 	n := len(keys)
 	if n == 0 {
 		return 0
 	}
+	if t >= keys[0].time && t <= keys[n - 1].time {
+		return curve_inside(keys, t, hint)
+	}
+	before := t < keys[0].time
+	if (pre if before else post) == .Linear && n > 1 {
+		return f32(curve_extend(keys, t, before))
+	}
+	local, cycles := curve_wrap(keys, t, pre, post)
+	return curve_offset(keys, curve_inside(keys, local, hint), cycles)
+}
+
+// curve_step is a curve's value at a time as if every key were constant: the value of the last key at or before the
+// time, or of the first key before it. Fields that cannot take a value between two keys, such as integers, bools, enums
+// and assets, step. pre and post are as for curve_value, except that linear holds, since a step has no slope.
+curve_step :: proc "contextless" (
+	keys: []format.Cutscene_Key,
+	t: i32,
+	pre, post: format.Cutscene_Infinity,
+	hint: ^int = nil,
+) -> f32 {
+	n := len(keys)
+	if n == 0 {
+		return 0
+	}
+	if t >= keys[0].time && t <= keys[n - 1].time {
+		return curve_step_inside(keys, t, hint)
+	}
+	local, cycles := curve_wrap(keys, t, pre, post)
+	return curve_offset(keys, curve_step_inside(keys, local, hint), cycles)
+}
+
+// curve_wrap maps a time outside a curve's keys to the time inside them that gives its value, by the mode of its side:
+// pre before the first key, post after the last. Constant and linear hold the end key's time; curve_value extends a
+// linear side itself. Cycle repeats the keys' span, first key to last, and oscillate repeats it forward and then
+// backward in turn. cycles is how many spans a cycle-with-offset side moves the value by, negative before the first key,
+// and 0 for every other mode. A curve whose keys span no time holds. The arithmetic is on whole ticks, so the time
+// inside is exact. The time is a floored division by the span, written out, since % truncates toward 0.
+@(private)
+curve_wrap :: proc "contextless" (
+	keys: []format.Cutscene_Key,
+	t: i32,
+	pre, post: format.Cutscene_Infinity,
+) -> (
+	local: i32,
+	cycles: i64,
+) {
+	first, last := keys[0].time, keys[len(keys) - 1].time
+	if t >= first && t <= last {
+		return t, 0
+	}
+	mode := pre if t < first else post
+	span := i64(last) - i64(first)
+	if span == 0 || mode == .Constant || mode == .Linear {
+		return clamp(t, first, last), 0
+	}
+	d := i64(t) - i64(first)
+	whole := d / span
+	r := d - whole * span
+	if r < 0 {
+		r += span
+		whole -= 1
+	}
+	switch mode {
+	case .Constant, .Linear:
+	case .Cycle:
+		return first + i32(r), 0
+	case .Cycle_Offset:
+		return first + i32(r), whole
+	case .Oscillate:
+		if whole % 2 != 0 {
+			return first + i32(span - r), 0
+		}
+		return first + i32(r), 0
+	}
+	return clamp(t, first, last), 0
+}
+
+// curve_offset is a value inside a curve moved by cycles times the change from its first key's value to its last's.
+@(private)
+curve_offset :: proc "contextless" (keys: []format.Cutscene_Key, v: f32, cycles: i64) -> f32 {
+	if cycles == 0 {
+		return v
+	}
+	return f32(f64(v) + f64(cycles) * (f64(keys[len(keys) - 1].value) - f64(keys[0].value)))
+}
+
+// curve_extend is a linear side's value: the end key's value, then on along the slope that the curve has at that key,
+// from its end segment. A constant segment's slope is 0, a linear one's is its own, and a Bezier or automatic one's is
+// its tangent's. The curve has at least two keys.
+@(private)
+curve_extend :: proc "contextless" (keys: []format.Cutscene_Key, t: i32, before: bool) -> f64 {
+	TICKS :: f64(format.CUTSCENE_TICKS_PER_SECOND)
+	n := len(keys)
+	// The end key, and the segment from a to b that touches it.
+	end, a, b := n - 1, n - 2, n - 1
+	if before {
+		end, a, b = 0, 0, 1
+	}
+	slope := 0.0
+	switch keys[a].interp {
+	case .Constant:
+	case .Linear:
+		slope =
+			(f64(keys[b].value) - f64(keys[a].value)) / (f64(keys[b].time - keys[a].time) / TICKS)
+	case .Bezier, .Auto:
+		slope = curve_out_slope(keys, 0) if before else curve_in_slope(keys, n - 1)
+	}
+	return f64(keys[end].value) + slope * (f64(i64(t) - i64(keys[end].time)) / TICKS)
+}
+
+// curve_inside is curve_value at a time from the first key's to the last's.
+@(private)
+curve_inside :: proc "contextless" (keys: []format.Cutscene_Key, t: i32, hint: ^int) -> f32 {
+	n := len(keys)
 	if t <= keys[0].time {
 		return keys[0].value
 	}
@@ -41,14 +161,10 @@ curve_value :: proc "contextless" (keys: []format.Cutscene_Key, t: i32, hint: ^i
 	return k0.value
 }
 
-// curve_step is a curve's value at a time as if every key were constant: the value of the last key at or before the
-// time, or of the first key before it. Fields that cannot take a value between two keys, such as integers, bools, enums
-// and assets, step.
-curve_step :: proc "contextless" (keys: []format.Cutscene_Key, t: i32, hint: ^int = nil) -> f32 {
+// curve_step_inside is curve_step at a time from the first key's to the last's.
+@(private)
+curve_step_inside :: proc "contextless" (keys: []format.Cutscene_Key, t: i32, hint: ^int) -> f32 {
 	n := len(keys)
-	if n == 0 {
-		return 0
-	}
 	if t <= keys[0].time {
 		return keys[0].value
 	}
@@ -185,7 +301,7 @@ curve_auto_slope :: proc "contextless" (keys: []format.Cutscene_Key, i: int) -> 
 
 // curve_integral is the integral of a curve from 0 to a time in ticks, which can fall between two, in value × seconds:
 // an audio section's place in its sound from its pitch (see docs/cinematics/tracks.md#audio-tracks). Before the first
-// key and after the last, the curve holds. A segment integrates by three-point Gauss-Legendre over its parameter, which
+// key and after the last, the curve holds, as a pitch curve's infinity is constant (cutscene_view checks it). A segment integrates by three-point Gauss-Legendre over its parameter, which
 // is exact for its polynomial: of degree 3 without weights, and of degree 5, y(u) × x'(u), with them. A pitch is what a
 // voice plays, CUTSCENE_MIN_PITCH to CUTSCENE_MAX_PITCH, so a Bezier segment whose handles leave that range integrates
 // the clamped curve in CURVE_CLAMPED_PIECES pieces instead, which is close but not exact. An empty curve is 0.

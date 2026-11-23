@@ -17,6 +17,9 @@ public enum TangentMode
     Flatten,
 }
 
+/// <summary>The side of a curve that an infinity mode is for: before its first key, or after its last.</summary>
+public enum InfinitySide { Pre, Post }
+
 /// <summary>A side of a key: its in tangent, from the key before, or its out tangent, to the key after.</summary>
 public enum TangentSide
 {
@@ -46,6 +49,68 @@ public static class CutsceneCurveEdits
             keys.Add((block, key));
         }
         return keys;
+    }
+
+    /// <summary>The settings that hold a channel's infinity modes, before its first key and after its last.</summary>
+    public static readonly string[] InfinitySettings = ["pre_infinity", "post_infinity"];
+
+    /// <summary>The infinity modes' names, as the settings write them, in <see cref="CurveInfinity"/>'s order.</summary>
+    public static readonly string[] InfinityNames = ["constant", "linear", "cycle", "cycle_offset", "oscillate"];
+
+    /// <summary>
+    /// A channel's pre and post infinity, as the cooker reads them: constant without the setting, and constant for a
+    /// mode that it does not know, which the cooker reports.
+    /// </summary>
+    public static (CurveInfinity Pre, CurveInfinity Post) InfinityOf(CutsceneBlock channel)
+    {
+        CurveInfinity Read(string setting) =>
+            Array.IndexOf(InfinityNames, channel.Get(setting)) is var i and >= 0 ? (CurveInfinity)i : CurveInfinity.Constant;
+        return (Read(InfinitySettings[0]), Read(InfinitySettings[1]));
+    }
+
+    /// <summary>
+    /// Whether a channel can take an infinity mode, as the cooker checks: a channel of assets has no slope or change of
+    /// value, so no linear or offset mode, and an audio track's pitch is constant, since the sound's place is its
+    /// integral.
+    /// </summary>
+    public static bool TakesInfinity(CutsceneBlock channel, CurveInfinity mode)
+    {
+        if (mode == CurveInfinity.Constant)
+        {
+            return true;
+        }
+        if (channel.Name == "pitch" && CutsceneEdits.SectionOf(channel)?.Parent?.TrackKind == "audio")
+        {
+            return false;
+        }
+        var assets = channel.Children.Any(c => c.KeyValue?.StartsWith('$') == true);
+        return !(assets && mode is CurveInfinity.Linear or CurveInfinity.CycleOffset);
+    }
+
+    /// <summary>
+    /// Sets one side's infinity on channels: the setting, or none for constant, the default. It skips a channel on a
+    /// locked track, and one that does not take the mode (<see cref="TakesInfinity"/>). Whether the text changed.
+    /// </summary>
+    public static bool SetInfinity(CutsceneFile file, IEnumerable<string> channelPaths, InfinitySide side, CurveInfinity mode, IReadOnlySet<int>? locked = null)
+    {
+        var changed = false;
+        var setting = InfinitySettings[(int)side];
+        foreach (var path in channelPaths.Distinct())
+        {
+            if (file.Find(path) is not { Kind: CutsceneBlockKind.Channel } channel || CutsceneEdits.IsLocked(channel, locked)
+                || !TakesInfinity(channel, mode))
+            {
+                continue;
+            }
+            var text = mode == CurveInfinity.Constant ? null : InfinityNames[(int)mode];
+            if (channel.Get(setting) == text)
+            {
+                continue;
+            }
+            channel.Set(setting, text);
+            changed = true;
+        }
+        return changed;
     }
 
     /// <summary>A channel's keys as the runtime reads them, or null when one does not read.</summary>
@@ -109,12 +174,64 @@ public static class CutsceneCurveEdits
     }
 
     /// <summary>
-    /// Sets a key's slope on one side, in value per second, as a drag of its handle does. The key becomes a Bezier key. One
-    /// that is not broken takes the slope on both sides; a broken one on that side only.
+    /// Whether a key can be weighted: a Bezier or an automatic key, whose handles a weight sets the reach of. Linear and
+    /// constant keys have no handles.
     /// </summary>
-    public static void SetSlope(CutsceneFile file, string path, TangentSide side, double slope, IReadOnlySet<int>? locked = null)
+    public static bool Weighable(CurveKey key) => key.Interp is CurveInterp.Bezier or CurveInterp.Auto;
+
+    /// <summary>
+    /// A key weighted or not (see docs/editor/cutscene-editor.md#weights). Weighted, it becomes a Bezier key with the
+    /// slopes it had, an automatic key's computed ones included, and weights of a third on both sides where it had none,
+    /// which is the reach that a key without weights has, so the curve keeps its shape. Not weighted, it keeps its slopes
+    /// and loses its weights. A key that cannot be weighted stays as it is.
+    /// </summary>
+    public static CurveKey WithWeights(IReadOnlyList<CurveKey> curve, int index, bool weighted)
     {
-        if (!double.IsFinite(slope))
+        var key = curve[index];
+        if (!Weighable(key) || key.Weighted == weighted)
+        {
+            return key;
+        }
+        if (!weighted)
+        {
+            return key with { Weighted = false, InWeight = 0, OutWeight = 0 };
+        }
+        var third = (float)CutsceneCurve.TangentWeight;
+        var bezier = key.Interp == CurveInterp.Bezier
+            ? key
+            : new CurveKey(key.Time, key.Value, CurveInterp.Bezier, Teleport: key.Teleport,
+                InSlope: (float)CutsceneCurve.InSlope(curve, index), OutSlope: (float)CutsceneCurve.OutSlope(curve, index));
+        return bezier with { Weighted = true, InWeight = third, OutWeight = third };
+    }
+
+    /// <summary>Weights keys, or takes their weights away, as the Weighted Tangents command does. Returns whether a key changed.</summary>
+    public static bool SetWeighted(CutsceneFile file, IEnumerable<string> paths, bool weighted, IReadOnlySet<int>? locked = null)
+    {
+        var changed = false;
+        foreach (var path in paths.Distinct().ToList())
+        {
+            foreach (var (block, curve, index) in Resolve(file, [path], locked))
+            {
+                var next = WithWeights(curve, index, weighted).Interpolation();
+                if (next != block.KeyInterpolation)
+                {
+                    block.SetKeyInterpolation(next);
+                    changed = true;
+                }
+            }
+        }
+        return changed;
+    }
+
+    /// <summary>
+    /// Sets a key's slope on one side, in value per second, as a drag of its handle does. The key becomes a Bezier key. One
+    /// that is not broken takes the slope on both sides; a broken one on that side only. A weight, from 0 to 1, sets a
+    /// weighted key's weight on that side only, since each side reaches into its own segment; a key without weights
+    /// ignores it.
+    /// </summary>
+    public static void SetSlope(CutsceneFile file, string path, TangentSide side, double slope, IReadOnlySet<int>? locked = null, double? weight = null)
+    {
+        if (!double.IsFinite(slope) || weight is { } w && !double.IsFinite(w))
         {
             return;
         }
@@ -128,8 +245,77 @@ public static class CutsceneCurveEdits
             next = !next.Broken ? next with { InSlope = s, OutSlope = s }
                 : side == TangentSide.In ? next with { InSlope = s }
                 : next with { OutSlope = s };
+            if (weight is { } reach && next.Weighted)
+            {
+                var clamped = (float)Math.Clamp(reach, 0, 1);
+                next = side == TangentSide.In ? next with { InWeight = clamped } : next with { OutWeight = clamped };
+            }
             block.SetKeyInterpolation(next.Interpolation());
         }
+    }
+
+    /// <summary>
+    /// Sets keys' values, each to what <paramref name="value"/> makes of its own, as the curve editor's value box does. A
+    /// key of a channel that <paramref name="stepped"/> says steps takes a whole number. A value that is not finite, or
+    /// that an f32 does not hold, leaves its key. Returns whether a key changed.
+    /// </summary>
+    public static bool SetValues(CutsceneFile file, IEnumerable<string> paths, Func<double, double> value, Func<CutsceneBlock, bool>? stepped = null, IReadOnlySet<int>? locked = null)
+    {
+        var changed = false;
+        foreach (var (block, curve, index) in Resolve(file, paths, locked).ToList())
+        {
+            var v = value(curve[index].Value);
+            if (stepped?.Invoke(block.Parent!) == true)
+            {
+                v = Math.Round(v);
+            }
+            if (!double.IsFinite(v) || Math.Abs(v) > float.MaxValue)
+            {
+                continue;
+            }
+            var text = CutsceneKeying.Format((float)v);
+            if (text != block.KeyValue)
+            {
+                block.SetKeyValue(text);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    /// <summary>
+    /// Moves keys, each to the time that <paramref name="time"/> makes of its own on the cutscene's time, as the curve
+    /// editor's time box does, kept inside its section. Returns the keys' paths after the moves, or null with a problem
+    /// when two of the keys of one channel would land on one tick, which changes nothing. A key may land on a key that
+    /// does not move, as a drag's may, and the cooker reports it.
+    /// </summary>
+    public static IReadOnlyList<string>? SetTimes(CutsceneFile file, IEnumerable<string> paths, Func<int, double> time, out string? problem, IReadOnlySet<int>? locked = null)
+    {
+        problem = null;
+        var targets = new List<(CutsceneBlock Block, int Local)>();
+        foreach (var (block, _, _) in Resolve(file, paths, locked).ToList())
+        {
+            if (CutsceneEdits.SectionOf(block) is not { Start: { } start, End: { } end } || block.Start is not { } local)
+            {
+                continue;
+            }
+            var to = time(start + local) - start;
+            if (!double.IsFinite(to))
+            {
+                continue;
+            }
+            targets.Add((block, (int)Math.Clamp(Math.Round(to), 0, end - start)));
+        }
+        if (targets.GroupBy(t => (t.Block.Parent, t.Local)).Any(g => g.Count() > 1))
+        {
+            problem = "two of the keys of one curve would be at one time";
+            return null;
+        }
+        foreach (var (block, local) in targets)
+        {
+            CutsceneEdits.Move(file, [CutsceneFile.PathOf(block)], local - block.Start!.Value, locked);
+        }
+        return [.. targets.Select(t => CutsceneFile.PathOf(t.Block))];
     }
 
     /// <summary>
@@ -171,7 +357,8 @@ public static class CutsceneCurveEdits
             return CutsceneFile.PathOf(there);
         }
         var curve = keys.Select(k => k.Key).ToList();
-        var value = stepped ? CutsceneCurve.Step(curve, tick) : CutsceneCurve.Value(curve, tick);
+        var (pre, post) = InfinityOf(channel);
+        var value = stepped ? CutsceneCurve.Step(curve, tick, pre, post) : CutsceneCurve.Value(curve, tick, pre, post);
         var text = stepped ? Math.Round(value).ToString(System.Globalization.CultureInfo.InvariantCulture) : CutsceneKeying.Format(value);
         var before = curve.LastOrDefault(k => k.Time < tick);
         var interpolation = stepped ? "constant" : curve.Any(k => k.Time < tick) && before.Interp is CurveInterp.Linear or CurveInterp.Constant

@@ -1,3 +1,4 @@
+using Cinnabar.Editor.Cutscenes;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Tools;
@@ -39,6 +40,7 @@ public sealed class CutsceneEditor : IGraphEditor
     bool _follow = true;
     bool _curvesOpen;
     bool _curvesNormalized;
+    bool _valueSnap;
     readonly HashSet<string> _hiddenCurves = [];
     IReadOnlyList<string> _shownCurves = [];
     float _playRate = 1;
@@ -714,6 +716,24 @@ public sealed class CutsceneEditor : IGraphEditor
         }
     }
 
+    /// <summary>
+    /// Whether a value drag in the curve editor puts the grabbed key's value on a grid line: Value Snap, off at first. The
+    /// tab's, and not saved. Ctrl during a drag turns it off for that drag, as it does time snapping.
+    /// </summary>
+    public bool ValueSnap
+    {
+        get => _valueSnap;
+        set
+        {
+            if (_valueSnap != value)
+            {
+                _valueSnap = value;
+                Changed?.Invoke();
+                _shell.Commands.InvalidateAll();
+            }
+        }
+    }
+
     /// <summary>Whether the curve editor scales each curve to −1..1, for display only. The tab's, and not saved.</summary>
     public bool CurvesNormalized
     {
@@ -813,6 +833,151 @@ public sealed class CutsceneEditor : IGraphEditor
             _ => "Flatten Tangents",
         };
         Own(() => Document.Edit(label, f => CutsceneCurveEdits.SetTangents(f, keys, mode, _locked)));
+    }
+
+    /// <summary>
+    /// The selected keys that the curve editor's time and value boxes show and set: on a curve that the runtime reads, on
+    /// a track that is not locked. Stepped curves' keys are among them.
+    /// </summary>
+    public IReadOnlyList<string> CurveKeys => [.. _selection.Where(p => File.Find(p) is { Kind: CutsceneBlockKind.Key, Parent: { } channel } key
+        && !CutsceneEdits.IsLocked(key, _locked) && CutsceneCurveEdits.KeysOf(channel) != null)];
+
+    /// <summary>The time on the cutscene's time that every one of <see cref="CurveKeys"/> has, or null when they differ or there are none.</summary>
+    public int? CurveKeyTime
+    {
+        get
+        {
+            var times = CurveKeys.Select(File.Find).Select(b => CutsceneEdits.SectionOf(b!)?.Start + b!.Start).Distinct().ToList();
+            return times.Count == 1 ? times[0] : null;
+        }
+    }
+
+    /// <summary>The value that every one of <see cref="CurveKeys"/> has, or null when they differ or there are none.</summary>
+    public float? CurveKeyValue
+    {
+        get
+        {
+            var values = CurveKeys.Select(p => CurveKey.Parse(File.Find(p)!)?.Value).Distinct().ToList();
+            return values.Count == 1 ? values[0] : null;
+        }
+    }
+
+    /// <summary>
+    /// Sets the times of <see cref="CurveKeys"/> from a typed entry (see <see cref="CurveEntry"/>): timecode or frames at the
+    /// display rate, or <c>+=</c> or <c>-=</c> one, as one undo entry, and selects them where they went. An offset moves
+    /// them together, as a drag does, so at a section's edge they all stop and keep their spacing. Returns a problem, or
+    /// null. An entry that does not read, or a time that would put two keys of one curve at one time, changes nothing.
+    /// </summary>
+    public string? SetCurveKeyTime(string text)
+    {
+        var keys = CurveKeys;
+        if (Document.InTransaction || keys.Count == 0)
+        {
+            return null;
+        }
+        if (CurveEntry.ParseTime(text, File.Rate) is not { } entry)
+        {
+            return "a time is timecode or frames, or += or -= one";
+        }
+        string? problem = null;
+        IReadOnlyList<string>? paths = null;
+        if (entry.Op == CurveEntryOp.Set)
+        {
+            Own(() => Document.Edit("Set Key Time", f => paths = CutsceneCurveEdits.SetTimes(f, keys, t => entry.Apply(t), out problem, _locked)));
+        }
+        else
+        {
+            var delta = (int)Math.Clamp(entry.Op == CurveEntryOp.Add ? entry.Operand : -entry.Operand, int.MinValue, int.MaxValue);
+            Own(() => Document.Edit("Set Key Time", f => paths = CutsceneEdits.Move(f, keys, delta, _locked)));
+        }
+        if (paths != null)
+        {
+            Select(paths, SelectMode.Replace);
+        }
+        return problem;
+    }
+
+    /// <summary>
+    /// Sets the values of <see cref="CurveKeys"/> from a typed entry (see <see cref="CurveEntry"/>): a number, or <c>+=</c>
+    /// or <c>-=</c> one, as one undo entry. A stepped curve's key takes a whole number. Returns a problem, or null. An
+    /// entry that does not read changes nothing.
+    /// </summary>
+    public string? SetCurveKeyValue(string text)
+    {
+        var keys = CurveKeys;
+        if (Document.InTransaction || keys.Count == 0)
+        {
+            return null;
+        }
+        if (CurveEntry.ParseValue(text) is not { } entry)
+        {
+            return "a value is a number, or += or -= one";
+        }
+        Own(() => Document.Edit("Set Key Value", f => CutsceneCurveEdits.SetValues(f, keys, entry.Apply, Stepped, _locked)));
+        return null;
+    }
+
+    /// <summary>
+    /// Weights the selected keys that a tangent command changes and that have handles, or when every one of them is
+    /// weighted already, takes their weights away, as one undo entry: Weighted Tangents.
+    /// </summary>
+    public void ToggleWeighted()
+    {
+        var keys = WeighableKeys;
+        if (Document.InTransaction || keys.Count == 0)
+        {
+            return;
+        }
+        var weighted = !keys.All(p => File.Find(p) is { } b && CurveKey.Parse(b) is { Weighted: true });
+        Own(() => Document.Edit("Weighted Tangents", f => CutsceneCurveEdits.SetWeighted(f, keys, weighted, _locked)));
+    }
+
+    /// <summary>The selected keys that Weighted Tangents changes: of <see cref="TangentKeys"/>, the Bezier and automatic ones.</summary>
+    public IReadOnlyList<string> WeighableKeys => [.. TangentKeys.Where(p => File.Find(p) is { } b && CurveKey.Parse(b) is { } k && CutsceneCurveEdits.Weighable(k))];
+
+    /// <summary>
+    /// The channels whose infinity the Pre-Infinity and Post-Infinity commands and boxes set: the channels of the selected
+    /// keys, or with no key selected, every curve that the curve editor shows and does not hide. Each is one that the
+    /// runtime reads, on a track that is not locked.
+    /// </summary>
+    public IReadOnlyList<string> InfinityCurves
+    {
+        get
+        {
+            var ofKeys = _selection.Select(File.Find).Where(b => b?.Kind == CutsceneBlockKind.Key).Select(b => CutsceneFile.PathOf(b!.Parent!)).Distinct().ToList();
+            var channels = ofKeys.Count > 0 ? ofKeys : _shownCurves.Where(p => !_hiddenCurves.Contains(p));
+            return [.. channels.Where(p => File.Find(p) is { Kind: CutsceneBlockKind.Channel } c && !CutsceneEdits.IsLocked(c, _locked)
+                && CutsceneCurveEdits.KeysOf(c) != null)];
+        }
+    }
+
+    /// <summary>The infinity on a side that every one of <see cref="InfinityCurves"/> has, or null when they differ or there are none.</summary>
+    public CurveInfinity? Infinity(InfinitySide side)
+    {
+        var modes = InfinityCurves.Select(p => File.Find(p)!).Select(c => side == InfinitySide.Pre ? CutsceneCurveEdits.InfinityOf(c).Pre : CutsceneCurveEdits.InfinityOf(c).Post).Distinct().ToList();
+        return modes.Count == 1 ? modes[0] : null;
+    }
+
+    /// <summary>
+    /// Sets one side's infinity on <see cref="InfinityCurves"/>, as one undo entry. A curve that does not take the mode,
+    /// such as an audio track's pitch for any but constant, keeps its own. Nothing when no curve changes.
+    /// </summary>
+    public void SetInfinity(InfinitySide side, CurveInfinity mode)
+    {
+        var curves = InfinityCurves;
+        if (Document.InTransaction || curves.Count == 0)
+        {
+            return;
+        }
+        var label = side == InfinitySide.Pre ? "Pre-Infinity" : "Post-Infinity";
+        Own(() => Document.Edit(label, f => CutsceneCurveEdits.SetInfinity(f, curves, side, mode, _locked)));
+    }
+
+    /// <summary>Sets one side's infinity on <see cref="InfinityCurves"/> to the mode after the one they share, or after constant when they differ.</summary>
+    public void NextInfinity(InfinitySide side)
+    {
+        var count = Enum.GetValues<CurveInfinity>().Length;
+        SetInfinity(side, (CurveInfinity)(((int)(Infinity(side) ?? CurveInfinity.Constant) + 1) % count));
     }
 
     /// <summary>

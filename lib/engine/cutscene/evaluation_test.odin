@@ -1167,7 +1167,7 @@ a_property_track_seeks_to_the_exact_values :: proc(t: ^testing.T) {
 		at(f, e, time)
 		testing.expectf(
 			t,
-			lamp(f).brightness == curve_value(brightness_keys, time),
+			lamp(f).brightness == curve_value(brightness_keys, time, .Constant, .Constant),
 			"the brightness at %d: %v",
 			time,
 			lamp(f).brightness,
@@ -1178,6 +1178,51 @@ a_property_track_seeks_to_the_exact_values :: proc(t: ^testing.T) {
 	testing.expect_value(t, lamp(f).brightness, 5)
 	at(f, e, 2 * SECOND)
 	testing.expect_value(t, lamp(f).brightness, 10)
+}
+
+// A channel's infinity carries its curve from the section's start to its first key and from its last key to the section's
+// end: here a linear lead-in, and a ramp that oscillates after it.
+@(test)
+a_property_tracks_infinity_runs_to_its_sections_edges :: proc(t: ^testing.T) {
+	f := property_setup(t)
+	defer eval_teardown(t, f)
+	keys := []format.Cutscene_Key {
+		{time = SECOND, value = 0, interp = .Linear},
+		{time = 2 * SECOND, value = 10, interp = .Linear},
+	}
+	channel := format.Cutscene_Channel_Contents {
+		name          = "value",
+		pre_infinity  = .Linear,
+		post_infinity = .Oscillate,
+		keys          = keys,
+	}
+	tracks := []format.Cutscene_Track_Contents {
+		property(
+			1,
+			"brightness",
+			{{id = 1, start = 0, end = 4 * SECOND, weight = 1, channels = {channel}}},
+		),
+	}
+	e := begin_evaluation(t, f, cutscene_blob(tracks), added = false)
+	defer end_evaluation(f, e)
+	cases := [][2]f32 {
+		{0, -10},
+		{f32(SECOND) / 2, -5},
+		{f32(2 * SECOND + SECOND / 2), 5},
+		{f32(3 * SECOND), 0},
+		{f32(4 * SECOND), 10},
+	}
+	for c in cases {
+		at(f, e, i32(c[0]))
+		testing.expectf(
+			t,
+			lamp(f).brightness == c[1],
+			"the brightness at %v: %v, not %v",
+			c[0],
+			lamp(f).brightness,
+			c[1],
+		)
+	}
 }
 
 // When the cutscene finishes, a track set to restore puts its field back, and a track set to keep leaves the last

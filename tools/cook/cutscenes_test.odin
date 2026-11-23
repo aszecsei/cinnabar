@@ -980,6 +980,41 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 		{SOUNDS + "\t\tchannel volume\n\t\t\tkey 0 1 linear\n", 6, "channel is gain or pitch"},
 		{SOUNDS + "\t\tchannel gain\n\t\t\tkey 0 -1 linear\n", 6, "a gain key is a number from 0"},
 		{SOUNDS + "\t\tchannel pitch\n\t\t\tkey 0 5 linear\n", 6, "a pitch key is a number from"},
+		{
+			SOUNDS + "\t\tchannel pitch\n\t\t\tpost_infinity = cycle\n\t\t\tkey 0 1 linear\n",
+			7,
+			"a pitch is constant before and after its keys",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			LAMP +
+			"\tsection 1 0 10\n\t\tchannel value\n\t\t\tpre_infinity = linear\n\t\t\tkey 0 " +
+			P +
+			" constant\n",
+			11,
+			"assets have no slope or change of value",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			LAMP +
+			"\tsection 1 0 10\n\t\tchannel value\n\t\t\tpost_infinity = bounce\n\t\t\tkey 0 0 linear\n",
+			11,
+			"post_infinity is constant, linear, cycle, cycle_offset or oscillate",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			LAMP +
+			"\tsection 1 0 10\n\t\tchannel value\n\t\t\tpre_infinity = cycle\n\t\t\tpre_infinity = linear\n\t\t\tkey 0 0 linear\n",
+			12,
+			"pre_infinity is set twice",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			LAMP +
+			"\tsection 1 0 10\n\t\tchannel value\n\t\t\tkey 0 0 linear\n\t\t\tpre_infinity = cycle\n",
+			12,
+			"pre_infinity comes before the channel's keys",
+		},
 		{SOUNDS + "\t\tchannel pitch\n\t\t\tkey 0 0 linear\n", 6, "a pitch key is a number from"},
 		{
 			SOUNDS + "\t\tchannel gain\n\t\t\tkey 0 1 linear\n\t\t\tbus = 1\n",
@@ -1867,6 +1902,8 @@ track 1 property "Glow"
 	section 1 0 60000
 		blend = additive
 		channel value
+			pre_infinity = cycle
+			post_infinity = linear
 			key 0 0 auto
 			key 30000 2.5 bezier 1
 track 2 property "Bulb"
@@ -1905,6 +1942,16 @@ track 2 property "Bulb"
 	testing.expect_value(t, glow.field, "light.intensity")
 	testing.expect_value(t, glow.sections[0].flags, format.Cutscene_Section_Flags{.Additive})
 	testing.expect_value(t, glow.sections[0].channels[0].flags, format.Cutscene_Channel_Flags{})
+	testing.expect_value(
+		t,
+		glow.sections[0].channels[0].pre_infinity,
+		format.Cutscene_Infinity.Cycle,
+	)
+	testing.expect_value(
+		t,
+		glow.sections[0].channels[0].post_infinity,
+		format.Cutscene_Infinity.Linear,
+	)
 	keys := glow.sections[0].channels[0].keys
 	testing.expect_value(t, keys[0].interp, format.Cutscene_Interp.Auto)
 	testing.expect_value(t, keys[1].flags, format.Cutscene_Key_Flags{})
@@ -1960,7 +2007,7 @@ track 2 property "Bulb"
 	testing.expect(t, !pass.ok)
 	found := false
 	for p in pass.problems.list {
-		found ||= p.line == 27 && strings.contains(p.text, "no asset has the GUID 7777")
+		found ||= p.line == 29 && strings.contains(p.text, "no asset has the GUID 7777")
 	}
 	testing.expectf(t, found, "%v", pass.problems.list)
 }

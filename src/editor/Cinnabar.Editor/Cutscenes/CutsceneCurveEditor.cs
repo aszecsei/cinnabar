@@ -39,7 +39,7 @@ sealed class CutsceneCurveEditor : Control
 
     readonly CutsceneEditor _editor;
     readonly Dictionary<string, FormattedText> _texts = [];
-    readonly Dictionary<uint, (IPen Line, IPen Dim, IBrush Fill)> _colors = [];
+    readonly Dictionary<uint, (IPen Line, IPen Dim, IBrush Fill, IPen Outside)> _colors = [];
     CutscenePaneFocus? _focus;
 
     public CutsceneCurveEditor(CutsceneEditor editor)
@@ -89,24 +89,17 @@ sealed class CutsceneCurveEditor : Control
         return formatted;
     }
 
-    (IPen Line, IPen Dim, IBrush Fill) Colors(uint argb)
+    (IPen Line, IPen Dim, IBrush Fill, IPen Outside) Colors(uint argb)
     {
         if (!_colors.TryGetValue(argb, out var c))
         {
             var color = Color.FromUInt32(argb);
             var brush = new SolidColorBrush(color);
-            c = (new Pen(brush, 1.5), new Pen(new SolidColorBrush(Color.FromArgb(0x60, color.R, color.G, color.B)), 1.5), brush);
+            var dim = new SolidColorBrush(Color.FromArgb(0x60, color.R, color.G, color.B));
+            c = (new Pen(brush, 1.5), new Pen(dim, 1.5), brush, new Pen(brush, 1.5, new DashStyle([4, 3], 0)));
             _colors[argb] = c;
         }
         return c;
-    }
-
-    // A round step for grid lines about pixels apart: 1, 2 or 5 times a power of ten.
-    static double NiceStep(double perPixel, double pixels)
-    {
-        var raw = perPixel * pixels;
-        var power = Math.Pow(10, Math.Floor(Math.Log10(raw)));
-        return raw / power < 2 ? 2 * power : raw / power < 5 ? 5 * power : 10 * power;
     }
 
     public override void Render(DrawingContext context)
@@ -123,7 +116,7 @@ sealed class CutsceneCurveEditor : Control
         using (context.PushClip(new Rect(gutter, 0, width, size.Height)))
         {
             // The value grid, with 0 brighter, and the time grid on frames.
-            var step = NiceStep(view.Value.PerPixel, 40);
+            var step = view.Value.GridStep;
             var top = view.Value.At(0);
             for (var v = Math.Floor(view.Value.At(size.Height) / step) * step; v <= top; v += step)
             {
@@ -178,15 +171,30 @@ sealed class CutsceneCurveEditor : Control
         }
     }
 
-    // A curve over its section, where it plays, its keys, and the handles of its selected keys.
+    // A curve over its section, where it plays, dashed before its first key and after its last, where its infinity
+    // decides; its keys; and the handles of its selected keys.
     void DrawCurve(DrawingContext context, CurveRow row, CurveView view, double width, IReadOnlySet<string> selected)
     {
-        var (line, dim, fill) = Colors(row.Color);
+        var (line, dim, fill, outside) = Colors(row.Color);
+        int firstKey = row.TickOf(0), lastKey = row.TickOf(row.Keys.Count - 1);
+        DrawPart(context, row, view, width, (row.Start, firstKey), row.Locked ? dim : outside);
+        DrawPart(context, row, view, width, (firstKey, lastKey), row.Locked ? dim : line);
+        DrawPart(context, row, view, width, (lastKey, row.End), row.Locked ? dim : outside);
+        DrawKeys(context, row, view, width, selected, fill);
+    }
+
+    // A part of a curve, from and to on the cutscene's time.
+    static void DrawPart(DrawingContext context, CurveRow row, CurveView view, double width, (int From, int To) part, IPen pen)
+    {
+        if (part.To <= part.From)
+        {
+            return;
+        }
         var geometry = new StreamGeometry();
         using (var g = geometry.Open())
         {
             var first = true;
-            foreach (var (px, py) in CutsceneCurveLayout.Samples(row, view, width))
+            foreach (var (px, py) in CutsceneCurveLayout.Samples(row, view, width, part))
             {
                 var y = Math.Clamp(py, -10_000, 10_000);
                 if (first)
@@ -204,7 +212,12 @@ sealed class CutsceneCurveEditor : Control
                 g.EndFigure(false);
             }
         }
-        context.DrawGeometry(null, row.Locked ? dim : line, geometry);
+        context.DrawGeometry(null, pen, geometry);
+    }
+
+    // A curve's keys, and the handles of its selected keys.
+    void DrawKeys(DrawingContext context, CurveRow row, CurveView view, double width, IReadOnlySet<string> selected, IBrush fill)
+    {
         for (var i = 0; i < row.Keys.Count; i++)
         {
             var (kx, ky) = CutsceneCurveLayout.KeyPoint(row, i, view);
@@ -239,7 +252,7 @@ sealed class CutsceneCurveEditor : Control
             var row = rows[i];
             var y = i * CutsceneCurveInput.ListRowHeight;
             var hidden = _editor.HiddenCurves.Contains(row.Path);
-            var (line, _, fill) = Colors(row.Color);
+            var (line, _, fill, _) = Colors(row.Color);
             var swatch = new Rect(8, y + 6, 10, 8);
             if (hidden)
             {

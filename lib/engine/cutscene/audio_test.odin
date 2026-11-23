@@ -778,6 +778,49 @@ a_scrub_plays_a_grain_of_each_section_under_the_playhead :: proc(t: ^testing.T) 
 	free_all(f.platform.frame_allocator)
 }
 
+// A gain's linear infinity can go below 0 where no key is; the section plays it at 0, not at a negative gain.
+@(test)
+a_gain_that_its_infinity_takes_below_zero_plays_silent :: proc(t: ^testing.T) {
+	f := sound_setup(t)
+	defer sound_teardown(f)
+	gain := []format.Cutscene_Key {
+		{time = 0, value = 1, interp = .Linear},
+		{time = SECOND, value = 0.5, interp = .Linear},
+	}
+	channels := []format.Cutscene_Channel_Contents {
+		{name = "gain", post_infinity = .Linear, keys = gain},
+	}
+	tracks := [?]format.Cutscene_Track_Contents {
+		sound_track(1, sound_section(1, 0, 4 * SECOND, channels = channels)),
+	}
+	data := sounds_blob(f, tracks[:], 4 * SECOND)
+	aligned := make([]byte, len(data) + 16, context.temp_allocator)
+	start := int(-uintptr(raw_data(aligned)) & 15)
+	copy(aligned[start:], data)
+	data = aligned[start:][:len(data)]
+	blob, ok := format.cutscene_view(data)
+	testing.expect(t, ok)
+	e: Evaluation
+	init_evaluation(&e, &f.world, {}, data, blob)
+	defer destroy_evaluation(&e, &f.world)
+	set_audition(&e, &f.world, .Scrub)
+	// At 2 s the line goes on to 0, and at 3 s to -0.5, which plays as 0.
+	seek(&f.cutscenes, &e, &f.world, data, blob, 2 * SECOND)
+	evaluate(&f.cutscenes, &e, &f.world, data, blob, .Late)
+	fake.clock += 2 * SCRUB_INTERVAL
+	seek(&f.cutscenes, &e, &f.world, data, blob, 3 * SECOND)
+	evaluate(&f.cutscenes, &e, &f.world, data, blob, .Late)
+	testing.expect_value(t, len(fake.voices), 2)
+	testing.expect_value(t, fake.voices[0].params.gain, 0)
+	testing.expect_value(t, fake.voices[1].params.gain, 0)
+	fake.clock += 2 * SCRUB_INTERVAL
+	seek(&f.cutscenes, &e, &f.world, data, blob, SECOND / 2)
+	evaluate(&f.cutscenes, &e, &f.world, data, blob, .Late)
+	testing.expect_value(t, len(fake.voices), 3)
+	testing.expect_value(t, fake.voices[2].params.gain, 0.75)
+	free_all(f.platform.frame_allocator)
+}
+
 // The editor's preview plays an evaluation of no player under the Preview audition, moved by advance on each frame's
 // real time (see docs/editor/cutscene-editor.md#the-games-side). Over 60 s of 1/60 s frames, its voices stay within a
 // frame of the picture, across eight sections in a row.
@@ -857,7 +900,7 @@ a_curves_integral_is_the_sum_of_its_values :: proc(t: ^testing.T) {
 		STEPS :: 200000
 		for i in 0 ..< STEPS {
 			at := (f64(i) + 0.5) * end / STEPS
-			sum += f64(curve_value(keys, i32(at))) * end / STEPS / SECOND
+			sum += f64(curve_value(keys, i32(at), .Constant, .Constant)) * end / STEPS / SECOND
 		}
 		got := curve_integral(keys, end)
 		testing.expectf(t, abs(got - sum) < 2e-4, "to %v: %v, and the sum %v", end, got, sum)

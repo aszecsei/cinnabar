@@ -342,8 +342,8 @@ public sealed class CutsceneCurveInput
         Reset();
     }
 
-    // A step of a key drag, from the press: in time, snapped as the timeline snaps, and in value; Shift keeps the axis
-    // that has moved more.
+    // A step of a key drag, from the press: in time, snapped as the timeline snaps, and in value, which value snapping
+    // puts the grabbed key on a grid line of; Shift keeps the axis that has moved more, and Ctrl snaps neither.
     void StepKeys(KeyModifiers modifiers)
     {
         var dx = _pointer.X - _pressAt.X;
@@ -362,8 +362,13 @@ public sealed class CutsceneCurveInput
         var ticks = dx == 0 ? 0 : tick - grabbed;
         // A shown value's change, which a normalized curve scales back to its own.
         var shown = -dy * view.Value.PerPixel;
-        var moving = _moving;
         var normalized = view.Normalized;
+        if (dy != 0 && _editor.ValueSnap && !modifiers.HasFlag(KeyModifiers.Control))
+        {
+            var from = row.Shown(row.Keys[_press.Index].Value, normalized);
+            shown = ValueAxis.SnapTo(from + shown, view.Value.GridStep) - from;
+        }
+        var moving = _moving;
         _drag?.Step(f =>
         {
             foreach (var (r, paths) in moving)
@@ -378,19 +383,20 @@ public sealed class CutsceneCurveInput
         Tooltip = $"{Units(grabbed + ticks)}  ·  {CutsceneKeying.Format(value)}";
     }
 
-    // A step of a handle drag: the slope from the key to the pointer.
+    // A step of a handle drag: the slope from the key to the pointer, and a weighted key's weight from how far across it is.
     void StepHandle()
     {
         var row = _press.Row!;
         var slope = CutsceneCurveLayout.SlopeAt(row, _press.Index, _press.Side, View, _pointer.X, _pointer.Y);
+        var weight = CutsceneCurveLayout.WeightAt(row, _press.Index, _press.Side, View, _pointer.X);
         var path = _press.Path!;
         var side = _press.Side;
         _drag?.Step(f =>
         {
-            CutsceneCurveEdits.SetSlope(f, path, side, slope, _editor.Locked);
+            CutsceneCurveEdits.SetSlope(f, path, side, slope, _editor.Locked, weight);
             return [];
         });
-        Tooltip = $"slope {CutsceneKeying.Format(slope)}/s";
+        Tooltip = $"slope {CutsceneKeying.Format(slope)}/s" + (weight is { } w ? $"  ·  weight {CutsceneKeying.Format((float)w)}" : "");
     }
 
     string Units(int ticks) => ticks < 0 ? "-" + Units(-ticks) : _editor.ShowFrames ? $"{CutsceneTime.Frames(ticks, _editor.File.Rate)}f" : CutsceneTime.Timecode(ticks, _editor.File.Rate);

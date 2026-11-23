@@ -145,7 +145,12 @@ channel_at :: proc(
 ) -> f32 {
 	for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
 		if format.blob_string(ctx.data, channel.name) == name {
-			return curve_value(format.cutscene_channel_keys(ctx.data, ctx.blob, channel), local)
+			return curve_value(
+				format.cutscene_channel_keys(ctx.data, ctx.blob, channel),
+				local,
+				channel.pre_infinity,
+				channel.post_infinity,
+			)
 		}
 	}
 	return otherwise
