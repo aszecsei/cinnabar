@@ -39,8 +39,17 @@ Cutscene_Preview :: struct {
 // Preview_Values is the editor's values over the preview: a layer of fields and poses, as an override's, that shows
 // only while the preview stands at tick. Its id is the serial.
 Preview_Values :: struct {
-	tick:  i32,
-	layer: Override,
+	tick:     i32,
+	layer:    Override,
+	// The poses of bindings, by ID, which the editor has no entity for. Each lay finds the binding's entity again, as a
+	// new blob can spawn it again.
+	bindings: [dynamic]Binding_Pose,
+}
+
+// Binding_Pose is a pose that the editor's values give a binding of the preview. Its entity is found at each lay.
+Binding_Pose :: struct {
+	binding: u32,
+	pose:    Pose_Write,
 }
 
 // Preview_Clock is whether the preview stands at its time or moves on the game's clock.
@@ -65,8 +74,10 @@ Preview_Playing :: struct {
 // Cutscene_Previews is the session's preview, and the highest ticket that the editor opened one with. An Open with a
 // ticket no higher is late, and a message for another ticket is dropped.
 Cutscene_Previews :: struct {
-	open: Maybe(Cutscene_Preview),
-	last: u64,
+	open:       Maybe(Cutscene_Preview),
+	last:       u64,
+	// The last Cutscene_Preview_Shown that went to the editor.
+	shown_sent: link.Shown_Preview,
 }
 
 // handle_cutscene_preview_message handles the preview's messages, and reports whether the message was one. despawned
@@ -261,6 +272,7 @@ free_cutscene_previews :: proc(previews: ^Cutscene_Previews) {
 		delete(p.held)
 		if v, has := &p.values.?; has {
 			free_override(&v.layer)
+			delete(v.bindings)
 		}
 	}
 	previews^ = {}
@@ -304,7 +316,7 @@ lay_cutscene_preview :: proc(e: ^Editor, w: ^ecs.World) -> (laid: bool) {
 		return
 	}
 	laid = evaluate_preview(e, w, p)
-	if lay_preview_values(w, p) {
+	if lay_preview_values(e, w, p) {
 		laid = true
 	}
 	return
@@ -335,9 +347,29 @@ write_preview_values :: proc(
 			spawned = make([dynamic]Spawned, heap),
 			saved = make([dynamic]Saved, heap),
 		},
+		bindings = make([dynamic]Binding_Pose, heap),
 	}
 	v := &p.values.?
-	write_fields_and_poses(e, w, &v.layer, m.fields, m.transforms)
+	others := make([dynamic]link.Override_Transform, e.platform.frame_allocator)
+	for t in m.transforms {
+		if t.target.kind != .Binding {
+			append(&others, t)
+			continue
+		}
+		r := t.rotation
+		append(
+			&v.bindings,
+			Binding_Pose {
+				binding = u32(t.target.entity),
+				pose = {
+					position = t.position,
+					rotation = quaternion(x = r[0], y = r[1], z = r[2], w = r[3]),
+					scale = t.scale,
+				},
+			},
+		)
+	}
+	write_fields_and_poses(e, w, &v.layer, m.fields, others[:])
 }
 
 // drop_preview_values forgets the editor's values, after it puts back what they wrote over.
@@ -349,6 +381,7 @@ drop_preview_values :: proc(e: ^Editor, w: ^ecs.World, p: ^Cutscene_Preview) {
 	}
 	lift_saved(w, &v.layer)
 	free_override(&v.layer)
+	delete(v.bindings)
 	p.values = nil
 }
 
@@ -376,9 +409,24 @@ preview_values_serial :: proc(p: ^Cutscene_Preview) -> u64 {
 // lay_preview_values writes the editor's values over the preview, while it stands at their tick, and saves what they
 // write over. They are lifted before any evaluation of the preview, so what they save is the preview's.
 @(private)
-lay_preview_values :: proc(w: ^ecs.World, p: ^Cutscene_Preview) -> bool {
+lay_preview_values :: proc(e: ^Editor, w: ^ecs.World, p: ^Cutscene_Preview) -> (laid: bool) {
 	layer := preview_values_shown(p) or_return
-	return lay_fields_and_poses(w, layer)
+	laid = lay_fields_and_poses(w, layer)
+	v := &p.values.?
+	if len(v.bindings) == 0 {
+		return
+	}
+	data, blob := cutscene.cutscene_data(e.cutscenes, &p.live.evaluation) or_return
+	for b in v.bindings {
+		index := cutscene.binding_index(data, blob, cutscene.Binding_Id(b.binding)) or_continue
+		entity := cutscene.binding_entity(&p.live.evaluation.bindings, w, index) or_continue
+		pose := b.pose
+		pose.entity = entity
+		if lay_pose(w, layer, pose) {
+			laid = true
+		}
+	}
+	return
 }
 
 @(private)
@@ -461,7 +509,7 @@ update_cutscene_preview :: proc(
 	if evaluate_preview(e, w, p) {
 		changed = true
 	}
-	if lay_preview_values(w, p) {
+	if lay_preview_values(e, w, p) {
 		changed = true
 	}
 	// The events that a play crossed go to the scripts in this frame, as a player's do at the end of update.

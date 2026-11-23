@@ -350,6 +350,7 @@ poll :: proc(
 	if values_due {
 		shown = capture_shown(e, w, frame)
 	}
+	looks := capture_looks(e, w)
 	lift_overrides(e, w)
 	defer lay_overrides(e, w)
 	for m in incoming {
@@ -544,6 +545,7 @@ poll :: proc(
 	}
 	send_overridden_entities(e, w, out, frame)
 	send_cutscene_preview_tick(e, out)
+	send_viewport_looks(e, looks, out)
 	send_streamed_scenes(e, out)
 	if now - s.last_stats >= STATS_INTERVAL {
 		stats_interval := now - s.last_stats

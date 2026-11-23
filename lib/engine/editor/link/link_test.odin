@@ -81,6 +81,32 @@ every_message_round_trips :: proc(t: ^testing.T) {
 		Cutscene_Preview_Opened{ticket = 3, tick = 12_000, range_start = 0, range_end = 600_000},
 		Cutscene_Preview_Ended{ticket = 4, reason = .Code_Reloaded},
 		Cutscene_Preview_Tick{ticket = 3, tick = 1001, playing = true},
+		Viewport_Look{viewport = 2, serial = 7, ticket = 3, source = .Binding, binding = 12},
+		Viewport_Look_Shown {
+			viewport = 2,
+			serial = 7,
+			camera = true,
+			binding = 12,
+			position = {1, -2, 3},
+			rotation = {0, 0.5, 0, 0.8660254},
+			vertical_fov = 0.6,
+			focal_length = 50,
+			sensor = {36, 24},
+		},
+		Cutscene_Preview_Shown{shown = {ticket = 3, tick = 1001, blob = 99, values = 5}},
+		Cutscene_Preview_Values {
+			ticket = 3,
+			tick = 1001,
+			serial = 6,
+			transforms = {
+				{
+					target = {kind = .Binding, entity = 12},
+					position = {1, -2, 3},
+					rotation = {0, 0, 0, 1},
+					scale = {1, 1, 1},
+				},
+			},
+		},
 		Component_Types {
 			types = {
 				{

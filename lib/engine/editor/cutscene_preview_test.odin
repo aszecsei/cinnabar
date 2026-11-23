@@ -13,9 +13,11 @@ import "cinnabar:core/jobs"
 import "cinnabar:core/testlog"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/camera"
 import "cinnabar:engine/cutscene"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
+import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 
@@ -51,6 +53,33 @@ PROP_GUID :: format.Guid {
 	15 = 3,
 }
 
+@(private = "file")
+SHOT_GUID :: format.Guid {
+	0  = 0x5c,
+	15 = 4,
+}
+
+// A cinematic camera with a 50 mm lens, which the cutscene spawns twice when the fixture has cameras.
+@(private = "file")
+SHOT :: `scene 2
+entity 1000000000000001
+name = "Shot"
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 32 Camera
+	vertical_fov = 1
+component 160 Cinematic_Camera
+	focal_length = 50
+`
+
+// The camera bindings' IDs.
+@(private = "file")
+SHOT_A :: 3
+@(private = "file")
+SHOT_B :: 4
+
 // A prefab of one entity, which the cutscene spawns.
 @(private = "file")
 PROP :: `scene 2
@@ -76,6 +105,10 @@ Fixture :: struct {
 	bulb:      u64,
 	// The scene's hero, after load, which the cutscene possesses.
 	hero:      ecs.Entity,
+	// With cameras, the cutscene spawns two shot cameras and cuts from one to the other at 1 s, and the game's views
+	// take the cut's claim.
+	cameras:   bool,
+	views:     camera.Views,
 }
 
 @(private = "file")
@@ -85,8 +118,9 @@ clock: f64
 // Bulb of brightness 1, in Edit. The cutscene moves the hero from 0 m to 10 m over its first second, ramps the Bulb from
 // 0 to 4, and spawns the prop.
 @(private = "file")
-setup :: proc(t: ^testing.T, to: f32 = 10) -> ^Fixture {
+setup :: proc(t: ^testing.T, to: f32 = 10, cameras := false) -> ^Fixture {
 	f := new(Fixture)
+	f.cameras = cameras
 	testing.expect(t, virtual.arena_init_growing(&f.frame) == nil)
 	f.platform = {
 		frame_allocator = virtual.arena_allocator(&f.frame),
@@ -120,6 +154,9 @@ setup :: proc(t: ^testing.T, to: f32 = 10) -> ^Fixture {
 	ecs.register_engine_components(&f.world.registry)
 	scene.register_components(&f.world.registry)
 	ecs.register_component(&f.world.registry, Bulb)
+	if cameras {
+		render.register_components(&f.world.registry)
+	}
 	f.bulb = u64(ecs.registry_find_type(&f.world.registry, Bulb).id)
 
 	dir, err := os.make_directory_temp("", "editor_cutscene_preview_test_*", context.allocator)
@@ -134,8 +171,18 @@ setup :: proc(t: ^testing.T, to: f32 = 10) -> ^Fixture {
 		PROP_GUID,
 		format.scene_write(s, PROP_GUID, 1, .Prefab, allocator = context.temp_allocator),
 	)
+	if cameras {
+		shot, shot_problems, shot_parsed := format.scene_parse(SHOT, context.temp_allocator)
+		testing.expectf(t, shot_parsed, "problems: %v", shot_problems)
+		write_blob(
+			t,
+			f,
+			SHOT_GUID,
+			format.scene_write(shot, SHOT_GUID, 1, .Prefab, allocator = context.temp_allocator),
+		)
+	}
 	write_blob(t, f, CUTSCENE_GUID, cutscene_blob(f, to))
-	cutscene.init(&f.cutscenes, &f.world, &f.assets)
+	cutscene.init(&f.cutscenes, &f.world, &f.assets, views = &f.views if cameras else nil)
 	cutscene.register(&f.cutscenes, &f.world)
 
 	init(&f.editor, &f.platform, nil, cutscenes = &f.cutscenes)
@@ -191,6 +238,7 @@ teardown :: proc(f: ^Fixture) {
 	end_overrides(&f.editor, &f.world, nil)
 	destroy(&f.editor)
 	cutscene.destroy(&f.cutscenes, &f.world)
+	camera.destroy(&f.views, nil)
 	asset.destroy(&f.assets)
 	os.remove_all(f.dir)
 	delete(f.dir)
@@ -319,8 +367,51 @@ cutscene_blob :: proc(
 		tracks[1] = tracks[2]
 		tracks = tracks[:2]
 	}
-	guids := make([]format.Guid, 1, context.temp_allocator)
+	guids := make([]format.Guid, 2 if f.cameras else 1, context.temp_allocator)
 	guids[0] = PROP_GUID
+	if f.cameras {
+		guids[1] = SHOT_GUID
+		shots := make([]format.Cutscene_Binding_Contents, 4, context.temp_allocator)
+		copy(shots, bindings)
+		for &b, i in shots[2:] {
+			b = {
+				id       = u32(SHOT_A + i),
+				kind     = .Spawned,
+				name     = "Shot A" if i == 0 else "Shot B",
+				parent   = format.CUTSCENE_NONE,
+				asset    = SHOT_GUID,
+				position = {i64(i) * 5 * METER, 0, 0},
+				rotation = {0, 0, 0, 1},
+				scale    = {1, 1, 1},
+			}
+		}
+		bindings = shots
+		cuts := make([]format.Cutscene_Section_Contents, 2, context.temp_allocator)
+		cuts[0] = {
+			id     = 1,
+			start  = 0,
+			end    = SECOND,
+			weight = 1,
+			camera = 2,
+		}
+		cuts[1] = {
+			id     = 2,
+			start  = SECOND,
+			end    = 2 * SECOND,
+			weight = 1,
+			camera = 3,
+		}
+		more := make([]format.Cutscene_Track_Contents, len(tracks) + 1, context.temp_allocator)
+		copy(more, tracks)
+		more[len(tracks)] = {
+			id       = 90,
+			kind     = .Camera_Cut,
+			name     = "Cuts",
+			binding  = format.CUTSCENE_NONE,
+			sections = cuts,
+		}
+		tracks = more
+	}
 	return format.cutscene_write(
 		{
 			guid = CUTSCENE_GUID,
@@ -936,4 +1027,142 @@ a_new_blob_under_preview_values_gives_the_document_back :: proc(t: ^testing.T) {
 
 	step(f, link.Cutscene_Preview_Close{ticket = 1})
 	testing.expect_value(t, bulb_of(f), 1)
+}
+
+@(private = "file")
+look :: proc(
+	serial: u64,
+	source: link.Viewport_Look_Source,
+	binding: u32 = 0,
+) -> link.Viewport_Look {
+	return {viewport = 0, serial = serial, ticket = 1, source = source, binding = binding}
+}
+
+// A scene view that looks through a camera binding draws from its spawned entity, and the editor hears the pose and
+// the lens that the world shows, once, and again only when they change. Looking through the cuts follows the cut
+// track's shot as the time moves. A look with an older serial is dropped, and a preview that ends gives the view its
+// own camera.
+@(test)
+a_scene_view_looks_through_a_binding_and_through_the_cuts :: proc(t: ^testing.T) {
+	f := setup(t, cameras = true)
+	defer teardown(f)
+	step(f, open(1, SECOND / 2))
+	v := &f.editor.session.view.viewports[0]
+
+	step(f, look(1, .Binding, SHOT_B))
+	entity, binding, looks := look_camera(&f.editor, &f.world, v)
+	testing.expect(t, looks)
+	testing.expect_value(t, binding, SHOT_B)
+	testing.expect_value(t, x_of(f, entity), 5 * METER)
+	shown, told := find_message(step(f), link.Viewport_Look_Shown)
+	testing.expect(t, told)
+	testing.expect(t, shown.camera)
+	testing.expect_value(t, shown.serial, 1)
+	testing.expect_value(t, shown.binding, SHOT_B)
+	testing.expect_value(t, shown.position, [3]i64{5 * METER, 0, 0})
+	testing.expect_value(t, shown.focal_length, 50)
+	testing.expect_value(t, shown.sensor, [2]f32{36, 24})
+	testing.expect_value(t, shown.vertical_fov, render.cinematic_vertical_fov({focal_length = 50}))
+	_, again := find_message(step(f), link.Viewport_Look_Shown)
+	testing.expect(t, !again)
+
+	// The cuts show shot A before 1 s and shot B after it.
+	step(f, look(2, .Cuts))
+	shown, told = find_message(step(f), link.Viewport_Look_Shown)
+	testing.expect(t, told && shown.camera)
+	testing.expect_value(t, shown.binding, SHOT_A)
+	step(f, link.Cutscene_Preview_Time{ticket = 1, tick = 3 * SECOND / 2})
+	shown, told = find_message(step(f), link.Viewport_Look_Shown)
+	testing.expect(t, told && shown.camera)
+	testing.expect_value(t, shown.binding, SHOT_B)
+	testing.expect_value(t, shown.position, [3]i64{5 * METER, 0, 0})
+
+	// An older serial does nothing.
+	step(f, look(1, .Binding, SHOT_A))
+	testing.expect_value(t, v.look.source, link.Viewport_Look_Source.Cuts)
+
+	step(f, link.Cutscene_Preview_Close{ticket = 1})
+	shown, told = find_message(step(f), link.Viewport_Look_Shown)
+	testing.expect(t, told)
+	testing.expect(t, !shown.camera)
+	_, _, looks = look_camera(&f.editor, &f.world, v)
+	testing.expect(t, !looks)
+}
+
+// The editor's values move a spawned binding that it has no entity for, by the binding's ID, while the preview stands
+// at their tick, and the editor hears when the world shows them. An override's frame cannot name a binding.
+@(test)
+preview_values_move_a_binding_by_its_id :: proc(t: ^testing.T) {
+	f := setup(t, cameras = true)
+	defer teardown(f)
+	step(f, open(1, SECOND / 2))
+	step(f, look(1, .Binding, SHOT_A))
+	shot, _, _ := look_camera(&f.editor, &f.world, &f.editor.session.view.viewports[0])
+	testing.expect_value(t, x_of(f, shot), 0)
+	step(
+		f,
+		link.Cutscene_Preview_Values {
+			ticket     = 1,
+			tick       = SECOND / 2,
+			serial     = 4,
+			transforms = {
+				{
+					target = {kind = .Binding, entity = SHOT_A},
+					position = {7 * METER, 0, 0},
+					// A quarter turn about +y.
+					rotation = {0, 0.70710677, 0, 0.70710677},
+					scale = {1, 1, 1},
+				},
+			},
+		},
+	)
+	testing.expect_value(t, x_of(f, shot), 7 * METER)
+	messages := step(f)
+	shown_preview, told := find_message(messages, link.Cutscene_Preview_Shown)
+	testing.expect(t, told)
+	testing.expect_value(t, shown_preview.shown.values, 4)
+	testing.expect_value(t, shown_preview.shown.tick, SECOND / 2)
+	shown, looked := find_message(messages, link.Viewport_Look_Shown)
+	testing.expect(t, looked)
+	testing.expect_value(t, shown.position, [3]i64{7 * METER, 0, 0})
+	// The report, as an Editor_Camera, is the view that the scene view draws through the camera: the editor seeds its
+	// pilot camera from it.
+	drawn, drawn_ok := render.camera_view(&f.world, shot)
+	testing.expect(t, drawn_ok)
+	reported := camera_view(
+		{
+			position = shown.position,
+			rotation = shown.rotation,
+			vertical_fov = shown.vertical_fov,
+			near = render.DEFAULT_NEAR,
+		},
+	)
+	testing.expect_value(t, reported.position, drawn.position)
+	testing.expect_value(t, reported.rotation, drawn.rotation)
+	testing.expect_value(t, reported.projection, drawn.projection)
+	// The evaluation in each frame does not move it back.
+	frame(f, 0)
+	testing.expect_value(t, x_of(f, shot), 7 * METER)
+
+	// A time drops the values, and the cutscene's pose shows again.
+	step(f, link.Cutscene_Preview_Time{ticket = 1, tick = SECOND / 4})
+	testing.expect_value(t, x_of(f, shot), 0)
+
+	context.logger = testlog.expected_errors()
+	step(f, link.Begin_Override{override = 1})
+	step(
+		f,
+		link.Override_Frame {
+			override = 1,
+			transforms = {
+				{
+					target = {kind = .Binding, entity = SHOT_A},
+					position = {9 * METER, 0, 0},
+					rotation = {0, 0, 0, 1},
+					scale = {1, 1, 1},
+				},
+			},
+		},
+	)
+	testing.expect_value(t, x_of(f, shot), 0)
 }
