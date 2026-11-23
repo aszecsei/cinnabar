@@ -1422,7 +1422,9 @@ public sealed partial class CutsceneEditor : IGraphEditor
     /// a possessed entity of a scene that is not open is not loaded, and one of an open scene that lacks it, or of no
     /// scene that the index knows, is broken. A spawned binding is broken when its prefab is missing.
     /// </summary>
-    public CutsceneBindingInfo InfoOf(CutsceneBlock binding)
+    public CutsceneBindingInfo InfoOf(CutsceneBlock binding) => BoundInfoOf(binding) with { Camera = IsCamera(binding) };
+
+    CutsceneBindingInfo BoundInfoOf(CutsceneBlock binding)
     {
         var possess = binding.Get("possess");
         var spawn = binding.Get("spawn");

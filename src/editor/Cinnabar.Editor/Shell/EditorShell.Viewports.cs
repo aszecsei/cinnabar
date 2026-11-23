@@ -183,6 +183,7 @@ public sealed partial class EditorShell
         SettingsViewport = viewport;
         Commands.InvalidateAll();
         ActiveViewportChanged?.Invoke();
+        LooksChanged();
         // The viewport commands show the settings of the viewport that they act on.
         ViewportSettingsChanged?.Invoke();
     }

@@ -85,6 +85,7 @@ sealed class CutsceneTimeline : Control
             .Add(() => _editor.PlayStarted += Played, () => _editor.PlayStarted -= Played)
             .Add(() => _editor.Changed += Changed, () => _editor.Changed -= Changed)
             .Add(() => _editor.ProblemsChanged += Changed, () => _editor.ProblemsChanged -= Changed)
+            .Add(() => _editor.LooksChanged += Viewed, () => _editor.LooksChanged -= Viewed)
             .Add(() => _editor.FrameRequested += Frame, () => _editor.FrameRequested -= Frame)
             .Add(() => _editor.PlayheadChanged += Playhead, () => _editor.PlayheadChanged -= Playhead);
     }
@@ -462,7 +463,8 @@ sealed class CutsceneTimeline : Control
                     x += 12;
                 }
                 var label = Text(r.Label, r.Kind == CutsceneRowKind.Channel ? DimText : TextBrush, r.Kind == CutsceneRowKind.Binding ? 12 : 11);
-                var right = r.Kind == CutsceneRowKind.Binding ? Layout.Gutter - (warn ? 22 : 6) : Layout.MuteX - 12;
+                var camera = r.Binding is { Camera: true } && !warn;
+                var right = r.Kind == CutsceneRowKind.Binding ? Layout.Gutter - (warn || camera ? 22 : 6) : Layout.MuteX - 12;
                 using (context.PushClip(new Rect(x, y, right - x, Layout.RowHeight)))
                 {
                     context.DrawText(label, new Point(x, y + (Layout.RowHeight - label.Height) / 2));
@@ -479,6 +481,10 @@ sealed class CutsceneTimeline : Control
                     context.DrawEllipse(r.Binding!.State == CutsceneBindingState.Broken ? ErrorBrush : WarnBrush, null, at, 6, 6);
                     context.DrawText(sign, new Point(at.X - sign.Width / 2, at.Y - sign.Height / 2));
                 }
+                if (camera && _editor.File.Find(r.Path) is { Id: { } binding })
+                {
+                    LookThrough(context, Layout.Gutter - Layout.LockWidth + 4, y + 6, _editor.LooksThrough(binding));
+                }
                 if (problems.Contains(r.Path) && r.Kind != CutsceneRowKind.Channel)
                 {
                     context.DrawEllipse(ErrorBrush, null, new Point(Layout.MuteX - 6, y + Layout.RowHeight / 2), 3, 3);
@@ -493,6 +499,23 @@ sealed class CutsceneTimeline : Control
         }
         context.FillRectangle(RulerBrush, new Rect(0, 0, Layout.Gutter, Layout.RulerHeight));
         context.DrawText(Text(Units(_editor.Playhead), TextBrush, 12), new Point(8, 7));
+    }
+
+    // A camera binding's look-through toggle: a small camera, lit while the active scene view looks through it.
+    void LookThrough(DrawingContext context, double x, double y, bool on)
+    {
+        var brush = on ? SoloBrush : DimText;
+        var pen = new Pen(brush, 1.2);
+        context.DrawRectangle(on ? brush : null, pen, new Rect(x, y + 2, 9, 7), 1.5);
+        var lens = new StreamGeometry();
+        using (var g = lens.Open())
+        {
+            g.BeginFigure(new Point(x + 9, y + 5.5), true);
+            g.LineTo(new Point(x + 14, y + 2.5));
+            g.LineTo(new Point(x + 14, y + 8.5));
+            g.EndFigure(true);
+        }
+        context.DrawGeometry(on ? brush : null, pen, lens);
     }
 
     // A mute or solo toggle: a letter, on a color when it is on. A track whose asset mutes it shows its M struck

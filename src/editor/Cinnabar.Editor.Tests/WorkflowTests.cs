@@ -76,7 +76,12 @@ public sealed class WorkflowTests : IDisposable
         // A cutscene's timeline's own, which act while it has the keyboard (see docs/editor/cutscene-editor.md#the-timeline).
         // And its keys, which act on the selection wherever the keyboard is (see docs/editor/cutscene-editor.md#keying).
         // And its bindings', which act between the selected entities and the cutscene (see docs/editor/cutscene-editor.md#bindings).
-        string[] timeline = [.. EditorCommands.CutsceneTimelineCommands, .. EditorCommands.CutsceneKeyCommands, .. EditorCommands.CutsceneBindingCommands];
+        // And its cameras', which act between the active scene view and the cutscene (see docs/editor/cutscene-editor.md#cameras).
+        string[] timeline =
+        [
+            .. EditorCommands.CutsceneTimelineCommands, .. EditorCommands.CutsceneKeyCommands, .. EditorCommands.CutsceneBindingCommands,
+            .. EditorCommands.CutsceneCameraCommands,
+        ];
 
         Assert.All(viewport, id => Assert.DoesNotContain(id, ribbon));
         Assert.All(scene, id => Assert.DoesNotContain(id, ribbon));

@@ -123,10 +123,69 @@ public sealed class ViewportToolbar : StackPanel
             _shell.Show2D(_viewport);
         }, "Look at the scene as a 2D game's camera does: without perspective, along +z, with +x to the right and +y up.");
         menu.Items.Add(new Separator());
+        LookThroughMenu(menu);
+        menu.Items.Add(new Separator());
         Command(menu, EditorCommands.FrameSelected);
         Command(menu, EditorCommands.FrameScene);
         Command(menu, EditorCommands.OrbitSelection);
         return menu;
+    }
+
+    // What the view draws from (see docs/editor/cutscene-editor.md#look-through): its own camera, the cutscene's cuts, or
+    // one of its camera bindings, of the active cutscene or the one that holds the preview. It is built as it opens, as
+    // the bindings change.
+    void LookThroughMenu(LiveMenu menu)
+    {
+        var index = _viewport.Index;
+        var look = menu.Submenu(menu.Items, () => _shell.Looks[index] switch
+        {
+            ViewLook.Cuts => "Look Through: Cuts",
+            ViewLook.Camera camera => $"Look Through: {camera.Owner.File.Bindings.FirstOrDefault(b => b.Id == camera.Binding)?.Name ?? "Camera"}",
+            _ => "Look Through",
+        }, "Draw this view from a camera of the cutscene that holds the preview, in place of its own.");
+        menu.OnOpening(() =>
+        {
+            look.Items.Clear();
+            var cutscene = _shell.ActiveCutscene ?? _shell.CutscenePreview.Owner;
+            var current = _shell.Looks[index];
+            look.Items.Add(Choice("Editor Camera", current is ViewLook.Editor, "Draw this view from its own camera.",
+                () => _shell.Looks.LookThroughEditor(index)));
+            if (cutscene == null || !_shell.IsEditing)
+            {
+                return;
+            }
+            look.Items.Add(Choice("Cuts", current is ViewLook.Cuts, "Draw this view from the camera of the camera cut at the playhead.", () =>
+            {
+                _shell.ActivateViewport(_viewport);
+                cutscene.LookThroughCuts();
+            }));
+            var cameras = cutscene.CameraBindings();
+            if (cameras.Count > 0)
+            {
+                look.Items.Add(new Separator());
+            }
+            foreach (var (id, name) in cameras)
+            {
+                var on = current is ViewLook.Camera c && c.Owner == cutscene && c.Binding == id;
+                look.Items.Add(Choice(name, on, "Draw this view from the camera, and move it with the view's fly, orbit and pan.", () =>
+                {
+                    _shell.ActivateViewport(_viewport);
+                    if (!cutscene.LooksThrough(id))
+                    {
+                        cutscene.ToggleLookThrough(id);
+                    }
+                }));
+            }
+        });
+    }
+
+    // A radio item of a menu that is built as it opens, so it reads its state then.
+    static MenuItem Choice(string header, bool on, string tip, Action click)
+    {
+        var item = new MenuItem { Header = header, ToggleType = MenuItemToggleType.Radio, IsChecked = on };
+        item.Click += (_, _) => click();
+        ToolTip.SetTip(item, tip);
+        return item;
     }
 
     LiveMenu ShadingMenu()

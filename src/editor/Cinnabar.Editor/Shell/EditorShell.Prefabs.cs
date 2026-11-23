@@ -310,6 +310,21 @@ public sealed partial class EditorShell
         return tree;
     }
 
+    // The components of each prefab's root, as its file has them, by the prefab's GUID: read once, until the next cook.
+    readonly Dictionary<string, HashSet<ulong>> _prefabRoots = [];
+
+    /// <summary>Whether a prefab's root entity has a component, as its file has it. False for a prefab that is not there.</summary>
+    public bool PrefabRootHas(string guid, ulong component)
+    {
+        if (!_prefabRoots.TryGetValue(guid, out var components))
+        {
+            var root = SceneOfPrefab(guid)?.Entities.FirstOrDefault(e => e.Parent == 0 && e.ParentPath == null);
+            components = root == null ? [] : [.. root.Components.Select(c => c.Id)];
+            _prefabRoots[guid] = components;
+        }
+        return components.Contains(component);
+    }
+
     // A prefab's scene as its file has it, or null. A USD stage's prefab is text that the cooker generates.
     Scene? SceneOfPrefab(string guid)
     {

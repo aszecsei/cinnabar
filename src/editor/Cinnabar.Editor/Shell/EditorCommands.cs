@@ -266,6 +266,7 @@ static partial class EditorCommands
         RegisterGameWindow(shell);
         RegisterProject(shell);
         RegisterCutscenes(shell);
+        RegisterCutsceneCameras(shell);
     }
 
     static string Nearest(IReadOnlyList<string> options, double value) => options.MinBy(o => Math.Abs(double.Parse(o, System.Globalization.CultureInfo.InvariantCulture) - value))!;

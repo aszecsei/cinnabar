@@ -68,7 +68,11 @@ public enum CutsceneBindingState
 /// What a binding's row shows (see docs/editor/cutscene-editor.md#bindings): whether it possesses or spawns, the name of
 /// its entity or prefab, and whether that is there, with the reason when it is not.
 /// </summary>
-public sealed record CutsceneBindingInfo(CutsceneBindingKind Kind, string? TargetName, CutsceneBindingState State, string? Reason = null);
+public sealed record CutsceneBindingInfo(CutsceneBindingKind Kind, string? TargetName, CutsceneBindingState State, string? Reason = null)
+{
+    /// <summary>Whether the binding is a camera, which a scene view can look through (see docs/editor/cutscene-editor.md#look-through).</summary>
+    public bool Camera { get; init; }
+}
 
 /// <summary>A row of the timeline: a binding, a track or one of a track's channels, with what it draws.</summary>
 public sealed class CutsceneTimelineRow
@@ -153,6 +157,8 @@ public enum CutsceneHitKind
     Fold,
     /// <summary>A track's mute toggle, each user's, which only the preview hears.</summary>
     Mute,
+    /// <summary>A camera binding's toggle, which makes the active scene view look through the camera.</summary>
+    LookThrough,
     /// <summary>A track's solo toggle, each user's, which only the preview hears.</summary>
     Solo,
     Lock,
@@ -522,6 +528,10 @@ public sealed class CutsceneTimelineLayout
             if (row.CanFold && x >= foldX && x < foldX + Indent)
             {
                 return new CutsceneHit(CutsceneHitKind.Fold, row, [row.Path], tick);
+            }
+            if (row.Binding is { Camera: true, State: CutsceneBindingState.Bound } && x >= Gutter - LockWidth)
+            {
+                return new CutsceneHit(CutsceneHitKind.LookThrough, row, [row.Path], tick);
             }
             if (row.Kind == CutsceneRowKind.Track && x >= MuteX)
             {
