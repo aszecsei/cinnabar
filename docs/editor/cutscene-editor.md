@@ -2,12 +2,12 @@
 
 The cutscene editor edits a cutscene (see [Content: Cutscenes](../content/kinds/cutscenes.md)), which the game plays as [Cinematics](../cinematics/README.md) describes. Each open one is a tab, `CutsceneEditorDocument`, over a `CutsceneEditor` in the shell, which holds its state. Docking can rebuild the view, and tests drive the editor without a window.
 
-The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, and the curve editor. These come next:
+The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, and the first part of the bindings. These come next:
 - a scene view that looks through the cut camera, and the camera tools ([#555](https://github.com/aszecsei/cinnabar/issues/555));
-- the bindings and the viewport's selection ([#554](https://github.com/aszecsei/cinnabar/issues/554)), with the filter that shows the tracks of the entities selected in the viewport;
+- the rest of the bindings ([#554](https://github.com/aszecsei/cinnabar/issues/554)): convert between possessed and spawned, pick a broken binding's entity, stand-ins for the bindings that a script gives, and Spawn Prefab without a drag;
 - the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)).
 
-**In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Preview](#preview) · [Keying](#keying) · [Curves](#curves)
+**In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Preview](#preview) · [Keying](#keying) · [Bindings](#bindings) · [Curves](#curves)
 
 ## The file
 
@@ -74,6 +74,7 @@ On the left is a header for each row, and on the right is the time area. Both sc
 - **The order:** the tracks that have no binding come first, as camera cuts, audio, events, presentation and sub-sequences. Then each binding has a row, with its tracks under it. Its fold arrow hides them.
 - **A track's row** shows its sections, ranges and triggers, and the keys of all its sections. Its fold arrow shows a row for each channel name, with that channel's keys.
 - **Glyphs:** keys and triggers closer than 2 pixels draw as one glyph, as the profiler merges zones.
+- **A binding's header** shows whether it possesses or spawns, its name, the name of its entity or prefab, and a warning when that is not there (see [Bindings](#bindings)).
 - **A track's header** shows its kind's color, its name, a mark when its lines have problems, and at its right end, mute (M), solo (S) and the lock.
 - **A click on a header** selects the binding or the track, so the details edit its name and settings.
 
@@ -424,6 +425,85 @@ A transform track whose space is `relative <id>` keys the world's pose in the ot
 - A preview value of a child's pose in an absolute track, or one relative to another binding, keys once the world shows it, at most 20 times a second.
 - A possess names an entity by its scene's asset GUID and its folded scene ID. An entity of a sublevel's part, which a binding names by the part's GUID, has no key button, as the editor does not name it by its part yet.
 - Auto-key asks to possess an entity at an edit or a gizmo's press, never while it only routes one, and not while another question is open.
+
+## Bindings
+
+A binding names what the cutscene's tracks act on (see [Cinematics: Bindings](../cinematics/bindings.md)). It is either an entity of a scene that it possesses, `possess = @<guid>/<id>`, or a prefab that it spawns for the cutscene, `spawn = $<guid>`. Each binding is a row of the timeline, with its tracks under it. The edits are in `CutsceneBindings`, in `Cinnabar.Editor.Document`. The editor's side is in `CutsceneEditor`.
+
+### A binding's row
+
+The header shows these items:
+- a dot for a possessed entity, or a ring for a spawned prefab;
+- the binding's name;
+- the name of its entity or prefab, when that name is different.
+
+`CutsceneEditor.InfoOf` gives each binding's kind, the name of its entity or prefab, and its state. `CutsceneTimelineLayout.Build` puts them on the row.
+
+| State | When | The header |
+|---|---|---|
+| Bound | The open scene has the entity, or the index has the prefab | The name of the entity or prefab |
+| Not loaded | The entity's scene is not open in the editor | An amber mark |
+| Broken | One of these: the open scene does not have the entity; no scene has the GUID; the index has no such prefab; the binding has neither `possess` nor `spawn`, or has both | A red mark |
+
+Put the pointer on a marked header to see the reason. The state comes from the scene documents and the asset index, not from the game. Thus it shows when the game is not connected. The rows change when a scene opens, closes or changes, and at each asset snapshot. Before the cook daemon sends its first snapshot, these rules apply:
+- a binding whose scene is not open shows as not loaded;
+- a spawned binding shows as bound, with no name.
+
+### Possess and spawn
+
+| Command | Key | What it does |
+|---|---|---|
+| **Add Binding: Selected Entities** (`cutscene.addBindingSelected`) | Ctrl+Shift+B | Adds a binding for each selected entity that no binding possesses yet |
+| **Rebind to Selection** (`cutscene.rebindToSelection`) | | Points the selected binding at the primary selected entity |
+| **Show Selected Entities' Bindings** (`cutscene.filterSelected`) | | Shows only the bindings of the selected entities (see [Selection sync](#selection-sync)) |
+
+These commands act on the active cutscene, or on the cutscene that holds the preview. As the keys do, they work wherever the keyboard is. Thus a designer can select entities in the viewport or the Outliner, and add bindings at once. Ctrl+B is Build Project, so the add command uses Ctrl+Shift+B. The commands are not in the ribbon, as the timeline's commands are not.
+
+- **Possess.** A new binding gets the name of its entity, made unique. It goes after the last binding, as a possess from a key does (see [Possessing](#possessing)). These entities are not possessed:
+  - entities that the game spawned;
+  - entities of a scene that has no GUID yet.
+
+  To possess an entity, you can also drag it from the Outliner onto the timeline. If the entity is in the selection, the whole selection is possessed.
+- **Spawn.** Drag a prefab from the content browser onto the timeline. The editor adds a binding that spawns the prefab, with the prefab's name. Some files make a prefab, for example a USD stage. A drop of such a file spawns its prefab, as a drop in the viewport places it.
+- Each add is one undo entry for all its bindings, and selects their rows. Undo follows the add while no other editor's tab is active (see [Undo](#undo)).
+
+### Rebind and delete
+
+- **Rebind.** There are two ways to rebind:
+  - the Rebind to Selection command;
+  - a drop of an entity on a binding's row while you hold Alt.
+
+  A rebind changes only the binding's `possess`. The tracks name the binding by its ID, so they do not change. The editor refuses a rebind in these conditions:
+  - the binding spawns a prefab: this change is a convert, which comes in the second part;
+  - another binding possesses the entity.
+- **Delete.** Select a binding's row and press Delete. The editor removes the binding and its tracks as one undo entry.
+  - If the binding has tracks, the editor asks first (`EditorShell.AskDeleteBinding`). The main window answers with a dialog.
+  - If other blocks name the binding by its ID, the editor does not delete it. These blocks can name a binding: another binding's `parent` or constraints; a camera cut's `camera` or constraints; a transform track's `space = relative <id>`; an event's `value = entity <id>`; a sub-sequence's `bind`. The refusal names those blocks (`CutsceneEditor.DeleteBindingRefusal`).
+- **Rename.** Use the name box in the details strip, as for a track. A rename changes only the name.
+
+### Selection sync
+
+- **A binding's row selects its entity.** When you select binding rows on the timeline, the editor selects the entities that they possess in the viewport and the Outliner.
+  - Some rows have no entity in the world: a broken, not loaded or spawned binding's row. Such a row does not change the world's selection. Thus the entity that a rebind would use stays selected.
+- **An entity selects its row.** When you select an entity that a binding possesses, the editor selects that binding's row and scrolls to it.
+  - If you select an entity that no binding possesses, or you clear the selection, the timeline's selection does not change. Thus keys stay selected while the designer picks an entity to key.
+- One side does not write back to the other while it writes (`CutsceneEditor._syncing`).
+- **Selected entities** is the toggle beside the search box. When it is on, the timeline shows only these rows:
+  - the bindings of the entities selected in the viewport or the Outliner;
+  - their tracks.
+
+  It hides the tracks that no binding has. The rows follow the selection while the toggle is on. The toggle is a field of `CutsceneRowFilter`, so every build of the rows uses it.
+
+### Limits
+
+- A spawned binding's row does not select the entity that the preview spawned, because the game does not send which entity that is.
+- These items come in the second part of [#554](https://github.com/aszecsei/cinnabar/issues/554):
+  - convert a possessed binding to a spawned one, and back;
+  - a Pick button on a broken row, and a list of the entities that have the old name;
+  - stand-ins for the bindings that a script gives;
+  - a Spawn Prefab command, which needs an asset picker;
+  - a drag from the viewport;
+  - a first transform key at a spawn's drop point.
 
 ## Curves
 

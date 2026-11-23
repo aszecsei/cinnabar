@@ -180,7 +180,14 @@ static partial class EditorCommands
         {
             if (shell.ActiveCutscene is { TimelineFocused: true } cutscene)
             {
-                cutscene.DeleteSelected(ripple: false);
+                if (cutscene.CanEditSelection)
+                {
+                    cutscene.DeleteSelected(ripple: false);
+                }
+                else
+                {
+                    _ = cutscene.DeleteBinding();
+                }
             }
             else
             {
@@ -188,11 +195,11 @@ static partial class EditorCommands
             }
         })
         {
-            Description = "Delete the selected entities and their children, or in mesh mode the selected vertices, edges or faces, or on a cutscene's timeline, the selected sections, events and keys.",
+            Description = "Delete the selected entities and their children, or in mesh mode the selected vertices, edges or faces, or on a cutscene's timeline, the selected sections, events and keys, or the selected binding with its tracks.",
             Icon = "delete",
             Shortcut = "Delete",
             CanExecuteWhen = () => shell.ActiveCutscene is { TimelineFocused: true } cutscene
-                ? cutscene.CanEditSelection
+                ? cutscene.CanEditSelection || cutscene.CanDeleteBinding
                 : shell.Mesh.InMeshMode ? !shell.Mesh.MeshSelection.IsEmpty : shell.SelectedSceneEntities.Count > 0,
         });
     }

@@ -322,10 +322,21 @@ public sealed class CutsceneTimelineInput
             case Gesture.Box:
                 break;
             default:
+                // Over a binding's header that is not bound, the tip says why.
+                var tip = Layout.HitTest(x, y, View, ScrollY) is { Kind: CutsceneHitKind.Header, Row.Binding: { State: not CutsceneBindingState.Bound, Reason: { } reason } } ? reason : null;
+                if (tip != Tooltip)
+                {
+                    Tooltip = tip;
+                    Invalidated?.Invoke();
+                }
                 return;
         }
         Invalidated?.Invoke();
     }
+
+    /// <summary>The binding's row under a point, for a drop on it, or null.</summary>
+    public CutsceneTimelineRow? BindingRowAt(double x, double y) =>
+        Layout.HitTest(x, y, View, ScrollY) is { Row: { Kind: CutsceneRowKind.Binding } row } ? row : null;
 
     // The press moved past the slop: the pending drag begins.
     void Start()

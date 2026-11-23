@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
+using Cinnabar.Editor.Tools;
 using static Cinnabar.Editor.Panels.Kit;
 
 namespace Cinnabar.Editor.Cutscenes;
@@ -45,7 +46,9 @@ sealed class CutsceneDetails : ScrollViewer
         {
             return;
         }
-        var shown = block == null ? "" : $"{_editor.Selection}#{string.Join("\n", block.LineTexts)}#{_editor.File.Rate}";
+        // A binding's state and whether a delete can remove it depend on the scenes and the other blocks.
+        var binding = block?.Kind == CutsceneBlockKind.Binding ? $"#{_editor.InfoOf(block)}#{_editor.DeleteBindingRefusal()}" : "";
+        var shown = block == null ? "" : $"{_editor.Selection}#{string.Join("\n", block.LineTexts)}#{_editor.File.Rate}{binding}";
         if (shown == _shown)
         {
             return;
@@ -72,6 +75,26 @@ sealed class CutsceneDetails : ScrollViewer
                 }
                 _content.Children.Add(Row("Name", ValueBox(block.Name ?? "", "name", text =>
                     _editor.EditSelected("Rename", b => b.SetName(text.Trim())))));
+                if (block.Kind == CutsceneBlockKind.Binding)
+                {
+                    // See docs/editor/cutscene-editor.md#bindings.
+                    var info = _editor.InfoOf(block);
+                    var what = info.Kind switch
+                    {
+                        CutsceneBindingKind.Possessed => "Possesses",
+                        CutsceneBindingKind.Spawned => "Spawns",
+                        _ => "Binds",
+                    };
+                    _content.Children.Add(Row(what, new TextBlock { Text = info.TargetName ?? "?", FontSize = 12 }));
+                    if (info.Reason is { } reason)
+                    {
+                        _content.Children.Add(Dim(info.State == CutsceneBindingState.NotLoaded ? $"Not loaded: {reason}" : $"Broken: {reason}"));
+                    }
+                    if (_editor.DeleteBindingRefusal() is { } refusal)
+                    {
+                        _content.Children.Add(Dim($"Delete: {refusal}"));
+                    }
+                }
                 break;
             case CutsceneBlockKind.Section or CutsceneBlockKind.Range:
                 _content.Children.Add(TicksRow("Start", "Move Start", b => b.Start, (b, t) => b.SetSpan(t, b.End ?? t + 1), rate));

@@ -36,6 +36,7 @@ public sealed class CutsceneEditorView : DockPanel
     readonly TextBlock _time = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0) };
     readonly TextBlock _status = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
     readonly TextBox _search = new() { PlaceholderText = "Filter tracks (Ctrl+F)", Classes = { "value-edit" }, MinWidth = 200, FontSize = 12 };
+    readonly ToggleButton _selectedOnly = new() { Content = "Selected entities", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(8, 0, 0, 0) };
     readonly ToggleButton _curves = new() { Content = "Curves", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(8, 0, 0, 0) };
     readonly RowDefinition _curveRow = new(0, GridUnitType.Pixel);
     readonly RowDefinition _curveSplitRow = new(0, GridUnitType.Pixel);
@@ -151,9 +152,12 @@ public sealed class CutsceneEditorView : DockPanel
         };
         ToolTip.SetTip(_keysUnder, "Show only the tracks with keys in the span of the selection, as it is when this is turned on.");
         _keysUnder.IsCheckedChanged += (_, _) => editor.SetKeysUnderSelection(_keysUnder.IsChecked == true);
+        ToolTip.SetTip(_selectedOnly, "Show only the bindings of the entities selected in the viewport or the Outliner, and their tracks.");
+        _selectedOnly.IsCheckedChanged += (_, _) => editor.SetSelectedOnly(_selectedOnly.IsChecked == true);
         var strip = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(8, 4) };
         strip.Children.Add(new Border { Classes = { "value-box", "editable" }, Child = _search });
         strip.Children.Add(_keysUnder);
+        strip.Children.Add(_selectedOnly);
         var timelinePane = new DockPanel();
         SetDock(strip, DockSide.Top);
         timelinePane.Children.Add(strip);
@@ -320,6 +324,10 @@ public sealed class CutsceneEditorView : DockPanel
         _play.Content = CommandViews.Icon(preview.IsPlayingIn(_editor) ? "pause" : "play", 16);
         _play.IsEnabled = preview.CanPlay(_editor);
         _here.IsVisible = preview.CanTake(_editor);
+        if (_selectedOnly.IsChecked != _editor.SelectedOnly)
+        {
+            _selectedOnly.IsChecked = _editor.SelectedOnly;
+        }
         if (_keysUnder.IsChecked != _editor.KeysUnderSelection)
         {
             _keysUnder.IsChecked = _editor.KeysUnderSelection;

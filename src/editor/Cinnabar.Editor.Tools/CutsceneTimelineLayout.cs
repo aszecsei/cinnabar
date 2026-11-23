@@ -33,14 +33,40 @@ public sealed record CutsceneTimelineItem(CutsceneItemKind Kind, int Start, int 
 
 /// <summary>
 /// Which rows the timeline shows (see docs/editor/cutscene-editor.md#search-and-filter): those whose binding's or
-/// track's name holds a text, ignoring case, and with keysIn, only the tracks with a key in that span of time.
+/// track's name holds a text, ignoring case, with keysIn, only the tracks with a key in that span of time, and with
+/// bindings, only those bindings and their tracks (see docs/editor/cutscene-editor.md#selection-sync).
 /// </summary>
-public sealed record CutsceneRowFilter(string Text, (int Start, int End)? KeysIn)
+public sealed record CutsceneRowFilter(string Text, (int Start, int End)? KeysIn, IReadOnlySet<int>? Bindings = null)
 {
     public static readonly CutsceneRowFilter None = new("", null);
 
-    public bool IsNone => Text.Length == 0 && KeysIn == null;
+    public bool IsNone => Text.Length == 0 && KeysIn == null && Bindings == null;
 }
+
+public enum CutsceneBindingKind
+{
+    /// <summary>It names an entity of a scene, with <c>possess</c>.</summary>
+    Possessed,
+    /// <summary>It spawns a prefab for the cutscene, with <c>spawn</c>.</summary>
+    Spawned,
+    /// <summary>It has neither <c>possess</c> nor <c>spawn</c>, or both.</summary>
+    Unknown,
+}
+
+public enum CutsceneBindingState
+{
+    Bound,
+    /// <summary>Its entity's scene is not open in the editor.</summary>
+    NotLoaded,
+    /// <summary>Its entity, its scene or its prefab is missing.</summary>
+    Broken,
+}
+
+/// <summary>
+/// What a binding's row shows (see docs/editor/cutscene-editor.md#bindings): whether it possesses or spawns, the name of
+/// its entity or prefab, and whether that is there, with the reason when it is not.
+/// </summary>
+public sealed record CutsceneBindingInfo(CutsceneBindingKind Kind, string? TargetName, CutsceneBindingState State, string? Reason = null);
 
 /// <summary>A row of the timeline: a binding, a track or one of a track's channels, with what it draws.</summary>
 public sealed class CutsceneTimelineRow
@@ -76,6 +102,9 @@ public sealed class CutsceneTimelineRow
 
     /// <summary>Whether the rows under it are hidden.</summary>
     public bool Folded { get; internal set; }
+
+    /// <summary>For a binding's row, what it binds and whether that is there, when the layout was given a way to tell.</summary>
+    public CutsceneBindingInfo? Binding { get; internal set; }
 
     /// <summary>Whether the track's asset sets <c>muted = true</c>, which no player plays.</summary>
     public bool AssetMuted { get; internal set; }
@@ -202,9 +231,12 @@ public sealed class CutsceneTimelineLayout
     /// sub-sequences), then each binding with its tracks under it, and under a track, a row for each channel name of its
     /// sections. A binding shows its tracks unless toggled is folding it, and a track hides its channels unless toggled
     /// opens it: toggled holds the paths whose fold is not the default. A filter leaves out the tracks that it does not
-    /// show, and a binding with none of its tracks shown, unless the text names the binding and no span is given.
+    /// show, and a binding with none of its tracks shown, unless the text names the binding and no span is given. A
+    /// filter's bindings leave out every other binding, and the tracks that no binding has. bindingInfo tells each
+    /// binding's row what it binds.
     /// </summary>
-    public static CutsceneTimelineLayout Build(CutsceneFile file, IReadOnlySet<string> toggled, CutsceneRowFilter? filter = null)
+    public static CutsceneTimelineLayout Build(CutsceneFile file, IReadOnlySet<string> toggled, CutsceneRowFilter? filter = null,
+        Func<CutsceneBlock, CutsceneBindingInfo?>? bindingInfo = null)
     {
         filter ??= CutsceneRowFilter.None;
         var rows = new List<CutsceneTimelineRow>();
@@ -214,7 +246,7 @@ public sealed class CutsceneTimelineLayout
         bool Names(string? name) => filter.Text.Length == 0 || (name?.Contains(filter.Text, StringComparison.OrdinalIgnoreCase) ?? false);
         bool HasKeysIn(CutsceneBlock track) => filter.KeysIn is not { } span || track.Children.Any(s => s is { Kind: CutsceneBlockKind.Section, Start: { } start }
             && s.Descendants().Any(k => k.Kind == CutsceneBlockKind.Key && k.Start is { } t && start + t >= span.Start && start + t <= span.End));
-        var master = file.Tracks.Where(t => BindingOf(t) == null)
+        var master = file.Tracks.Where(t => BindingOf(t) == null && filter.Bindings == null)
             .OrderBy(t => Array.IndexOf(MasterOrder, t.TrackKind) is var i and >= 0 ? i : MasterOrder.Length)
             .Where(t => Names(TrackLabel(t)) && HasKeysIn(t))
             .ToList();
@@ -224,12 +256,17 @@ public sealed class CutsceneTimelineLayout
         }
         foreach (var binding in file.Bindings)
         {
+            if (filter.Bindings != null && (binding.Id is not { } id || !filter.Bindings.Contains(id)))
+            {
+                continue;
+            }
             var path = CutsceneFile.PathOf(binding);
             var named = filter.Text.Length > 0 && Names(binding.Name);
             var tracks = file.Tracks.Where(t => binding.Id != null && BindingOf(t) == binding.Id)
                 .Where(t => (named || Names(TrackLabel(t))) && HasKeysIn(t))
                 .ToList();
-            if (!filter.IsNone && tracks.Count == 0 && !(named && filter.KeysIn == null))
+            var textOrKeys = filter.Text.Length > 0 || filter.KeysIn != null;
+            if (textOrKeys && tracks.Count == 0 && !(named && filter.KeysIn == null))
             {
                 continue;
             }
@@ -237,6 +274,7 @@ public sealed class CutsceneTimelineLayout
             {
                 CanFold = tracks.Count > 0,
                 Folded = toggled.Contains(path),
+                Binding = bindingInfo?.Invoke(binding),
             };
             rows.Add(row);
             if (row.Folded)

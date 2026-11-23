@@ -52,6 +52,7 @@ sealed class CutsceneTimeline : Control
     static readonly IPen LockedPen = new Pen(new SolidColorBrush(Color.Parse("#FFD24A")), 1.2);
     static readonly IBrush SilentFill = new SolidColorBrush(Color.Parse("#4A4A50"));
     static readonly IBrush MutedBrush = new SolidColorBrush(Color.Parse("#E69138"));
+    static readonly IBrush WarnBrush = new SolidColorBrush(Color.Parse("#E5A93B"));
     static readonly IBrush SoloBrush = new SolidColorBrush(Color.Parse("#FFD24A"));
     static readonly IPen StrikePen = new Pen(new SolidColorBrush(Color.Parse("#9A9AA2")), 1);
     static readonly IBrush MarkerDefault = new SolidColorBrush(Color.Parse("#F5A623"));
@@ -67,6 +68,11 @@ sealed class CutsceneTimeline : Control
         Focusable = true;
         ClipToBounds = true;
         Input.Invalidated += InvalidateVisual;
+        // Entities from the Outliner possess, prefabs from the content browser spawn, and an entity with Alt on a
+        // binding's row rebinds it (see docs/editor/cutscene-editor.md#bindings).
+        DragDrop.SetAllowDrop(this, true);
+        AddHandler(DragDrop.DragOverEvent, (_, e) => e.DragEffects = DropOf(e) ? DragDropEffects.Link : DragDropEffects.None);
+        AddHandler(DragDrop.DropEvent, (_, e) => Drop(e));
         void Changed() => Input.Refresh();
         void Frame() => Input.Frame();
         void Playhead() => Input.ShowPlayhead();
@@ -433,10 +439,40 @@ sealed class CutsceneTimeline : Control
                     context.FillRectangle(Fill(r.TrackKind, false), new Rect(x, y + 7, 8, 8), 2);
                     x += 12;
                 }
+                // A binding's row (see docs/editor/cutscene-editor.md#bindings): a dot for a possessed entity, a ring for a
+                // spawned prefab, the name, the entity's or prefab's name after it, and a warning when it is not bound.
+                var warn = r.Binding is { State: not CutsceneBindingState.Bound };
+                if (r.Binding is { } info)
+                {
+                    var center = new Point(x + 4, y + Layout.RowHeight / 2);
+                    var brush = warn ? WarnBrush : DimText;
+                    if (info.Kind == CutsceneBindingKind.Spawned)
+                    {
+                        context.DrawEllipse(null, new Pen(brush, 1.5), center, 3.5, 3.5);
+                    }
+                    else
+                    {
+                        context.DrawEllipse(brush, null, center, 4, 4);
+                    }
+                    x += 12;
+                }
                 var label = Text(r.Label, r.Kind == CutsceneRowKind.Channel ? DimText : TextBrush, r.Kind == CutsceneRowKind.Binding ? 12 : 11);
-                using (context.PushClip(new Rect(x, y, Layout.MuteX - x - 12, Layout.RowHeight)))
+                var right = r.Kind == CutsceneRowKind.Binding ? Layout.Gutter - (warn ? 22 : 6) : Layout.MuteX - 12;
+                using (context.PushClip(new Rect(x, y, right - x, Layout.RowHeight)))
                 {
                     context.DrawText(label, new Point(x, y + (Layout.RowHeight - label.Height) / 2));
+                    if (r.Binding?.TargetName is { } target && target != r.Label)
+                    {
+                        var dim = Text(target, DimText, 11);
+                        context.DrawText(dim, new Point(x + label.Width + 6, y + (Layout.RowHeight - dim.Height) / 2));
+                    }
+                }
+                if (warn)
+                {
+                    var sign = Text("!", BarText, 10);
+                    var at = new Point(Layout.Gutter - 14, y + Layout.RowHeight / 2);
+                    context.DrawEllipse(r.Binding!.State == CutsceneBindingState.Broken ? ErrorBrush : WarnBrush, null, at, 6, 6);
+                    context.DrawText(sign, new Point(at.X - sign.Width / 2, at.Y - sign.Height / 2));
                 }
                 if (problems.Contains(r.Path) && r.Kind != CutsceneRowKind.Channel)
                 {
@@ -492,6 +528,25 @@ sealed class CutsceneTimeline : Control
     {
         base.OnSizeChanged(e);
         Input.Resize(e.NewSize.Width, e.NewSize.Height);
+    }
+
+    // Whether a drag holds what the timeline takes: an entity, or an asset that places a prefab.
+    bool DropOf(DragEventArgs e) =>
+        !_editor.Document.InTransaction && (EntityView.Dropped(e) != 0 || ContentBrowserView.DroppedAll(e) is { } assets && _editor.PrefabsOf(assets).Count > 0);
+
+    void Drop(DragEventArgs e)
+    {
+        var at = e.GetPosition(this);
+        if (EntityView.Dropped(e) is not 0 and var handle)
+        {
+            _editor.DropEntity(handle, Input.BindingRowAt(at.X, at.Y)?.Path, e.KeyModifiers.HasFlag(KeyModifiers.Alt));
+        }
+        else if (ContentBrowserView.DroppedAll(e) is { } assets)
+        {
+            _editor.Spawn(_editor.PrefabsOf(assets));
+        }
+        Focus();
+        e.Handled = true;
     }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)

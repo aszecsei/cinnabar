@@ -62,6 +62,9 @@ static partial class EditorCommands
     public const string CutsceneCurveValueSnap = "cutscene.curveValueSnap";
     public const string CutscenePreInfinity = "cutscene.preInfinity";
     public const string CutscenePostInfinity = "cutscene.postInfinity";
+    public const string CutsceneAddBindingSelected = "cutscene.addBindingSelected";
+    public const string CutsceneRebindToSelection = "cutscene.rebindToSelection";
+    public const string CutsceneFilterSelected = "cutscene.filterSelected";
 
     /// <summary>The timeline's commands, which act on the active cutscene while its timeline has the keyboard.</summary>
     public static readonly string[] CutsceneTimelineCommands =
@@ -83,6 +86,12 @@ static partial class EditorCommands
     /// </summary>
     public static readonly string[] CutsceneKeyCommands =
         [CutsceneKeyTransform, CutsceneKeyTrackedFields, CutsceneAutoKey, CutsceneAutoKeyAddTracks, CutsceneKeyPreviewValues];
+
+    /// <summary>
+    /// The bindings' commands, which act between the entities selected in the viewport or the Outliner and the active
+    /// cutscene, or the one that holds the preview, wherever the keyboard is (see docs/editor/cutscene-editor.md#bindings).
+    /// </summary>
+    public static readonly string[] CutsceneBindingCommands = [CutsceneAddBindingSelected, CutsceneRebindToSelection, CutsceneFilterSelected];
 
     // The cutscene editor's timeline (see docs/editor/cutscene-editor.md#the-timeline). Its keys are bare letters, which
     // the viewport and the other panels use too, so each command acts only while the timeline has the keyboard. Delete
@@ -311,6 +320,35 @@ static partial class EditorCommands
             Icon = "cutscene",
             Shortcut = "Enter",
             CanExecuteWhen = () => shell.Keying.KeyPreviewValuesRefusal() == null,
+        });
+        // Bindings (see docs/editor/cutscene-editor.md#bindings) act on the entities selected in the viewport or the
+        // Outliner, where the keyboard is when the designer picks them.
+        CutsceneEditor? Bindings() => shell.ActiveCutscene ?? shell.CutscenePreview.Owner;
+        commands.Register(new Command(CutsceneAddBindingSelected, "Add Binding: Selected Entities", () => Bindings()?.Possess(shell.Selection.Entities))
+        {
+            Description = "Add a binding to the cutscene that possesses each selected entity that no binding possesses yet.",
+            Icon = "cutscene",
+            Shortcut = "Ctrl+Shift+B",
+            CanExecuteWhen = () => Bindings() is { } editor && editor.PossessRefusal() == null,
+        });
+        commands.Register(new Command(CutsceneRebindToSelection, "Rebind to Selection", () => Bindings()?.Rebind(shell.Selection.Entity))
+        {
+            Description = "Point the selected binding at the selected entity, and keep its tracks.",
+            Icon = "cutscene",
+            CanExecuteWhen = () => Bindings() is { } editor && editor.RebindRefusal(shell.Selection.Entity) == null,
+        });
+        commands.Register(new Command(CutsceneFilterSelected, "Show Selected Entities' Bindings", () =>
+        {
+            if (Bindings() is { } editor)
+            {
+                editor.SetSelectedOnly(!editor.SelectedOnly);
+            }
+        })
+        {
+            Description = "Show only the bindings of the entities selected in the viewport or the Outliner, and their tracks, or show them all again.",
+            Icon = "search",
+            CanExecuteWhen = () => Bindings() != null,
+            IsCheckedWhen = () => Bindings()?.SelectedOnly == true,
         });
         commands.Register(new Command(CutsceneKeysUnderSelection, "Keys Under Selection", () =>
         {
