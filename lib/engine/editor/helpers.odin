@@ -6,6 +6,7 @@ import "core:math/linalg"
 import "cinnabar:engine/ai"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/cutscene"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
@@ -23,12 +24,15 @@ import "cinnabar:engine/volume"
 // plays, its corridor, its corners, its neighbors and its velocities.
 
 // A helper of an entity that is not selected is grey and faint. A selected light's is its color, made bright.
-@(private = "file")
+@(private)
 UNSELECTED :: [4]f32{0.6, 0.6, 0.6, 0.5}
 @(private = "file")
 VOLUME_COLOR :: [4]f32{0.3, 0.8, 1, 1}
-@(private = "file")
+@(private)
 CAMERA_COLOR :: [4]f32{1, 1, 1, 1}
+// The frustum of the camera that the cutscene preview shows at its playhead: the timeline's camera-cut color, #E69138.
+@(private)
+ON_SCREEN_CAMERA :: [4]f32{0.902, 0.569, 0.22, 1}
 // A reflection probe's boxes, and their handles (see box_handle_vertices): the influence box, its fade inside it, and
 // the projection box.
 @(private)
@@ -394,8 +398,14 @@ draw_entity_helpers :: proc(
 			)
 		}
 	}
-	if c := ecs.get(w, entity, render.Camera); c != nil {
-		color := selected ? CAMERA_COLOR : UNSELECTED
+	if c := ecs.get(w, entity, render.Camera); c != nil && !is_looked_through(e, w, entity) {
+		color := UNSELECTED
+		switch {
+		case selected:
+			color = CAMERA_COLOR
+		case entity == on_screen_camera(e):
+			color = ON_SCREEN_CAMERA
+		}
 		fov := render.camera_vertical_fov(w, entity)
 		half_y := math.tan(fov / 2) * FRUSTUM_LENGTH
 		// An orthographic camera shows a box: as wide at the camera as ahead of it.
@@ -427,6 +437,32 @@ draw_entity_helpers :: proc(
 			}
 		}
 	}
+}
+
+// on_screen_camera is the camera that the open cutscene preview shows at its playhead, or 0 with no preview or no shot.
+@(private = "file")
+on_screen_camera :: proc(e: ^Editor) -> ecs.Entity {
+	p, open := &e.session.cutscene_previews.open.?
+	if !open {
+		return 0
+	}
+	shot, has := p.live.evaluation.cut.shown.(cutscene.Cut_Shot)
+	return shot.entity if has else 0
+}
+
+// is_looked_through is whether a scene view looks through the camera. The helpers' lines are the frame's, which every
+// scene view draws, so the frustum of such a camera is not drawn: it would be in the way of that view.
+@(private = "file")
+is_looked_through :: proc(e: ^Editor, w: ^ecs.World, entity: ecs.Entity) -> bool {
+	for &v in e.session.view.viewports {
+		if open, is_open := v.open.?; !is_open || open.kind != .Scene {
+			continue
+		}
+		if looked, _, looks := look_camera(e, w, &v); looks && looked == entity {
+			return true
+		}
+	}
+	return false
 }
 
 // Icon_Kind is the glyph of an entity's icon. Matches ICON_* in icons.hlsl.

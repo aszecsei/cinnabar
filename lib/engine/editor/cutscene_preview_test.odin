@@ -16,6 +16,7 @@ import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/camera"
 import "cinnabar:engine/cutscene"
+import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 import "cinnabar:engine/render"
@@ -1177,14 +1178,9 @@ preview_values_move_a_binding_by_its_id :: proc(t: ^testing.T) {
 	testing.expect_value(t, x_of(f, shot), 0)
 }
 
-// A scene view that looks through a camera draws the frame from that camera's view, with its lens, and its histories
-// start again only on the frame that the camera changes: at the look, at a cut, and back at its own camera.
-@(test)
-a_looking_scene_view_draws_from_the_camera_and_cuts_when_it_changes :: proc(t: ^testing.T) {
-	f := setup(t, cameras = true)
-	renderer := new(render.Renderer)
-	defer free(renderer)
-	defer teardown(f)
+// give_renderer gives the editor a renderer with a viewport target, which draws nothing, so frame_viewports plans views.
+@(private = "file")
+give_renderer :: proc(f: ^Fixture, renderer: ^render.Renderer) {
 	renderer.platform = &f.platform
 	f.platform.gpu_viewport_target = proc(id: int, size: [2]u32) -> (gpu.Preview_Target, bool) {
 		return {
@@ -1206,6 +1202,17 @@ a_looking_scene_view_draws_from_the_camera_and_cuts_when_it_changes :: proc(t: ^
 	f.platform.gpu_destroy_upscaler = proc(_: gpu.Upscaler) {}
 	f.platform.gpu_destroy_pipeline = proc(_: gpu.Pipeline) {}
 	f.editor.renderer = renderer
+}
+
+// A scene view that looks through a camera draws the frame from that camera's view, with its lens, and its histories
+// start again only on the frame that the camera changes: at the look, at a cut, and back at its own camera.
+@(test)
+a_looking_scene_view_draws_from_the_camera_and_cuts_when_it_changes :: proc(t: ^testing.T) {
+	f := setup(t, cameras = true)
+	renderer := new(render.Renderer)
+	defer free(renderer)
+	defer teardown(f)
+	give_renderer(f, renderer)
 	own := link.Editor_Camera {
 		viewport     = 0,
 		position     = {-(3 * METER), 0, 0},
@@ -1277,4 +1284,142 @@ a_looking_scene_view_draws_from_the_camera_and_cuts_when_it_changes :: proc(t: ^
 	drawn = draw(t, f)
 	testing.expect_value(t, drawn.view.position, ecs.World_Position{own.position})
 	testing.expect(t, drawn.cut)
+}
+
+// A binding's field, which the editor's values name by the binding's ID, sets the lens of the spawned camera, and a scene
+// view that looks through it draws with that lens. It holds across a new blob, and a time lifts it.
+@(test)
+preview_values_set_a_bindings_field_by_its_id :: proc(t: ^testing.T) {
+	f := setup(t, cameras = true)
+	renderer := new(render.Renderer)
+	defer free(renderer)
+	defer teardown(f)
+	give_renderer(f, renderer)
+	write_blob(t, f, CUTSCENE_GUID, cutscene_blob(f, 10, key = 2), "preview")
+	step(
+		f,
+		open(1, SECOND / 2, unsaved = true),
+		link.Open_Viewport{viewport = 0, kind = .Scene, width = 64, height = 64},
+		link.Editor_Camera{viewport = 0, rotation = {0, 0, 0, 1}, vertical_fov = 1, near = 0.05},
+		look(1, .Binding, SHOT_A),
+	)
+	drawn_fov :: proc(t: ^testing.T, f: ^Fixture, loc := #caller_location) -> f32 {
+		views := frame_viewports(&f.editor, &f.world)
+		defer free_all(f.platform.frame_allocator)
+		testing.expect_value(t, len(views), 1, loc = loc)
+		if len(views) != 1 {
+			return 0
+		}
+		view := views[0].view.? or_else {}
+		return view.projection.(render.Perspective).vertical_fov
+	}
+	wide := render.cinematic_vertical_fov({focal_length = 20})
+	testing.expect_value(t, drawn_fov(t, f), render.cinematic_vertical_fov({focal_length = 50}))
+
+	values := link.Cutscene_Preview_Values {
+		ticket = 1,
+		tick   = SECOND / 2,
+		serial = 5,
+		fields = {
+			{
+				target = {kind = .Binding, scene = 0, entity = SHOT_A},
+				component = u64(render.CINEMATIC_CAMERA_ID),
+				field = format.scene_field_hash("focal_length"),
+				value = number(20),
+			},
+		},
+	}
+	step(f, values)
+	shown_preview, told := find_message(step(f), link.Cutscene_Preview_Shown)
+	testing.expect(t, told)
+	testing.expect_value(t, shown_preview.shown.values, 5)
+	testing.expect_value(t, drawn_fov(t, f), wide)
+	frame(f, 0)
+	testing.expect_value(t, drawn_fov(t, f), wide)
+
+	// A new blob under the values: the camera is the same binding, and the values stay on it.
+	write_blob(t, f, CUTSCENE_GUID, cutscene_blob(f, 10, key = 3), "preview")
+	(&f.editor.session.cutscene_previews.open.?).modified = 1
+	frame(f, 0)
+	step(f)
+	testing.expect_value(t, drawn_fov(t, f), wide)
+
+	// A time lifts them, and the cutscene's lens shows again.
+	step(f, link.Cutscene_Preview_Time{ticket = 1, tick = SECOND / 4})
+	testing.expect_value(t, drawn_fov(t, f), render.cinematic_vertical_fov({focal_length = 50}))
+	testing.expect(t, (&f.editor.session.cutscene_previews.open.?).values == nil)
+}
+
+// The frustum of the camera that the preview shows at its playhead is orange, the others' are grey, and the selected
+// camera's is white. A camera that a scene view looks through has none, as its frustum is in that view's way.
+@(test)
+the_helpers_color_the_camera_on_screen_and_skip_the_one_looked_through :: proc(t: ^testing.T) {
+	when !debug.DEBUG_DRAW {
+		return
+	}
+	f := setup(t, cameras = true)
+	defer teardown(f)
+	lines: debug.Draw
+	debug.init(&lines, runtime.heap_allocator())
+	defer debug.destroy(&lines)
+	step(
+		f,
+		open(1, SECOND / 2),
+		link.Open_Viewport{viewport = 0, kind = .Scene, width = 64, height = 64},
+	)
+	f.editor.session.view.viewports[0].settings.helpers = .All
+	counts :: proc(f: ^Fixture, lines: ^debug.Draw) -> (orange, grey, white: int) {
+		debug.end_frame(lines)
+		draw_helpers(&f.editor, &f.world, lines)
+		for l in debug.frame_lines(lines) {
+			switch l.color {
+			case ON_SCREEN_CAMERA:
+				orange += 1
+			case UNSELECTED:
+				grey += 1
+			case CAMERA_COLOR:
+				white += 1
+			}
+		}
+		return
+	}
+	// Each frustum is eight lines. Shot A is on screen before 1 s.
+	orange, grey, white := counts(f, &lines)
+	testing.expect_value(t, orange, 8)
+	testing.expect_value(t, grey, 8)
+	testing.expect_value(t, white, 0)
+
+	// The cut at 1 s puts shot B on screen, and a selected camera is white whichever.
+	step(f, link.Cutscene_Preview_Time{ticket = 1, tick = 3 * SECOND / 2})
+	probe := f.editor.session.view.viewports[0]
+	probe.look = {
+		serial  = 99,
+		ticket  = 1,
+		source  = .Binding,
+		binding = SHOT_B,
+	}
+	shot_b, _, found := look_camera(&f.editor, &f.world, &probe)
+	testing.expect(t, found)
+	orange, grey, white = counts(f, &lines)
+	testing.expect_value(t, orange, 8)
+	testing.expect_value(t, grey, 8)
+	append(&f.editor.session.view.selection, shot_b)
+	orange, grey, white = counts(f, &lines)
+	testing.expect_value(t, orange, 0)
+	testing.expect_value(t, grey, 8)
+	testing.expect_value(t, white, 8)
+	clear(&f.editor.session.view.selection)
+
+	// A view that looks through shot B takes its frustum away, and through the cuts, too.
+	step(f, look(1, .Binding, SHOT_B))
+	orange, grey, white = counts(f, &lines)
+	testing.expect_value(t, orange, 0)
+	testing.expect_value(t, grey, 8)
+	step(f, look(2, .Cuts))
+	orange, grey, white = counts(f, &lines)
+	testing.expect_value(t, orange, 0)
+	testing.expect_value(t, grey, 8)
+	step(f, look(3, .Editor_Camera))
+	orange, grey, white = counts(f, &lines)
+	testing.expect_value(t, orange, 8)
 }

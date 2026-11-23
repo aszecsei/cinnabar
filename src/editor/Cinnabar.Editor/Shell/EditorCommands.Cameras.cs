@@ -9,12 +9,14 @@ static partial class EditorCommands
     public const string CutsceneLookThroughCuts = "cutscene.lookThroughCuts";
     public const string CutsceneEditorCamera = "cutscene.editorCamera";
     public const string CutsceneNewCameraFromView = "cutscene.newCameraFromView";
+    public const string CutscenePickFocus = "cutscene.pickFocus";
 
     /// <summary>
     /// The camera commands, which act between the active scene view and the active cutscene, or the one that holds the
     /// preview, wherever the keyboard is (see docs/editor/cutscene-editor.md#cameras).
     /// </summary>
-    public static readonly string[] CutsceneCameraCommands = [CutsceneLookThrough, CutsceneLookThroughCuts, CutsceneEditorCamera, CutsceneNewCameraFromView];
+    public static readonly string[] CutsceneCameraCommands = [CutsceneLookThrough, CutsceneLookThroughCuts, CutsceneEditorCamera, CutsceneNewCameraFromView,
+        CutscenePickFocus];
 
     static void RegisterCutsceneCameras(EditorShell shell)
     {
@@ -48,6 +50,20 @@ static partial class EditorCommands
             Icon = "cutscene",
             Shortcut = "Ctrl+Shift+C",
             CanExecuteWhen = () => Cameras() is { } editor && editor.NewCameraRefusal(shell.ActiveViewport) == null,
+        });
+        ViewLook.Camera? Looked() => shell.Looks[shell.ActiveViewport.Index] as ViewLook.Camera;
+        commands.Register(new Command(CutscenePickFocus, "Pick Focus", () =>
+        {
+            if (Looked() is { } look)
+            {
+                look.Owner.ArmFocusPick(look.Binding);
+            }
+        })
+        {
+            Description = "Set the focus distance of the camera that the active scene view looks through to the depth of what the next click there hits. Ctrl+click in the view does it at once.",
+            Icon = "cutscene",
+            CanExecuteWhen = () => Looked() is { } look && look.Owner.PickFocusRefusal(shell.ActiveViewport.Index) == null,
+            IsCheckedWhen = () => Looked() is { } look && look.Owner.FocusArmed == look.Binding,
         });
         commands.Register(new Command(CutsceneEditorCamera, "Editor Camera", () => shell.Looks.LookThroughEditor(shell.ActiveViewport.Index))
         {

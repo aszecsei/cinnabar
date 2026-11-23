@@ -358,6 +358,8 @@ sealed class CutsceneTimeline : Control
         var silent = row.Row.TrackId is { } trackId && !_editor.Audible(trackId);
         var top = y + 3;
         var height = Layout.RowHeight - 6;
+        // A camera cut track names each cut's camera past a short cut's end (see docs/editor/cutscene-editor.md#the-cut-strip).
+        var cuts = row.Row.Kind == CutsceneRowKind.Track && row.Row.TrackKind == "camera_cut";
         foreach (var bar in row.Bars)
         {
             var x0 = Layout.Gutter + bar.X0;
@@ -371,12 +373,26 @@ sealed class CutsceneTimeline : Control
             {
                 context.DrawRectangle(SelectedPen, rect.Deflate(1), 2);
             }
-            if (rect.Width > 40 && row.Row.Kind == CutsceneRowKind.Track && bar.Item.Label is { Length: > 0 } label)
+            if (rect.Width > 40 && row.Row.Kind == CutsceneRowKind.Track && !cuts && bar.Item.Label is { Length: > 0 } label)
             {
                 using (context.PushClip(rect.Deflate(new Thickness(4, 0))))
                 {
                     var text = Text(label, BarText, 10);
                     context.DrawText(text, new Point(Math.Max(rect.X, Layout.Gutter) + 4, rect.Y + (rect.Height - text.Height) / 2));
+                }
+            }
+        }
+        if (cuts)
+        {
+            var area = Bounds.Width - Layout.Gutter;
+            foreach (var (at, room, name) in Layout.CutNames(row.Bars, area))
+            {
+                var x0 = Layout.Gutter + at + 3;
+                using (context.PushClip(new Rect(x0, top, room, height)))
+                {
+                    var text = Text(name, BarText, 10);
+                    context.FillRectangle(silent ? SilentFill : Fill(row.Row.TrackKind, locked), new Rect(x0, top, Math.Min(text.Width + 6, room), height), 2);
+                    context.DrawText(text, new Point(x0 + 3, top + (height - text.Height) / 2));
                 }
             }
         }

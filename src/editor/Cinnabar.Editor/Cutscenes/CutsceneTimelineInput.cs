@@ -89,11 +89,28 @@ public sealed class CutsceneTimelineInput
     // Whether the pointer is over the control, which a move sets and Leave clears.
     bool _inside;
 
-    string? HoverTip() =>
-        _inside && _gesture == Gesture.None
-        && Layout.HitTest(_pointer.X, _pointer.Y, View, ScrollY) is { Kind: CutsceneHitKind.Header, Row.Binding: { State: not CutsceneBindingState.Bound, Reason: { } reason } }
-            ? reason
-            : null;
+    string? HoverTip()
+    {
+        if (!_inside || _gesture != Gesture.None)
+        {
+            return null;
+        }
+        return Layout.HitTest(_pointer.X, _pointer.Y, View, ScrollY) switch
+        {
+            { Kind: CutsceneHitKind.Header, Row.Binding: { State: not CutsceneBindingState.Bound, Reason: { } reason } } => reason,
+            { Kind: CutsceneHitKind.Body or CutsceneHitKind.StartEdge or CutsceneHitKind.EndEdge, Row: { Kind: CutsceneRowKind.Track, TrackKind: "camera_cut" } row, Paths: [var path, ..] }
+                => row.Bars.FirstOrDefault(b => b.Path == path) is { } cut ? CutTip(cut, _editor.File.Rate) : null,
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// What a camera cut's hover shows (see docs/editor/cutscene-editor.md#the-cut-strip): its camera, its start and end,
+    /// and how long it is, as timecode at the cutscene's rate.
+    /// </summary>
+    public static string CutTip(CutsceneTimelineItem cut, int rate) =>
+        $"{(cut.Label is { Length: > 0 } name ? name : "No camera")} · {CutsceneTime.Timecode(cut.Start, rate)}–{CutsceneTime.Timecode(cut.End, rate)}"
+        + $" ({CutsceneTime.Timecode(cut.End - cut.Start, rate)})";
 
     /// <summary>The pointer left the control: the hover's tip goes.</summary>
     public void Leave()

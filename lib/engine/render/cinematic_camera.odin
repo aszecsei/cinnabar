@@ -31,6 +31,9 @@ Cinematic_Camera :: struct {
 	// The f-number. 0 means no depth of field.
 	aperture:       f32 `editor:"range=0,32"`,
 	focus:          ecs.Entity,
+	// In meters, added to the focus entity's distance, so the focus can be a little in front of or behind it. It does
+	// nothing without a live focus entity.
+	focus_offset:   f32 `editor:"range=-100,100"`,
 }
 
 DEFAULT_CINEMATIC_CAMERA :: Cinematic_Camera {
@@ -80,7 +83,7 @@ set_cinematic_fov :: proc(w: ^ecs.World) {
 }
 
 // cinematic_lens is a lens with its defaults, at a pose: the focus is its focus entity's distance along the camera's
-// axis while that entity is alive and presented, else focus_distance. A lens without an aperture is the zero lens.
+// axis plus focus_offset while that entity is alive and presented, else focus_distance. A lens without an aperture is the zero lens.
 @(private)
 cinematic_lens :: proc(
 	w: ^ecs.World,
@@ -95,7 +98,8 @@ cinematic_lens :: proc(
 	if c.focus != 0 && ecs.is_alive(w, c.focus) {
 		if target, ok := ecs.presented(w, c.focus); ok {
 			forward := linalg.quaternion128_mul_vector3(rotation, [3]f32{0, 0, 1})
-			focus = linalg.dot(ecs.position_sub(target.position, position), forward)
+			focus =
+				linalg.dot(ecs.position_sub(target.position, position), forward) + c.focus_offset
 		}
 	}
 	return {

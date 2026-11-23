@@ -1,5 +1,6 @@
 package editor
 
+import "core:fmt"
 import "core:log"
 import "core:reflect"
 import "core:slice"
@@ -10,6 +11,7 @@ import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/cutscene"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
+import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 
 // The cutscene preview (see docs/editor/cutscene-editor.md#preview): in Edit, the cutscene editor's tab shows its
@@ -39,17 +41,29 @@ Cutscene_Preview :: struct {
 // Preview_Values is the editor's values over the preview: a layer of fields and poses, as an override's, that shows
 // only while the preview stands at tick. Its id is the serial.
 Preview_Values :: struct {
-	tick:     i32,
-	layer:    Override,
+	tick:           i32,
+	layer:          Override,
 	// The poses of bindings, by ID, which the editor has no entity for. Each lay finds the binding's entity again, as a
 	// new blob can spawn it again.
-	bindings: [dynamic]Binding_Pose,
+	bindings:       [dynamic]Binding_Pose,
+	// The fields of bindings, by ID, as the poses are.
+	binding_fields: [dynamic]Binding_Field,
 }
 
 // Binding_Pose is a pose that the editor's values give a binding of the preview. Its entity is found at each lay.
 Binding_Pose :: struct {
 	binding: u32,
 	pose:    Pose_Write,
+}
+
+// Binding_Field is a field that the editor's values give a binding of the preview, with its place and bytes in the
+// component, which do not depend on the entity. Its entity is found at each lay.
+Binding_Field :: struct {
+	binding:   u32,
+	component: ecs.Component_Id,
+	hash:      u64,
+	place:     scene.Field_Place,
+	bytes:     [scene.MAX_FIELD_SIZE]u8,
 }
 
 // Preview_Clock is whether the preview stands at its time or moves on the game's clock.
@@ -271,8 +285,7 @@ free_cutscene_previews :: proc(previews: ^Cutscene_Previews) {
 	if p, open := &previews.open.?; open {
 		delete(p.held)
 		if v, has := &p.values.?; has {
-			free_override(&v.layer)
-			delete(v.bindings)
+			free_preview_values(v)
 		}
 	}
 	previews^ = {}
@@ -348,8 +361,36 @@ write_preview_values :: proc(
 			saved = make([dynamic]Saved, heap),
 		},
 		bindings = make([dynamic]Binding_Pose, heap),
+		binding_fields = make([dynamic]Binding_Field, heap),
 	}
 	v := &p.values.?
+	others_fields := make([dynamic]link.Override_Field, e.platform.frame_allocator)
+	for f in m.fields {
+		if f.target.kind != .Binding {
+			append(&others_fields, f)
+			continue
+		}
+		name := fmt.aprintf("%016x", f.field, allocator = e.platform.frame_allocator)
+		place, bytes, ok := scene.field_bytes(
+			w,
+			f.target.entity,
+			ecs.Component_Id(f.component),
+			{name = name, hash = f.field, value = scene_value_of(f.value)},
+			scene.handles_of(e.scenes, f.target.scene),
+		)
+		if ok {
+			append(
+				&v.binding_fields,
+				Binding_Field {
+					binding = u32(f.target.entity),
+					component = ecs.Component_Id(f.component),
+					hash = f.field,
+					place = place,
+					bytes = bytes,
+				},
+			)
+		}
+	}
 	others := make([dynamic]link.Override_Transform, e.platform.frame_allocator)
 	for t in m.transforms {
 		if t.target.kind != .Binding {
@@ -369,7 +410,7 @@ write_preview_values :: proc(
 			},
 		)
 	}
-	write_fields_and_poses(e, w, &v.layer, m.fields, others[:])
+	write_fields_and_poses(e, w, &v.layer, others_fields[:], others[:])
 }
 
 // drop_preview_values forgets the editor's values, after it puts back what they wrote over.
@@ -380,9 +421,16 @@ drop_preview_values :: proc(e: ^Editor, w: ^ecs.World, p: ^Cutscene_Preview) {
 		return
 	}
 	lift_saved(w, &v.layer)
+	free_preview_values(v)
+	p.values = nil
+}
+
+// free_preview_values frees what the editor's values hold: the one place that each of their arrays is freed.
+@(private)
+free_preview_values :: proc(v: ^Preview_Values) {
 	free_override(&v.layer)
 	delete(v.bindings)
-	p.values = nil
+	delete(v.binding_fields)
 }
 
 // preview_values_shown is whether the editor's values are on the world: they are while the preview stands at their
@@ -413,7 +461,7 @@ lay_preview_values :: proc(e: ^Editor, w: ^ecs.World, p: ^Cutscene_Preview) -> (
 	layer := preview_values_shown(p) or_return
 	laid = lay_fields_and_poses(w, layer)
 	v := &p.values.?
-	if len(v.bindings) == 0 {
+	if len(v.bindings) == 0 && len(v.binding_fields) == 0 {
 		return
 	}
 	data, blob := cutscene.cutscene_data(e.cutscenes, &p.live.evaluation) or_return
@@ -423,6 +471,13 @@ lay_preview_values :: proc(e: ^Editor, w: ^ecs.World, p: ^Cutscene_Preview) -> (
 		pose := b.pose
 		pose.entity = entity
 		if lay_pose(w, layer, pose) {
+			laid = true
+		}
+	}
+	for &b in v.binding_fields {
+		index := cutscene.binding_index(data, blob, cutscene.Binding_Id(b.binding)) or_continue
+		entity := cutscene.binding_entity(&p.live.evaluation.bindings, w, index) or_continue
+		if hold(w, layer, entity, b.component, b.hash, b.place, b.bytes[:b.place.size]) {
 			laid = true
 		}
 	}

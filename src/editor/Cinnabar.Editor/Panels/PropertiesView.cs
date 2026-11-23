@@ -241,7 +241,7 @@ public sealed class PropertiesView : ScrollViewer
             var footer = id switch
             {
                 SceneEdits.ReflectionProbeId => ProbeFooter(node.Handle),
-                CinematicCameraText.CinematicCameraId => LensFooter(editable ? document!.Id : null, SensorOf(node.Handle, type.Fields)),
+                CinematicCameraText.CinematicCameraId => LensFooter(editable ? document!.Id : null, node.Handle, SensorOf(node.Handle, type.Fields)),
                 _ => null,
             };
             _content.Children.Add(Group(title, fields, badge: added ? "Added" : null,
@@ -679,7 +679,7 @@ public sealed class PropertiesView : ScrollViewer
     // A Cinematic Camera's lens in words, and a choice of sensor that sets its width and height in one edit, for an
     // entity of the document.
     // The choice shows the preset that the sensor was when the panel was built, so that showing values never edits.
-    Control LensFooter(ulong? document, string? sensor)
+    Control LensFooter(ulong? document, ulong handle, string? sensor)
     {
         _lens = new TextBlock { Classes = { "dim" }, TextWrapping = TextWrapping.Wrap };
         if (document is not { } id)
@@ -689,6 +689,15 @@ public sealed class PropertiesView : ScrollViewer
         _sensor = Kit.Choice(CinematicCameraText.SensorPresets.Select(p => p.Name), sensor, name =>
         {
             var (_, width, height) = CinematicCameraText.SensorPresets.First(p => p.Name == name);
+            // While a cutscene that possesses the camera holds the preview, the sensor goes where its other fields go.
+            if (_shell.Keying.Cutscene is { } cutscene && _shell.Keying.BindingOf(handle) is { } binding)
+            {
+                if (cutscene.SetLens(binding, [("sensor_width", width), ("sensor_height", height)], $"Set Sensor to {name}") is { } why)
+                {
+                    _shell.Console.Add(LogLevel.Warning, $"edit: {why}");
+                }
+                return;
+            }
             _shell.Edit($"Set Sensor to {name}",
                 new SetField(id, CinematicCameraText.CinematicCameraId, "sensor_width", SceneValue.Of(SceneNumber.Of(width))),
                 new SetField(id, CinematicCameraText.CinematicCameraId, "sensor_height", SceneValue.Of(SceneNumber.Of(height))));

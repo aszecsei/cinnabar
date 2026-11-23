@@ -1591,4 +1591,40 @@ public sealed class HostLinkTests() : HostTests("host.exe", "just build", () => 
         }
     }
 
+    // Pick Focus (see docs/editor/cutscene-editor.md#focus): a view that looks through a spawned camera picks with the
+    // camera's projection, so the depth that it answers is the distance along the camera's axis that the focus takes.
+    [Fact]
+    public async Task APickThroughASpawnedCameraAnswersTheDepthThatItsFocusTakes()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        var target = await Show(editor);
+        // A box whose face is 1.2 m ahead of where the camera goes, and the fox that the intro possesses, far behind it.
+        var near = Box(1, "Near", z: 0.4, scale: 0.4);
+        await Load(editor, Scene(Entity(Fox, "Fox", z: 20), near), "Near", guid: AnimationScene);
+        Drained(editor);
+
+        editor.Link.Send(new CutscenePreviewOpen(1, Convert.FromHexString(IntroCutscene), false, 100000));
+        await editor.Next<CutscenePreviewOpened>(o => o.Ticket == 1);
+        // The Close Shot, which no cut shows at 100000, so no constraint aims it.
+        editor.Link.Send(new ViewportLook(0, 1, 1, ViewportLookSource.Binding, 4));
+        await editor.Next<ViewportLookShown>(s => s.Serial == 1 && s.Camera);
+        // The camera, moved by its binding to 1 m behind the box's origin, looking along +z.
+        long[] pose = [Origin, 0, -Meter];
+        editor.Link.Send(new CutscenePreviewValues(1, 100000, 7, [],
+            [new OverrideTransform(new OverrideTarget(OverrideTargetKind.Binding, 0, 4), pose, [0, 0, 0, 1], [1, 1, 1])]));
+        await editor.Next<ViewportLookShown>(s => s.Serial == 1 && s.Camera && s.Position.SequenceEqual(pose));
+
+        // The middle of the frame finds the box once its mesh has streamed in.
+        PickResult? center = null;
+        for (var attempt = 0u; attempt < 60 && center is not { Hits.Length: > 0 }; attempt++)
+        {
+            editor.Link.Send(new PickRequest(100 + attempt, 0, target.Width / 2, target.Height / 2, 1, 1));
+            center = await editor.Next<PickResult>(r => r.Id == 100 + attempt);
+        }
+        Assert.Equal(near.Id, Assert.Single(center!.Hits).SceneId);
+        Assert.Equal(1.2, center.Depth, 0.01);
+        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+    }
 }

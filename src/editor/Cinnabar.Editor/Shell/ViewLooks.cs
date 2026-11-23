@@ -401,7 +401,7 @@ public sealed class ViewLooks
         Become(viewport, idle, gestureDone: true);
         if (keyed)
         {
-            _shell.PreviewValues.Keyed();
+            _shell.PreviewValues.Keyed([], [camera.Binding], []);
         }
     }
 

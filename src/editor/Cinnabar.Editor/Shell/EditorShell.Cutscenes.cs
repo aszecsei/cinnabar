@@ -62,6 +62,24 @@ public sealed partial class EditorShell
         Commands.InvalidateAll();
     }
 
+    /// <summary>
+    /// A click in a view that looks through a camera (see docs/editor/cutscene-editor.md#focus): with Ctrl, or with a pick
+    /// of the camera's focus armed, it picks the focus at the pixel. Otherwise it selects what is drawn there.
+    /// </summary>
+    public void ClickInLook(int viewport, Maths.Vec2 pixel, SelectMode mode, bool control)
+    {
+        if (Looks[viewport] is ViewLook.Camera camera && (control || camera.Owner.PicksFocusOnClick(viewport)))
+        {
+            camera.Owner.PickFocus(viewport, pixel);
+            return;
+        }
+        PickAt(pixel, mode);
+    }
+
+    /// <summary>Disarms the pick of the focus of the camera that a view looks through, as Esc does. False when none was armed.</summary>
+    public bool CancelFocusPick(int viewport) =>
+        Looks[viewport] is ViewLook.Camera camera && camera.Owner.PicksFocusOnClick(viewport) && camera.Owner.DisarmFocusPick();
+
     /// <summary>Cancels the armed pick of a binding's entity, as Esc does. False when none was armed.</summary>
     public bool CancelBindingPicks()
     {

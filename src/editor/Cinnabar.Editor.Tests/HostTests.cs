@@ -591,12 +591,12 @@ public abstract class HostTests : IAsyncDisposable
     }
 
     // The sample's intro, and the scene and the entity that its fox binding possesses.
-    const string IntroCutscene = "9d549a4b7235fb289389db323a19fd8f";
-    const string AnimationScene = "f496b929575035d9c2626ed56d3165ba";
-    const ulong Fox = 0x79cea6d7586e3f48;
+    protected const string IntroCutscene = "9d549a4b7235fb289389db323a19fd8f";
+    protected const string AnimationScene = "f496b929575035d9c2626ed56d3165ba";
+    protected const ulong Fox = 0x79cea6d7586e3f48;
 
     // The messages that have come, which it drops.
-    static List<ILinkMessage> Drained(Editor editor)
+    protected static List<ILinkMessage> Drained(Editor editor)
     {
         var messages = new List<ILinkMessage>();
         while (editor.TryRead(out var message))

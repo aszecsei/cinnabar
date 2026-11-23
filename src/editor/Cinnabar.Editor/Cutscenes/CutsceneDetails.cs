@@ -79,6 +79,10 @@ sealed class CutsceneDetails : ScrollViewer
                 if (block.Kind == CutsceneBlockKind.Binding)
                 {
                     AddBindingRows(block);
+                    if (block.Id is { } camera && _editor.IsCamera(block))
+                    {
+                        _content.Children.Add(new CutsceneLensRows(_editor, camera));
+                    }
                 }
                 break;
             case CutsceneBlockKind.Section or CutsceneBlockKind.Range:

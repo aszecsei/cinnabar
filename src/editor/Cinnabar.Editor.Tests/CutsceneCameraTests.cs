@@ -431,4 +431,273 @@ public sealed class CutsceneCameraTests : IDisposable
         shell.FrameScene();
         Assert.IsType<ViewLook.Editor>(shell.Looks[0]);
     }
+
+    // The world's Cinematic_Camera, as the game describes it, so values over the preview can name its fields.
+    static void LensType(EditorShell shell)
+    {
+        static FieldInfo Field(string name, uint offset, FieldKind kind) => new(name, offset, kind, kind, [], false, false, 0, 0, false, false, 0, "");
+        shell.OnGameMessage(new ComponentTypes([new ComponentType(Panels.CinematicCameraText.CinematicCameraId, "Cinematic_Camera", "Rendering", 40,
+        [
+            Field("focal_length", 0, FieldKind.F32),
+            Field("sensor_width", 4, FieldKind.F32),
+            Field("sensor_height", 8, FieldKind.F32),
+            Field("focus_distance", 12, FieldKind.F32),
+            Field("aperture", 16, FieldKind.F32),
+            Field("focus", 24, FieldKind.Entity),
+            Field("focus_offset", 32, FieldKind.F32),
+        ])]));
+    }
+
+    static KeyTarget LensKey(int binding, string field) =>
+        new KeyTarget.Property(binding, Panels.CinematicCameraText.CinematicCameraId, field, PropertyShape.Number);
+
+    // A spawned camera of the engine's prefab, made from the first scene view at the playhead: binding 6.
+    static int NewCamera(EditorShell shell, CutsceneEditor editor, int tick = 300000)
+    {
+        LensType(shell);
+        editor.SetPlayhead(tick);
+        shell.CutscenePreview.Flush();
+        var id = editor.NewCameraFromView(shell.Viewports[0]);
+        Assert.Equal(6, id);
+        return id!.Value;
+    }
+
+    [Fact]
+    public void ASpawnedCamerasLensShowsItsKeyOrItsPrefabsValueAndATypedValueHoldsUntilEnterKeysIt()
+    {
+        var (shell, editor, ticket) = NewShell();
+        using var _ = shell;
+        var camera = NewCamera(shell, editor);
+        Assert.IsType<LensTarget.Spawned>(editor.LensTargetOf(camera));
+        // The binding of a character has no lens.
+        Assert.IsType<LensTarget.Refused>(editor.LensTargetOf(1));
+
+        // The focal length is keyed; the sensor is the prefab's, and the aperture is the default.
+        Assert.Equal(20.78, editor.LensValue(camera, "focal_length")!.Value, 2);
+        Assert.Equal(24, editor.LensValue(camera, "sensor_height"));
+        Assert.Equal(0, editor.LensValue(camera, "aperture"));
+        Assert.Equal(KeyState.Keyed, editor.LensKey(camera, "focal_length")!.State);
+        Assert.Equal(KeyState.None, editor.LensKey(camera, "aperture")!.State);
+
+        // Without auto-key, a typed aperture holds over the preview, by the binding's ID, and the text stays.
+        var text = editor.Document.Text;
+        _sent.Clear();
+        Assert.Null(editor.SetLens(camera, [("aperture", 2.8)], "Set Aperture"));
+        Assert.Equal(text, editor.Document.Text);
+        Assert.IsType<PreviewValuesState.Holding>(shell.PreviewValues.State);
+        Assert.Equal(2.8, editor.LensValue(camera, "aperture")!.Value, 5);
+        var values = _sent.OfType<CutscenePreviewValues>().Last();
+        Assert.Equal(ticket, values.Ticket);
+        var field = Assert.Single(values.Fields);
+        Assert.Equal((OverrideTargetKind.Binding, (ulong)camera, Panels.CinematicCameraText.CinematicCameraId),
+            (field.Target.Kind, field.Target.Entity, field.Component));
+
+        // Enter keys it at the playhead.
+        Assert.Null(shell.Keying.KeyPreviewValuesRefusal());
+        shell.Commands.Get(EditorCommands.CutsceneKeyPreviewValues).Execute();
+        Assert.Equal("Key Preview Values", editor.Document.History[^1]);
+        Assert.Equal(2.8, Assert.Single(CutsceneKeying.KeysAt(editor.File, LensKey(camera, "aperture"), 300000))!.Value, 5);
+        Assert.IsType<PreviewValuesState.Settling>(shell.PreviewValues.State);
+    }
+
+    [Fact]
+    public void WithAutoKeyALensScrubIsOneKeyAndOneEntryAndACancelPutsItBack()
+    {
+        var (shell, editor, _) = NewShell();
+        using var _ = shell;
+        var camera = NewCamera(shell, editor);
+        shell.Keying.AutoKey = true;
+        var history = editor.Document.History.Count;
+
+        var drag = editor.BeginLensDrag(camera, "focal_length", "Drag Focal Length", out var why);
+        Assert.Null(why);
+        Assert.True(drag!.Step(30));
+        Assert.True(drag.Step(40));
+        Assert.Equal(40, editor.LensValue(camera, "focal_length")!.Value, 4);
+        drag.End(cancel: false);
+
+        Assert.Equal(history + 1, editor.Document.History.Count);
+        Assert.Equal("Drag Focal Length", editor.Document.History[^1]);
+        Assert.Equal(40, Assert.Single(CutsceneKeying.KeysAt(editor.File, LensKey(camera, "focal_length"), 300000))!.Value, 4);
+
+        // A cancelled drag leaves no entry, and the key and the value are as they were.
+        var again = editor.BeginLensDrag(camera, "focal_length", "Drag Focal Length", out var _)!;
+        again.Step(85);
+        again.End(cancel: true);
+        Assert.Equal(history + 1, editor.Document.History.Count);
+        Assert.Equal(40, Assert.Single(CutsceneKeying.KeysAt(editor.File, LensKey(camera, "focal_length"), 300000))!.Value, 4);
+        Assert.Equal(40, editor.LensValue(camera, "focal_length")!.Value, 4);
+    }
+
+    [Fact]
+    public void WithoutAutoKeyALensScrubHoldsItsValueAndNeedsTheTabsPreview()
+    {
+        var (shell, editor, _) = NewShell();
+        using var _ = shell;
+        var camera = NewCamera(shell, editor);
+        var text = editor.Document.Text;
+
+        var drag = editor.BeginLensDrag(camera, "focus_distance", "Drag Focus", out var _)!;
+        drag.Step(3.5);
+        drag.End(cancel: false);
+        Assert.Equal(text, editor.Document.Text);
+        Assert.Equal(3.5, editor.LensValue(camera, "focus_distance")!.Value, 4);
+
+        // While another tab holds the preview, a value cannot hold, and the drag says why.
+        var fox = shell.OpenCutscene(shell.Assets.Find(Fox)!)!;
+        shell.CutscenePreview.Take(fox);
+        Assert.Null(editor.BeginLensDrag(camera, "focus_distance", "Drag Focus", out var why));
+        Assert.NotNull(why);
+    }
+
+    // Looks the first scene view through a camera, and answers with a pose.
+    ViewLook.Camera LookThrough(EditorShell shell, CutsceneEditor editor, int binding)
+    {
+        editor.ToggleLookThrough(binding);
+        var look = _sent.OfType<ViewportLook>().Last();
+        shell.OnGameMessage(new ViewportLookShown(0, look.Serial, true, (uint)binding, WideShot, [0, 0, 0, 1], (float)Lens.VerticalFov(35, 24), 35, [36, 24]));
+        _sent.Clear();
+        return Assert.IsType<ViewLook.Camera>(shell.Looks[0]);
+    }
+
+    [Fact]
+    public void PickFocusSetsTheFocusDistanceToThePickedDepthAndKeysItWithAutoKey()
+    {
+        var (shell, editor, _) = NewShell();
+        using var _ = shell;
+        var camera = NewCamera(shell, editor);
+        LookThrough(shell, editor, camera);
+        shell.Keying.AutoKey = true;
+        shell.Keying.AutoKeyAddTracks = true;
+        var history = editor.Document.History.Count;
+
+        // Ctrl+click in the looking view picks there, in that view.
+        shell.ClickInLook(0, new Vec2(64, 32), SelectMode.Toggle, control: true);
+        var pick = Assert.Single(_sent.OfType<PickRequest>());
+        Assert.Equal((0u, 64, 32, 1, 1), (pick.Viewport, pick.X, pick.Y, pick.Width, pick.Height));
+        shell.OnGameMessage(new PickResult(pick.Id, [], 4.25f, 0));
+
+        Assert.Equal(history + 1, editor.Document.History.Count);
+        Assert.Equal("Pick Focus", editor.Document.History[^1]);
+        Assert.Equal(4.25, Assert.Single(CutsceneKeying.KeysAt(editor.File, LensKey(camera, "focus_distance"), 300000))!.Value, 4);
+
+        // Nothing under the pointer sets nothing.
+        _sent.Clear();
+        Assert.True(editor.PickFocus(0, new Vec2(1, 1)));
+        shell.OnGameMessage(new PickResult(_sent.OfType<PickRequest>().Single().Id, [], 0, 0));
+        Assert.Equal(history + 1, editor.Document.History.Count);
+
+        // An answer that comes after the look ended sets nothing.
+        _sent.Clear();
+        Assert.True(editor.PickFocus(0, new Vec2(1, 1)));
+        var stale = _sent.OfType<PickRequest>().Single();
+        shell.Looks.LookThroughEditor(0);
+        shell.OnGameMessage(new PickResult(stale.Id, [], 9, 0));
+        Assert.Equal(history + 1, editor.Document.History.Count);
+    }
+
+    [Fact]
+    public void AnArmedPickTakesTheNextClickAndEscDisarmsIt()
+    {
+        var (shell, editor, _) = NewShell();
+        using var _ = shell;
+        var camera = NewCamera(shell, editor);
+        LookThrough(shell, editor, camera);
+
+        var command = shell.Commands.Get(EditorCommands.CutscenePickFocus);
+        Assert.True(command.CanExecute);
+        command.Execute();
+        Assert.Equal(camera, editor.FocusArmed);
+        Assert.True(editor.PicksFocusOnClick(0));
+
+        // Esc disarms it.
+        Assert.True(shell.CancelFocusPick(0));
+        Assert.Null(editor.FocusArmed);
+        Assert.False(shell.CancelFocusPick(0));
+
+        // Armed again, a plain click picks focus, and without auto-key the value holds.
+        command.Execute();
+        shell.ClickInLook(0, new Vec2(5, 5), SelectMode.Replace, control: false);
+        Assert.Null(editor.FocusArmed);
+        shell.OnGameMessage(new PickResult(_sent.OfType<PickRequest>().Last().Id, [], 2.5f, 0));
+        Assert.Equal(2.5, editor.LensValue(camera, "focus_distance")!.Value, 4);
+        Assert.IsType<PreviewValuesState.Holding>(shell.PreviewValues.State);
+    }
+
+    [Fact]
+    public void FocusOnSetsTheBindingsConstraintAndThenPickFocusIsRefused()
+    {
+        var (shell, editor, _) = NewShell();
+        using var _ = shell;
+        var camera = NewCamera(shell, editor);
+        LookThrough(shell, editor, camera);
+        Assert.Null(editor.PickFocusRefusal(0));
+
+        editor.SetFocusOn(camera, 1);
+        Assert.Equal("Focus On", editor.Document.History[^1]);
+        Assert.Equal("1", editor.File.Bindings.Single(b => b.Id == camera).Get("focus"));
+        Assert.Equal(1, editor.FocusedOn(camera));
+        Assert.NotNull(editor.PickFocusRefusal(0));
+        Assert.False(editor.PickFocus(0, new Vec2(1, 1)));
+        Assert.Empty(_sent.OfType<PickRequest>());
+
+        editor.SetFocusOn(camera, null);
+        Assert.Null(editor.File.Bindings.Single(b => b.Id == camera).Get("focus"));
+        Assert.Null(editor.PickFocusRefusal(0));
+    }
+
+    [Fact]
+    public void TheCutTrackNamesEachCutUpToTheNextAndItsHoverSaysWhereItIs()
+    {
+        static CutsceneVisibleBar Bar(double x0, double x1, string label, int start, int end) =>
+            new(x0, x1, new CutsceneTimelineItem(CutsceneItemKind.Section, start, end, $"s{start}") { Label = label });
+
+        // A short cut followed by a gap names its camera past its end; a name with too little room is left out.
+        var names = CutsceneTimelineLayout.CutNames([Bar(-20, 8, "Wide", 0, 1000), Bar(10, 12, "Close", 1000, 2000), Bar(20, 60, "Over", 2000, 3000),
+            Bar(200, 400, "Tracking", 3000, 4000)], 300);
+        Assert.Equal([(20.0, 174.0, "Over"), (200.0, 94.0, "Tracking")], names);
+
+        Assert.Equal("Wide Shot · 00:01:00–00:02:12 (00:01:12)",
+            Cutscenes.CutsceneTimelineInput.CutTip(new CutsceneTimelineItem(CutsceneItemKind.Section, 60000, 150000, "s") { Label = "Wide Shot" }, 24));
+    }
+
+    [Fact]
+    public void KeyingOneHeldValueLeavesAnotherThatIsNotKeyedHeld()
+    {
+        var (shell, editor, _) = NewShell();
+        using var _ = shell;
+        var camera = NewCamera(shell, editor);
+        Assert.Null(editor.SetLens(camera, [("aperture", 2.8)], "Set Aperture"));
+
+        // Auto-key keys only a field that has a track: the focal length. The aperture, which has none, stays held.
+        shell.Keying.AutoKey = true;
+        Assert.Null(editor.SetLens(camera, [("focal_length", 50)], "Set Focal Length"));
+        Assert.Equal(50, Assert.Single(CutsceneKeying.KeysAt(editor.File, LensKey(camera, "focal_length"), 300000))!.Value, 4);
+        Assert.IsType<PreviewValuesState.Holding>(shell.PreviewValues.State);
+        Assert.NotNull(shell.PreviewValues.BindingValueOf(camera, Panels.CinematicCameraText.CinematicCameraId, "aperture"));
+    }
+
+    [Fact]
+    public void AFocusPickWaitsForTheViewToDrawThroughTheCamera()
+    {
+        var (shell, editor, _) = NewShell();
+        using var _ = shell;
+        var camera = NewCamera(shell, editor);
+        editor.ToggleLookThrough(camera);
+
+        // The game has not drawn the view through the camera yet, so a pick would hit what the editor camera sees.
+        Assert.NotNull(editor.PickFocusRefusal(0));
+        Assert.NotNull(editor.ArmFocusPick(camera));
+        Assert.Null(editor.FocusArmed);
+
+        var look = _sent.OfType<ViewportLook>().Last();
+        shell.OnGameMessage(new ViewportLookShown(0, look.Serial, true, (uint)camera, WideShot, [0, 0, 0, 1], (float)Lens.VerticalFov(35, 24), 35, [36, 24]));
+        Assert.Null(editor.ArmFocusPick(camera));
+        Assert.Equal(camera, editor.FocusArmed);
+
+        // The pick ends with its look.
+        shell.Looks.LookThroughEditor(0);
+        Assert.Null(editor.FocusArmed);
+        Assert.False(editor.PicksFocusOnClick(0));
+    }
 }
