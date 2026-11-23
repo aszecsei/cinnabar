@@ -48,7 +48,7 @@ public sealed class BlackboardKey : BlackboardBlock
 /// and an edit changes only its own lines. It reads the keys' lines as the cooker does, and a line that the cooker would
 /// refuse is kept as it is, so a blackboard with problems still opens.
 /// </summary>
-public sealed class BlackboardFile
+public sealed class BlackboardFile : ITextFile<BlackboardFile>
 {
     public const string Header = "a blackboard starts with `blackboard 1`";
 
@@ -225,18 +225,6 @@ public sealed class BlackboardDocument : TextGraphDocument<BlackboardFile>
     }
 
     /// <summary>Reads a file. The document is null, with a problem, when it cannot be read or does not start as a blackboard does.</summary>
-    public static (BlackboardDocument? Document, MaterialProblem? Problem) Open(string path, string guid)
-    {
-        var (full, text, problem) = Read(path);
-        if (text == null)
-        {
-            return (null, problem);
-        }
-        var (file, refused) = BlackboardFile.Parse(text);
-        return (file == null ? null : new BlackboardDocument(full, guid, file, text), refused);
-    }
-
-    protected override string WriteGraph() => Graph.Text;
-
-    protected override BlackboardFile ReadGraph(string text) => BlackboardFile.Parse(text).File!;
+    public static (BlackboardDocument? Document, MaterialProblem? Problem) Open(string path, string guid) =>
+        Open(path, (full, file, text) => new BlackboardDocument(full, guid, file, text));
 }

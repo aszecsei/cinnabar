@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace Cinnabar.Editor.Document;
 
 /// <summary>
@@ -152,7 +150,7 @@ public sealed class UiStyle
 /// where each element and attribute is. It writes the text back as it was, and an edit changes only the text that it
 /// touches, keeping indents, comments and the order of everything else (see docs/editor/ui-editor.md#the-file).
 /// </summary>
-public sealed partial class UiFile
+public sealed partial class UiFile : ITextFile<UiFile>
 {
     /// <summary>The elements that the cooker knows, by name.</summary>
     public static readonly IReadOnlyList<string> Elements = ["ui", "box", "row", "column", "stack", "text", "image", "button", "field", "template"];
@@ -205,19 +203,6 @@ public sealed partial class UiFile
             return (null, new MaterialProblem(line, $"version {words[1]} is not 1, which this editor reads"));
         }
         return (new UiFile(text), null);
-    }
-
-    /// <summary>A file's bytes as text, or null if they are not UTF-8. A byte order mark is kept, as the cooker does.</summary>
-    public static string? Decode(byte[] bytes)
-    {
-        try
-        {
-            return new UTF8Encoding(false, throwOnInvalidBytes: true).GetString(bytes);
-        }
-        catch (DecoderFallbackException)
-        {
-            return null;
-        }
     }
 
     static (int Line, string Header) Header(string text)

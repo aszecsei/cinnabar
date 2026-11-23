@@ -480,7 +480,7 @@ public sealed class CutsceneBlock
 /// next keyword line. It reads only the structure. What a block's lines mean, and whether they are right, is the
 /// cooker's to say, so a cutscene with problems still opens, with its problems on its blocks.
 /// </summary>
-public sealed class CutsceneFile
+public sealed class CutsceneFile : ITextFile<CutsceneFile>
 {
     /// <summary>A second's ticks, the unit of every time in the file.</summary>
     public const int TicksPerSecond = 60000;
@@ -767,18 +767,6 @@ public sealed class CutsceneDocument : TextGraphDocument<CutsceneFile>
     }
 
     /// <summary>Reads a file. The document is null, with a problem, when it cannot be read or does not start as a cutscene does.</summary>
-    public static (CutsceneDocument? Document, MaterialProblem? Problem) Open(string path, string guid)
-    {
-        var (full, text, problem) = Read(path);
-        if (text == null)
-        {
-            return (null, problem);
-        }
-        var (file, refused) = CutsceneFile.Parse(text);
-        return (file == null ? null : new CutsceneDocument(full, guid, file, text), refused);
-    }
-
-    protected override string WriteGraph() => Graph.Text;
-
-    protected override CutsceneFile ReadGraph(string text) => CutsceneFile.Parse(text).File!;
+    public static (CutsceneDocument? Document, MaterialProblem? Problem) Open(string path, string guid) =>
+        Open(path, (full, file, text) => new CutsceneDocument(full, guid, file, text));
 }

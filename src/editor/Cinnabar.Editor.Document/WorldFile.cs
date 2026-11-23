@@ -76,7 +76,7 @@ public sealed class WorldScene : WorldBlock
 /// only its own lines. It reads the scenes as the cooker does, and a line that the cooker would refuse is kept as it
 /// is, so a world with problems still opens.
 /// </summary>
-public sealed class WorldFile
+public sealed class WorldFile : ITextFile<WorldFile>
 {
     public const string Header = "a world starts with `world 1`";
 
@@ -380,18 +380,6 @@ public sealed class WorldDocument : TextGraphDocument<WorldFile>
     }
 
     /// <summary>Reads a file. The document is null, with a problem, when it cannot be read or does not start as a world does.</summary>
-    public static (WorldDocument? Document, MaterialProblem? Problem) Open(string path, string guid)
-    {
-        var (full, text, problem) = Read(path);
-        if (text == null)
-        {
-            return (null, problem);
-        }
-        var (file, refused) = WorldFile.Parse(text);
-        return (file == null ? null : new WorldDocument(full, guid, file, text), refused);
-    }
-
-    protected override string WriteGraph() => Graph.Text;
-
-    protected override WorldFile ReadGraph(string text) => WorldFile.Parse(text).File!;
+    public static (WorldDocument? Document, MaterialProblem? Problem) Open(string path, string guid) =>
+        Open(path, (full, file, text) => new WorldDocument(full, guid, file, text));
 }

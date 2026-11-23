@@ -115,10 +115,8 @@ public sealed class AnimationGraphNode(int id, AnimationGraphNodeKind kind) : An
 /// own lines. It reads only the structure. What a block's lines mean, and whether they are right, is the cooker's to
 /// say, so a graph with problems still opens, with its problems on its nodes.
 /// </summary>
-public sealed class AnimationGraphFile
+public sealed class AnimationGraphFile : ITextFile<AnimationGraphFile>
 {
-    static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
-
     readonly List<AnimationGraphBlock> _blocks = [];
     // What the file's last line ends with, whichever line that comes to be.
     string _finalEnding = "";
@@ -149,20 +147,6 @@ public sealed class AnimationGraphFile
                 text.Append(lines[i].Text).Append(i == lines.Count - 1 ? _finalEnding : lines[i].Ending != "" ? lines[i].Ending : ending);
             }
             return text.ToString();
-        }
-    }
-
-    /// <summary>The bytes of a file as text, or null when they are not UTF-8.</summary>
-    public static string? Decode(byte[] bytes)
-    {
-        try
-        {
-            // This keeps a byte order mark, which the cooker has no place for either.
-            return StrictUtf8.GetString(bytes);
-        }
-        catch (DecoderFallbackException)
-        {
-            return null;
         }
     }
 
