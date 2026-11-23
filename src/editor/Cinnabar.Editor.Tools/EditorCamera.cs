@@ -87,6 +87,20 @@ public sealed class EditorCamera
     public EditorCamera Clone() => (EditorCamera)MemberwiseClone();
 
     /// <summary>
+    /// A perspective camera at a pose, with a field of view, as a view that pilots a cinematic camera starts from it (see
+    /// docs/editor/cutscene-editor.md#pilot): its yaw and pitch look along the rotation's +z. It has no roll, so a rolled
+    /// rotation loses its roll. Its speed is <paramref name="speed"/>.
+    /// </summary>
+    public static EditorCamera FromPose(IReadOnlyList<long> position, Quat rotation, double verticalFov, double speed = 4)
+    {
+        var forward = rotation.Normalized().Rotate(Vec3.UnitZ);
+        var camera = new EditorCamera { VerticalFov = verticalFov > 0 ? verticalFov : Math.PI / 3 };
+        camera.Speed = speed;
+        camera.Place([.. position], Math.Atan2(forward.X, forward.Z), -Math.Asin(Math.Clamp(forward.Y, -1, 1)));
+        return camera;
+    }
+
+    /// <summary>
     /// Changes the projection, so that what is at the pivot stays as large on screen: an orthographic camera shows the
     /// height that the perspective one showed at the pivot, and a perspective one stands back to where it shows the
     /// orthographic one's height. An orthographic camera stands at least <see cref="OrthographicStandoff"/> from its

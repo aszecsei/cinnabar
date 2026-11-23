@@ -13,6 +13,9 @@ using OverrideTransform = Cinnabar.Editor.Link.Protocol.OverrideTransform;
 
 namespace Cinnabar.Editor.Shell;
 
+/// <summary>A pose that the values give a binding of the cutscene, by its ID: a world position in World_Position units and a rotation.</summary>
+public sealed record BindingPose(long[] Position, Quat Rotation);
+
 /// <summary>A field of an entity, by its handle, its component's ID and its name.</summary>
 public readonly record struct ValueKey(ulong Handle, ulong Component, string Field);
 
@@ -47,7 +50,14 @@ public abstract record PreviewValuesState
         ulong Serial,
         ulong First,
         ImmutableDictionary<ValueKey, SceneValue> Values,
-        ImmutableDictionary<(ulong Handle, ulong Component), byte[]> Components) : PreviewValuesState;
+        ImmutableDictionary<(ulong Handle, ulong Component), byte[]> Components) : PreviewValuesState
+    {
+        /// <summary>
+        /// The poses of bindings that the editor has no entity for, as a spawned camera that a view pilots (see
+        /// docs/editor/cutscene-editor.md#pilot), by binding ID. The game finds each binding's entity.
+        /// </summary>
+        public ImmutableDictionary<int, BindingPose> Bindings { get; init; } = ImmutableDictionary<int, BindingPose>.Empty;
+    }
 
     /// <summary>Values that are not keyed: Enter or a key button keys them, and the playhead's move drops them.</summary>
     public sealed record Holding(
@@ -164,8 +174,46 @@ public sealed class PreviewValues(EditorShell shell)
             set = set.SetItem(key, value);
         }
         var serial = ++_last;
-        Become(new PreviewValuesState.Holding(open.Ticket, editor, tick, serial, live?.First ?? serial, set, components));
+        Become(new PreviewValuesState.Holding(open.Ticket, editor, tick, serial, live?.First ?? serial, set, components)
+        {
+            Bindings = live?.Bindings ?? ImmutableDictionary<int, BindingPose>.Empty,
+        });
         return true;
+    }
+
+    /// <summary>
+    /// Sets a binding's world pose over the preview at the playhead, by its ID, as a piloted camera's (see
+    /// docs/editor/cutscene-editor.md#pilot). False, with nothing set, when no session of the tab is open and paused.
+    /// </summary>
+    public bool SetBindingPose(CutsceneEditor editor, int binding, IReadOnlyList<long> position, Quat rotation)
+    {
+        if (shell.CutscenePreview.State is not CutscenePreviewState.Open { Playing: false } open || open.Editor != editor || position.Count != 3)
+        {
+            return false;
+        }
+        var tick = TickOf(open);
+        var live = State is PreviewValuesState.Live l && l.Ticket == open.Ticket && l.Tick == tick ? l : null;
+        var serial = ++_last;
+        Become(new PreviewValuesState.Holding(open.Ticket, editor, tick, serial, live?.First ?? serial,
+            live?.Values ?? ImmutableDictionary<ValueKey, SceneValue>.Empty, live?.Components ?? ImmutableDictionary<(ulong, ulong), byte[]>.Empty)
+        {
+            Bindings = (live?.Bindings ?? ImmutableDictionary<int, BindingPose>.Empty).SetItem(binding, new BindingPose([.. position], rotation.Normalized())),
+        });
+        return true;
+    }
+
+    /// <summary>A binding's pose over the preview, or null when none is set.</summary>
+    public BindingPose? PoseOf(int binding) => State is PreviewValuesState.Live live ? live.Bindings.GetValueOrDefault(binding) : null;
+
+    // What the game last said that the world shows of the preview (see Cutscene_Preview_Shown), which settles a
+    // binding's keyed pose, as no entity's values carry it.
+    Link.Protocol.ShownPreview? _shown;
+
+    /// <summary>The game said what the world shows of the preview.</summary>
+    internal void OnPreviewShown(Link.Protocol.ShownPreview shown)
+    {
+        _shown = shown;
+        Follow();
     }
 
     // The time that a session shows at the tab's playhead: the game holds its time within the cutscene's range.
@@ -195,7 +243,10 @@ public sealed class PreviewValues(EditorShell shell)
     {
         if (State is PreviewValuesState.Live live && live.Editor.Document.Text is var text)
         {
-            Become(new PreviewValuesState.Settling(live.Ticket, live.Editor, live.Tick, live.Serial, live.First, live.Values, live.Components, text));
+            Become(new PreviewValuesState.Settling(live.Ticket, live.Editor, live.Tick, live.Serial, live.First, live.Values, live.Components, text)
+            {
+                Bindings = live.Bindings,
+            });
         }
     }
 
@@ -233,7 +284,9 @@ public sealed class PreviewValues(EditorShell shell)
                 return;
             }
             var shown = open.Unsaved
-                ? live.Editor.CleanBlob is { } blob && live.Components.Keys.Any(k => shell.World.ShownPreviewOf(k.Handle) is { } s && s.Ticket == open.Ticket && s.Blob == blob)
+                ? live.Editor.CleanBlob is { } blob
+                    && (live.Components.Keys.Any(k => shell.World.ShownPreviewOf(k.Handle) is { } s && s.Ticket == open.Ticket && s.Blob == blob)
+                        || (!live.Bindings.IsEmpty && _shown is { } preview && preview.Ticket == open.Ticket && preview.Blob == blob))
                 : !live.Editor.Document.IsDirty;
             if (shown)
             {
@@ -264,6 +317,12 @@ public sealed class PreviewValues(EditorShell shell)
             {
                 fields.Add(new OverrideField(target, component, Hash(key.Field), SceneSnapshot.Value(value)));
             }
+        }
+        foreach (var (binding, pose) in live.Bindings)
+        {
+            var q = pose.Rotation;
+            transforms.Add(new OverrideTransform(new OverrideTarget(OverrideTargetKind.Binding, 0, (ulong)binding), pose.Position,
+                [(float)q.X, (float)q.Y, (float)q.Z, (float)q.W], [1, 1, 1]));
         }
         return new CutscenePreviewValues(live.Ticket, live.Tick, live.Serial, [.. fields], [.. transforms]);
     }

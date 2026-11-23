@@ -306,6 +306,7 @@ public sealed partial class EditorShell
         {
             return false;
         }
+        LeaveLook(viewport);
         var chosen = viewport.Projection != projection;
         viewport.Projection = projection;
         viewport.Camera.SetProjection(projection);
@@ -349,6 +350,7 @@ public sealed partial class EditorShell
         {
             return false;
         }
+        LeaveLook(viewport);
         // A view that has not been shown turns about the pivot that it would start at, the first view's.
         PlaceCamera(viewport);
         var (yaw, pitch) = ViewGizmo.Angles(axis);
@@ -507,6 +509,15 @@ public sealed partial class EditorShell
         WriteSetting("viewport", EditorSettings.ViewportFileName, JsonSerializer.Serialize(new ViewportFile([.. Viewports.Select(v => v.Settings)], SceneViews,
             Projections: [.. Viewports.Where(v => v.HasCamera).Select(v => v.Projection.ToString())],
             Guides: Viewports.Any(v => v.Guides != new FrameGuideSettings()) ? [.. Viewports.Select(v => v.Guides)] : null)));
+
+    // A command that moves a view's editor camera shows it: the view stops looking through a cutscene's camera.
+    void LeaveLook(EditorViewport viewport)
+    {
+        if (viewport.HasCamera)
+        {
+            Looks.LookThroughEditor(viewport.Index);
+        }
+    }
 
     /// <summary>A viewport's frame guides changed.</summary>
     public event Action<EditorViewport>? GuidesChanged;

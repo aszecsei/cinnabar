@@ -424,6 +424,25 @@ public sealed class ToolsTests
         Assert.Equal(ViewGizmoPart.None, ViewGizmo.Hit(handles, new Vec2(radius * 2, radius * 2), radius));
     }
 
+    // A pilot's camera starts from a cinematic camera's pose: the same position, looking the same way, with its lens's field of view.
+    [Fact]
+    public void ACameraFromAPoseLooksAlongTheRotationsZ()
+    {
+        var source = new EditorCamera();
+        source.Place([5L << 24, -(2L << 24), 7], 2.1, -0.4);
+
+        var camera = EditorCamera.FromPose(source.Position, source.Rotation, 0.5, speed: 9);
+
+        Assert.Equal(source.Position, camera.Position);
+        Assert.Equal(2.1, camera.Yaw, 9);
+        Assert.Equal(-0.4, camera.Pitch, 9);
+        Assert.Equal(0.5, camera.VerticalFov);
+        Assert.Equal(9, camera.Speed);
+        var a = source.Rotation;
+        var b = camera.Rotation;
+        Assert.True(Math.Abs(a.X * b.X + a.Y * b.Y + a.Z * b.Z + a.W * b.W) > 1 - 1e-12);
+    }
+
     [Fact]
     public void ACameraTurnTakesTheShortWayRoundAndEndsExactly()
     {

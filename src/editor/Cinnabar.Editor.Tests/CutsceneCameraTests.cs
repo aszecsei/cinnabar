@@ -2,6 +2,7 @@ using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Link.Protocol;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Tools;
 using Asset = Cinnabar.Editor.Link.Cook.Asset;
@@ -259,5 +260,147 @@ public sealed class CutsceneCameraTests : IDisposable
         var focal = CutsceneKeying.KeysAt(editor.File,
             new KeyTarget.Property(6, Panels.CinematicCameraText.CinematicCameraId, "focal_length", PropertyShape.Number), editor.Playhead);
         Assert.Equal(50, Assert.Single(focal)!.Value, 2);
+    }
+
+    // The Wide Shot's pose as the sample's text spawns it, in World_Position units, looking along +z.
+    static readonly long[] WideShot = PoseKeys.Units([149999999998, 1.6, -5]);
+
+    // Looks the first scene view through the Wide Shot, and answers with the pose that the world shows.
+    ViewLook.Camera PilotWideShot(EditorShell shell, CutsceneEditor editor)
+    {
+        editor.ToggleLookThrough(3);
+        var look = _sent.OfType<ViewportLook>().Last();
+        shell.OnGameMessage(new ViewportLookShown(0, look.Serial, true, 3, WideShot, [0, 0, 0, 1], (float)Lens.VerticalFov(35, 24), 35, [36, 24]));
+        _sent.Clear();
+        return Assert.IsType<ViewLook.Camera>(shell.Looks[0]);
+    }
+
+    static Tools.EditorCamera PilotCamera(EditorShell shell) =>
+        Assert.IsType<Pilot.Ready>(Assert.IsType<ViewLook.Camera>(shell.Looks[0]).Pilot).Camera;
+
+    [Fact]
+    public void APilotStartsAtTheShownPoseAndItsGestureWithAutoKeyIsOneKeyAndOneEntry()
+    {
+        var (shell, editor, ticket) = NewShell();
+        using var _ = shell;
+        var camera = PilotWideShot(shell, editor);
+        var pilot = PilotCamera(shell);
+        Assert.Equal(WideShot, pilot.Position);
+        Assert.Equal(0, pilot.Yaw, 9);
+        Assert.Equal(0, pilot.Pitch, 9);
+        Assert.Equal(Lens.VerticalFov(35, 24), pilot.VerticalFov, 6);
+        var editorPose = shell.Viewports[0].Camera.Pose;
+        shell.Keying.AutoKey = true;
+        editor.SetPlayhead(60000);
+        shell.CutscenePreview.Flush();
+        var history = editor.Document.History.Count;
+
+        // A right-button flight, through the editor camera's own inputs: 2 m to the right over half a second, and a turn.
+        shell.Looks.BeginGesture(0);
+        shell.Looks.Move(0, c => c.Fly(new Vec3(1, 0, 0), 0.5, 1));
+        shell.Looks.Move(0, c => c.Look(-100, 0));
+        // An empty fly step moves nothing and keys nothing.
+        shell.Looks.Move(0, c => c.Fly(new Vec3(0, 0, 0), 0.016, 1));
+        shell.Looks.EndGesture(0, cancel: false);
+
+        Assert.Equal(history + 1, editor.Document.History.Count);
+        Assert.Equal("Pilot Wide Shot", editor.Document.History[^1]);
+        var position = CutsceneKeying.KeysAt(editor.File, new KeyTarget.Pose(3, PosePart.Position), 60000);
+        Assert.Equal(2, position[0]!.Value, 4);
+        Assert.Equal(0, position[1]!.Value, 4);
+        Assert.Equal(0, position[2]!.Value, 4);
+        var rotation = CutsceneKeying.KeysAt(editor.File, new KeyTarget.Pose(3, PosePart.Rotation), 60000);
+        Assert.Equal(PoseKeys.Euler(PilotCamera(shell).Rotation)[1], rotation[1]!.Value, 3);
+        Assert.NotEqual(0, rotation[1]!.Value);
+        // The world shows the pose at once, by the binding's ID, and the editor camera never moved.
+        var values = _sent.OfType<CutscenePreviewValues>().Last();
+        Assert.Equal(ticket, values.Ticket);
+        var transform = Assert.Single(values.Transforms);
+        Assert.Equal((OverrideTargetKind.Binding, 3UL), (transform.Target.Kind, transform.Target.Entity));
+        Assert.Equal(PilotCamera(shell).Position, transform.Position);
+        Assert.IsType<PreviewValuesState.Settling>(shell.PreviewValues.State);
+        Assert.Equal(editorPose, shell.Viewports[0].Camera.Pose);
+
+        // Undo takes the gesture back in one step.
+        shell.Commands.Get("edit.undo").Execute();
+        Assert.Equal(history, editor.Document.Position);
+        Assert.DoesNotContain(editor.File.Tracks, t => t.Get("binding") == "3" && t.TrackKind == "transform");
+        Assert.Equal(3, camera.Binding);
+    }
+
+    [Fact]
+    public void WithoutAutoKeyAPilotsPoseHoldsUntilEnterKeysIt()
+    {
+        var (shell, editor, _) = NewShell();
+        using var _ = shell;
+        PilotWideShot(shell, editor);
+        var text = editor.Document.Text;
+
+        shell.Looks.BeginGesture(0);
+        shell.Looks.Move(0, c => c.Fly(new Vec3(0, 1, 0), 0.25, 1));
+        shell.Looks.EndGesture(0, cancel: false);
+
+        Assert.Equal(text, editor.Document.Text);
+        Assert.False(editor.Document.IsDirty);
+        Assert.NotNull(shell.PreviewValues.PoseOf(3));
+        Assert.IsType<PreviewValuesState.Holding>(shell.PreviewValues.State);
+        Assert.Null(shell.Keying.KeyPreviewValuesRefusal());
+
+        // Esc leaves the look, and the pose still waits for its key.
+        Assert.True(shell.Looks.Escape(0));
+        Assert.IsType<ViewLook.Editor>(shell.Looks[0]);
+        shell.Commands.Get(EditorCommands.CutsceneKeyPreviewValues).Execute();
+        var position = CutsceneKeying.KeysAt(editor.File, new KeyTarget.Pose(3, PosePart.Position), 0);
+        Assert.Equal(1, position[1]!.Value, 4);
+        Assert.Equal("Key Preview Values", editor.Document.History[^1]);
+        Assert.IsType<PreviewValuesState.Settling>(shell.PreviewValues.State);
+    }
+
+    [Fact]
+    public void EscTakesBackAGestureAndThenGivesTheViewItsOwnCamera()
+    {
+        var (shell, editor, _) = NewShell();
+        using var _ = shell;
+        PilotWideShot(shell, editor);
+        shell.Keying.AutoKey = true;
+        var start = PilotCamera(shell).Pose;
+        var editorPose = shell.Viewports[0].Camera.Pose;
+        var history = editor.Document.History.Count;
+
+        shell.Looks.BeginGesture(0);
+        shell.Looks.Move(0, c => c.Pan(40, 0, 1080));
+        Assert.True(editor.Document.InTransaction);
+        Assert.True(shell.Looks.Escape(0));
+
+        Assert.False(editor.Document.InTransaction);
+        Assert.Equal(history, editor.Document.History.Count);
+        Assert.IsType<PreviewValuesState.Empty>(shell.PreviewValues.State);
+        Assert.Equal(start, PilotCamera(shell).Pose);
+        Assert.IsType<ViewLook.Camera>(shell.Looks[0]);
+
+        Assert.True(shell.Looks.Escape(0));
+        Assert.IsType<ViewLook.Editor>(shell.Looks[0]);
+        Assert.Equal(editorPose, shell.Viewports[0].Camera.Pose);
+        Assert.False(shell.Looks.Escape(0));
+    }
+
+    [Fact]
+    public void APossessedCameraIsNotPilotedAndFramingGivesTheViewItsOwnCamera()
+    {
+        var (shell, editor, _) = NewShell();
+        using var _ = shell;
+        editor.ToggleLookThrough(1);
+        var look = _sent.OfType<ViewportLook>().Last();
+        shell.OnGameMessage(new ViewportLookShown(0, look.Serial, true, 1, WideShot, [0, 0, 0, 1], 1, 0, [0, 0]));
+
+        var refused = Assert.IsType<Pilot.Refused>(Assert.IsType<ViewLook.Camera>(shell.Looks[0]).Pilot);
+        Assert.Contains("spawned", refused.Reason);
+        Assert.Equal(refused.Reason, shell.Looks.PilotRefusal(0));
+        shell.Looks.BeginGesture(0);
+        shell.Looks.Move(0, c => c.Fly(new Vec3(1, 0, 0), 1, 1));
+        Assert.Null(shell.PreviewValues.PoseOf(1));
+
+        shell.FrameScene();
+        Assert.IsType<ViewLook.Editor>(shell.Looks[0]);
     }
 }

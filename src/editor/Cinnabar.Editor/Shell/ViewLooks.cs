@@ -1,3 +1,4 @@
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Tools;
 using ViewportLook = Cinnabar.Editor.Link.Protocol.ViewportLook;
 using ViewportLookShown = Cinnabar.Editor.Link.Protocol.ViewportLookShown;
@@ -269,8 +270,152 @@ public sealed class ViewLooks
         Become(i, through switch
         {
             ViewLook.Cuts cuts => cuts with { Shown = shown },
-            ViewLook.Camera camera => camera with { Shown = shown },
+            ViewLook.Camera camera => camera with { Shown = shown, Pilot = PilotOf(camera, shown) },
             _ => through,
         });
+    }
+
+    // A camera's pilot after the game shows it: a gesture under way, or a pose over the preview that the pilot set, keeps
+    // its camera; otherwise the pilot starts again from what the world shows, as after a move of the playhead, or is
+    // refused when the binding cannot take its keys.
+    Pilot PilotOf(ViewLook.Camera camera, ViewportLookShown shown)
+    {
+        if (camera.Pilot is Pilot.Ready { Gesture: PilotGesture.Moving } moving)
+        {
+            return moving;
+        }
+        if (!shown.Camera)
+        {
+            return Pilot.Waiting.Instance;
+        }
+        if (camera.Pilot is Pilot.Ready ready && _shell.PreviewValues.PoseOf(camera.Binding) != null)
+        {
+            return ready;
+        }
+        if (PilotKeys.Refusal(camera.Owner.File, camera.Binding, camera.Owner.Locked) is { } why)
+        {
+            return new Pilot.Refused(why);
+        }
+        var r = shown.Rotation;
+        var speed = camera.Pilot is Pilot.Ready old ? old.Camera.Speed : 4;
+        return new Pilot.Ready(EditorCamera.FromPose(shown.Position, new Quat(r[0], r[1], r[2], r[3]), shown.VerticalFov, speed), PilotGesture.Idle.Instance);
+    }
+
+    /// <summary>Why a scene view's fly, orbit and pan cannot move what it looks through, or null when they move it or the view's own camera.</summary>
+    public string? PilotRefusal(int viewport) => this[viewport] switch
+    {
+        ViewLook.Cuts => "The view follows the cuts, so it moves no camera. Look through one camera to pilot it.",
+        ViewLook.Camera { Pilot: Pilot.Refused refused } => refused.Reason,
+        ViewLook.Camera { Pilot: Pilot.Waiting } => "Waiting for the game to show the camera.",
+        _ => null,
+    };
+
+    /// <summary>
+    /// A mouse gesture that moves the camera starts in a view that pilots one: the preview pauses, as values show only
+    /// at a standing playhead, and the pose and the values before it are kept for Esc.
+    /// </summary>
+    public void BeginGesture(int viewport)
+    {
+        if (this[viewport] is not ViewLook.Camera { Pilot: Pilot.Ready { Gesture: PilotGesture.Idle } ready } camera)
+        {
+            return;
+        }
+        if (_shell.CutscenePreview.State is CutscenePreviewState.Open { Playing: true })
+        {
+            _shell.CutscenePreview.Pause();
+        }
+        Become(viewport, camera with { Pilot = ready with { Gesture = new PilotGesture.Moving(_shell.PreviewValues.State, ready.Camera.Pose, null) } });
+    }
+
+    /// <summary>
+    /// Moves the camera that a view pilots during a gesture: the pose shows over the preview at once, and with auto-key,
+    /// the gesture's one undo entry keys it, from its first move. Nothing in a view that pilots nothing.
+    /// </summary>
+    public void Move(int viewport, Action<EditorCamera> move)
+    {
+        if (this[viewport] is not ViewLook.Camera { Pilot: Pilot.Ready { Gesture: PilotGesture.Moving moving } ready } camera)
+        {
+            return;
+        }
+        var before = ready.Camera.Pose;
+        move(ready.Camera);
+        if (ready.Camera.Pose == before)
+        {
+            return;
+        }
+        var position = ready.Camera.Position;
+        var rotation = ready.Camera.Rotation;
+        if (!_shell.PreviewValues.SetBindingPose(camera.Owner, camera.Binding, position, rotation) || !_shell.Keying.AutoKey)
+        {
+            return;
+        }
+        var keys = moving.Keys;
+        if (keys == null)
+        {
+            var name = camera.Owner.File.Bindings.FirstOrDefault(b => b.Id == camera.Binding)?.Name ?? "Camera";
+            keys = camera.Owner.BeginHeldDrag($"Pilot {name}");
+            if (keys == null)
+            {
+                return;
+            }
+            Become(viewport, camera with { Pilot = ready with { Gesture = moving with { Keys = keys } } });
+        }
+        var tick = camera.Owner.Playhead;
+        keys.Step(file =>
+        {
+            PilotKeys.Set(file, camera.Binding, position, rotation, tick, camera.Owner.Locked);
+            return [];
+        });
+    }
+
+    /// <summary>
+    /// Ends a view's pilot gesture. A release keeps the pose: with auto-key its keys are the gesture's one undo entry,
+    /// and the values settle until the preview shows them; without, they hold until they are keyed or the playhead moves.
+    /// A cancel, as Esc, puts the keys, the values and the pilot's pose back as they were.
+    /// </summary>
+    public void EndGesture(int viewport, bool cancel)
+    {
+        if (this[viewport] is not ViewLook.Camera { Pilot: Pilot.Ready { Gesture: PilotGesture.Moving moving } ready } camera)
+        {
+            return;
+        }
+        Become(viewport, camera with { Pilot = ready with { Gesture = PilotGesture.Idle.Instance } });
+        if (cancel)
+        {
+            moving.Keys?.End(cancel: true);
+            _shell.PreviewValues.Restore(moving.Before);
+            var start = moving.Start;
+            ready.Camera.Place([start.X, start.Y, start.Z], start.Yaw, start.Pitch);
+            return;
+        }
+        if (moving.Keys is { IsOpen: true } keys)
+        {
+            var before = camera.Owner.Document.Position;
+            keys.End(cancel: false);
+            if (camera.Owner.Document.Position != before)
+            {
+                _shell.Edited(new UndoTarget.Cutscene(camera.Owner));
+            }
+            _shell.PreviewValues.Keyed();
+        }
+    }
+
+    /// <summary>
+    /// Esc in a looking view: it takes back a pilot's gesture under way, or else gives the view its own camera back.
+    /// False when the view looks through nothing.
+    /// </summary>
+    public bool Escape(int viewport)
+    {
+        switch (this[viewport])
+        {
+            case ViewLook.Camera { Pilot: Pilot.Ready { Gesture: PilotGesture.Moving } }:
+                EndGesture(viewport, cancel: true);
+                return true;
+            case ViewLook.Through:
+                LookThroughEditor(viewport);
+                return true;
+            default:
+                return false;
+        }
     }
 }

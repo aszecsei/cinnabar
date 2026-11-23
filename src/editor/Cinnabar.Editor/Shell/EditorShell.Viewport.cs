@@ -311,6 +311,7 @@ public sealed partial class EditorShell
     {
         if (Bounds(entities) is var (center, radius))
         {
+            LeaveLook(ActiveViewport);
             Camera.Frame(center, radius);
         }
     }

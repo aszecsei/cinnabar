@@ -342,6 +342,7 @@ public sealed class ViewportView : Grid
         if (viewport == _viewport.Index)
         {
             _guides.InvalidateVisual();
+            ShowSpeed();
         }
     }
 
@@ -415,11 +416,22 @@ public sealed class ViewportView : Grid
 
     void ShowSpeed()
     {
-        if (!_viewport.IsGame)
+        if (_viewport.IsGame)
         {
-            _speed.Text = $"{FormatSpeed(_viewport.Camera.Speed)}   ·   {_shell.Tool}, {_shell.Space}{(_shell.Snap ? ", snapping" : "")}"
-                + (_shell.Mesh.InMeshMode ? $"   ·   grid {Mesh.MeshGrid.Format(_shell.Mesh.GridSize)}" : "");
+            return;
         }
+        // A view that looks through a camera says what its fly, orbit and pan move, or why they move nothing.
+        switch (_shell.Looks[_viewport.Index])
+        {
+            case ViewLook.Camera { Pilot: Pilot.Ready ready }:
+                _speed.Text = $"Piloting   ·   {FormatSpeed(ready.Camera.Speed)}   ·   Esc for the editor camera";
+                return;
+            case ViewLook.Through:
+                _speed.Text = $"{_shell.Looks.PilotRefusal(_viewport.Index)}   ·   Esc for the editor camera";
+                return;
+        }
+        _speed.Text = $"{FormatSpeed(_viewport.Camera.Speed)}   ·   {_shell.Tool}, {_shell.Space}{(_shell.Snap ? ", snapping" : "")}"
+            + (_shell.Mesh.InMeshMode ? $"   ·   grid {Mesh.MeshGrid.Format(_shell.Mesh.GridSize)}" : "");
     }
 
     static string FormatSpeed(double metersPerSecond) => metersPerSecond >= 1000 ? $"{metersPerSecond / 1000:0.##} km/s" : $"{metersPerSecond:0.##} m/s";
@@ -606,6 +618,30 @@ public sealed class ViewportView : Grid
         }
         var alt = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
         _start = _last = point.Position;
+        if (Looking)
+        {
+            // A view that looks through a camera moves the camera, or nothing, and a click selects (see
+            // docs/editor/cutscene-editor.md#pilot): the editor's tools act in the editor camera's view.
+            _gesture = point.Properties.IsRightButtonPressed ? alt ? Gesture.Dolly : Gesture.Fly
+                : point.Properties.IsMiddleButtonPressed ? Gesture.Pan
+                : point.Properties.IsLeftButtonPressed ? alt ? Gesture.Orbit : Gesture.Click
+                : Gesture.None;
+            if (_gesture is Gesture.Fly or Gesture.Dolly or Gesture.Pan or Gesture.Orbit)
+            {
+                _shell.Looks.BeginGesture(_viewport.Index);
+            }
+            if (_gesture == Gesture.Fly)
+            {
+                _lastFly = Environment.TickCount64;
+                _flyTimer.Start();
+            }
+            if (_gesture != Gesture.None)
+            {
+                e.Pointer.Capture(this);
+                e.Handled = true;
+            }
+            return;
+        }
         if (point.Properties.IsRightButtonPressed)
         {
             // An orthographic view has no way to look around in: its right button moves it in its plane.
@@ -672,7 +708,7 @@ public sealed class ViewportView : Grid
             case Gesture.None:
                 // The mouse over a viewport makes it the active one, so the gizmo's hover is in its frame.
                 _shell.ActivateViewport(_viewport);
-                if (_shell.ActiveViewport == _viewport && _control.FramePoint(position) is { } hover)
+                if (!Looking && _shell.ActiveViewport == _viewport && _control.FramePoint(position) is { } hover)
                 {
                     _shell.HoverGizmo(hover);
                     _shell.Mesh.HoverMesh(hover);
@@ -692,22 +728,27 @@ public sealed class ViewportView : Grid
                 }
                 break;
             case Gesture.Fly:
-                _viewport.Camera.Look(delta.X, delta.Y);
+                MoveCamera(c => c.Look(delta.X, delta.Y));
+                break;
+            case Gesture.Orbit when Looking:
+                MoveCamera(c => c.Orbit(delta.X, delta.Y));
                 break;
             case Gesture.Orbit:
                 _shell.Orbit(_viewport.Camera, delta.X, delta.Y);
                 break;
             case Gesture.Pan:
-                _viewport.Camera.Pan(delta.X, delta.Y, _viewport.FrameSize.Height);
+                MoveCamera(c => c.Pan(delta.X, delta.Y, _viewport.FrameSize.Height));
                 break;
             case Gesture.Dolly:
-                _viewport.Camera.Dolly(-delta.Y * DollyPerPixel);
+                MoveCamera(c => c.Dolly(-delta.Y * DollyPerPixel));
                 break;
             case Gesture.Gizmo:
                 if (_control.FramePoint(position) is { } drag)
                 {
                     _shell.DragGizmo(drag, e.KeyModifiers.HasFlag(KeyModifiers.Control));
                 }
+                break;
+            case Gesture.Click when Looking:
                 break;
             case Gesture.Click:
                 if ((position - _start) is var moved && Gestures.MovedPast(moved))
@@ -750,6 +791,8 @@ public sealed class ViewportView : Grid
             return;
         }
         var mode = ModeOf(e.KeyModifiers);
+        // A pilot's gesture ends with the release, which keys it with auto-key.
+        _shell.Looks.EndGesture(_viewport.Index, cancel: false);
         switch (_gesture)
         {
             case Gesture.Gizmo:
@@ -760,6 +803,12 @@ public sealed class ViewportView : Grid
                 break;
             case Gesture.Brush:
                 _shell.Landscape.EndStroke();
+                break;
+            case Gesture.Click when Looking:
+                if (_control.FramePoint(position) is { } picked)
+                {
+                    _shell.PickAt(picked, mode);
+                }
                 break;
             case Gesture.Click:
                 if (_control.FramePoint(position) is { } pixel && !_shell.Mesh.Tools.AddToolPoint(pixel) && !_shell.AddNavPoint(pixel))
@@ -781,6 +830,7 @@ public sealed class ViewportView : Grid
     protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
     {
         base.OnPointerCaptureLost(e);
+        _shell.Looks.EndGesture(_viewport.Index, cancel: false);
         if (_gesture == Gesture.Gizmo)
         {
             _shell.ReleaseGizmo();
@@ -850,7 +900,15 @@ public sealed class ViewportView : Grid
         {
             return;
         }
-        if (_gesture == Gesture.Fly)
+        if (Looking)
+        {
+            // A pilot's moves end with a mouse release, which keys them, so the wheel only changes the flying speed.
+            if (_gesture == Gesture.Fly)
+            {
+                MoveCamera(c => c.ChangeSpeed(e.Delta.Y));
+            }
+        }
+        else if (_gesture == Gesture.Fly)
         {
             _viewport.Camera.ChangeSpeed(e.Delta.Y);
         }
@@ -968,7 +1026,16 @@ public sealed class ViewportView : Grid
             Key.OemCloseBrackets => EditorCommands.MeshGridCoarser,
             _ => null,
         };
-        if (e.Key == Key.Escape && _gesture == Gesture.Gizmo)
+        if (e.Key == Key.Escape && Looking && _shell.Looks.Escape(_viewport.Index))
+        {
+            // Esc takes back a pilot's gesture under way, or gives the view its own camera back.
+            if (_gesture is Gesture.Fly or Gesture.Dolly or Gesture.Pan or Gesture.Orbit)
+            {
+                EndGesture();
+            }
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape && _gesture == Gesture.Gizmo)
         {
             _shell.CancelGizmo();
             _gesture = Gesture.None;
@@ -1043,7 +1110,23 @@ public sealed class ViewportView : Grid
         double Axis(Key positive, Key negative) => (_held.Contains(positive) ? 1 : 0) - (_held.Contains(negative) ? 1 : 0);
         var direction = new Vec3(Axis(Key.D, Key.A), Axis(Key.E, Key.Q), Axis(Key.W, Key.S));
         var boost = _held.Contains(Key.LeftShift) || _held.Contains(Key.RightShift) ? 4 : 1;
-        _viewport.Camera.Fly(direction, seconds, boost);
+        MoveCamera(c => c.Fly(direction, seconds, boost));
+    }
+
+    // Whether the view draws through a camera of the cutscene, not its own (see docs/editor/cutscene-editor.md#look-through).
+    bool Looking => !_viewport.IsGame && _shell.Looks[_viewport.Index] is not ViewLook.Editor;
+
+    // A camera gesture moves the view's own camera, or the one that it pilots, or nothing while it pilots none.
+    void MoveCamera(Action<EditorCamera> move)
+    {
+        if (Looking)
+        {
+            _shell.Looks.Move(_viewport.Index, move);
+        }
+        else
+        {
+            move(_viewport.Camera);
+        }
     }
 
     // The game sees the mouse in pixels of its frame.
