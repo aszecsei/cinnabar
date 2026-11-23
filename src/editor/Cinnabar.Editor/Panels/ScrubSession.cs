@@ -11,18 +11,20 @@ static class ScrubSession
 }
 
 /// <summary>
-/// A drag that scrubs a field's value: the edit it previews in, and what the field held when it began, so each move
-/// is from there. It starts only with an edit of its own, and it is over once the edit ends, by the drag or by the shell.
+/// A drag that scrubs a field's value: the edit it previews in, the scene's or one that keying routes (see
+/// <see cref="FieldSink"/>), and what the field held when it began, so each move is from there. It starts only with an
+/// edit of its own, and it is over once the edit ends, by the drag or by the shell.
 /// </summary>
-sealed class ScrubSession<T>
+sealed class ScrubSession<T, TEdit>
+    where TEdit : class, IFieldEdit
 {
-    (SceneEdit Edit, T Start)? _open;
+    (TEdit Edit, T Start)? _open;
 
     /// <summary>The drag's edit and start, or null when no drag is under way.</summary>
-    public (SceneEdit Edit, T Start)? Open => _open;
+    public (TEdit Edit, T Start)? Open => _open;
 
     /// <summary>Starts the drag in an edit, or with null, as when another edit is open, does not.</summary>
-    public bool Begin(SceneEdit? edit, T start)
+    public bool Begin(TEdit? edit, T start)
     {
         if (edit == null)
         {

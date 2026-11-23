@@ -290,7 +290,7 @@ sealed class MappingEditor(EditorShell shell, MappingField field) : IFieldEditor
     const double ShiftStep = 0.01;
     const double DegreeStep = 0.5;
 
-    readonly ScrubSession<IReadOnlyDictionary<string, MeshData>> _scrub = new();
+    readonly ScrubSession<IReadOnlyDictionary<string, MeshData>, SceneEdit> _scrub = new();
 
     public bool Commit(int axis, string text)
     {

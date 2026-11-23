@@ -61,6 +61,8 @@ public sealed class ViewportView : Grid
     readonly Border _box;
     readonly TextBlock _speed;
     readonly Border _modeFrame;
+    // Red around a scene view while auto-key turns its edits of bound entities into keys.
+    readonly Border _autoKeyFrame;
     readonly DispatcherTimer _timer;
     readonly DispatcherTimer _flyTimer;
     readonly DispatcherTimer _gamepadTimer;
@@ -116,6 +118,8 @@ public sealed class ViewportView : Grid
         Children.Add(_activeFrame);
         _modeFrame = new Border { Classes = { "viewport-frame" }, BorderThickness = new Thickness(2), IsHitTestVisible = false };
         Children.Add(_modeFrame);
+        _autoKeyFrame = new Border { Classes = { "auto-key-frame" }, BorderThickness = new Thickness(2), IsHitTestVisible = false };
+        Children.Add(_autoKeyFrame);
 
         _stats = new TextBlock { FontFamily = new FontFamily("Consolas"), FontSize = 12 };
         _overlay = Overlay(_stats, HorizontalAlignment.Right, VerticalAlignment.Top);
@@ -220,6 +224,7 @@ public sealed class ViewportView : Grid
                 _viewport.TurnStarted += StartTurn;
             }
             _shell.ModeChanged += ShowMode;
+            _shell.Keying.Changed += ShowAutoKey;
             _shell.ActiveViewportChanged += ShowActive;
             _shell.ViewportsChanged += ShowActive;
             _timer.Start();
@@ -235,6 +240,7 @@ public sealed class ViewportView : Grid
                 TakeFocus();
             }
             ShowMode();
+            ShowAutoKey();
             ShowTools();
             ShowSpeed();
             ShowActive();
@@ -250,6 +256,7 @@ public sealed class ViewportView : Grid
                 _viewport.TurnStarted -= StartTurn;
             }
             _shell.ModeChanged -= ShowMode;
+            _shell.Keying.Changed -= ShowAutoKey;
             _shell.ActiveViewportChanged -= ShowActive;
             _shell.ViewportsChanged -= ShowActive;
             if (_viewport.IsGame)
@@ -310,6 +317,8 @@ public sealed class ViewportView : Grid
 
     // The tool, the space and snapping are the Scene's, in its tool strip: here only what the status line says changes.
     void ShowTools() => ShowSpeed();
+
+    void ShowAutoKey() => _autoKeyFrame.Classes.Set("on", !_viewport.IsGame && _shell.Keying.AutoKeyShows);
 
     void ShowMode()
     {

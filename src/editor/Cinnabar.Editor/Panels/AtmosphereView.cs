@@ -358,7 +358,7 @@ sealed class SunAngleEditor(EditorShell shell, bool elevation) : IFieldEditor
 {
     const double DegreeStep = 0.5;
 
-    readonly ScrubSession<(double Azimuth, double Elevation)> _scrub = new();
+    readonly ScrubSession<(double Azimuth, double Elevation), SceneEdit> _scrub = new();
 
     string Label => elevation ? "Set Sun Elevation" : "Set Sun Azimuth";
 

@@ -32,6 +32,9 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     public WorldOverrides Overrides { get; }
     /// <summary>The cutscene editor's preview in the game, for one tab at a time (see docs/editor/cutscene-editor.md#preview).</summary>
     public CutscenePreview CutscenePreview { get; }
+
+    /// <summary>The values that the world shows over the cutscene preview, outside the document and the cutscene.</summary>
+    public PreviewValues PreviewValues { get; }
     public ResourceStats Stats { get; } = new();
     public Selection Selection { get; } = new();
     public OutlinerState Outliner { get; } = new();
@@ -91,6 +94,9 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Host = new HostSession(options);
         Overrides = new WorldOverrides(this);
         CutscenePreview = new CutscenePreview(this);
+        PreviewValues = new PreviewValues(this);
+        // A gizmo drag that goes to the cutscene moves with the values over the preview.
+        PreviewValues.Changed += SendGizmo;
         Keying = new Keying(this);
         WireKeying();
         Watches = new EntityWatches(Selection, Host);

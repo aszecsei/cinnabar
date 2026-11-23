@@ -199,7 +199,17 @@ public sealed class CutsceneEditor : IGraphEditor
         {
             Document.Commit();
         }
+        // Whoever ended it, the holder of a keying drag learns so.
+        var held = _held;
+        _held = null;
+        held?.RaiseEnded(!cancel);
     }
+
+    /// <summary>
+    /// The entities that the designer chose not to possess when auto-key asked, for this tab: their edits go to the
+    /// scene, and auto-key does not ask again.
+    /// </summary>
+    internal HashSet<PossessRef> DeclinedPossess { get; } = [];
 
     /// <summary>The playhead in ticks: where a split, Home and End act. It is the editor's, not the document's, so it is in no undo entry.</summary>
     public int Playhead => _playhead;
@@ -795,6 +805,27 @@ public sealed class CutsceneEditor : IGraphEditor
         return true;
     }
 
+    /// <summary>
+    /// Starts a drag from outside the timeline, such as auto-key's from the inspector or a gizmo, as
+    /// <see cref="BeginDrag"/> does, and gives its holder a token. Null when a drag is under way. However the drag ends,
+    /// by the token or by another, as with Esc in the timeline, the token's <see cref="CutsceneDrag.Ended"/> says so
+    /// once, and then the token does nothing.
+    /// </summary>
+    public CutsceneDrag? BeginHeldDrag(string label)
+    {
+        if (!BeginDrag(label))
+        {
+            return null;
+        }
+        _held = new CutsceneDrag(this);
+        return _held;
+    }
+
+    // The token of the drag that BeginHeldDrag started, while it is open.
+    CutsceneDrag? _held;
+
+    internal bool Holds(CutsceneDrag drag) => _held == drag && Document.InTransaction;
+
     // The selection when a drag began, which a cancel puts back, as the paths of moved keys change during it.
     List<string>? _dragSelection;
 
@@ -1001,4 +1032,43 @@ public sealed class CutsceneEditor : IGraphEditor
         _cook.Dispose();
         Document.Changed -= OnDocumentChanged;
     }
+}
+
+/// <summary>
+/// The hold on a cutscene's drag that <see cref="CutsceneEditor.BeginHeldDrag"/> gives. Its steps and its end act only
+/// while it is the cutscene's open drag.
+/// </summary>
+public sealed class CutsceneDrag
+{
+    readonly CutsceneEditor _editor;
+
+    internal CutsceneDrag(CutsceneEditor editor) => _editor = editor;
+
+    public CutsceneEditor Editor => _editor;
+
+    /// <summary>Whether it is still the cutscene's open drag.</summary>
+    public bool IsOpen => _editor.Holds(this);
+
+    /// <summary>The drag ended, committed or not, by its holder or by another. It is raised once.</summary>
+    public event Action<bool>? Ended;
+
+    /// <summary>A step from the drag's start. Nothing once the drag has ended.</summary>
+    public void Step(Func<CutsceneFile, IReadOnlyList<string>> edit)
+    {
+        if (IsOpen)
+        {
+            _editor.StepDrag(edit);
+        }
+    }
+
+    /// <summary>Ends the drag: commits it, or with cancel, puts it back. Nothing once it has ended.</summary>
+    public void End(bool cancel)
+    {
+        if (IsOpen)
+        {
+            _editor.EndDrag(cancel);
+        }
+    }
+
+    internal void RaiseEnded(bool committed) => Ended?.Invoke(committed);
 }

@@ -145,7 +145,9 @@ public sealed class CutsceneEditorView : DockPanel
         SetDock(strip, DockSide.Top);
         timelinePane.Children.Add(strip);
         timelinePane.Children.Add(timeline);
-        grid.Children.Add(timelinePane);
+        // Red around the timeline while auto-key keys this cutscene's bound entities' edits.
+        _autoKeyFrame = new Border { Child = timelinePane, Classes = { "auto-key-frame" }, BorderThickness = new Thickness(2) };
+        grid.Children.Add(_autoKeyFrame);
         var split = new GridSplitter { ResizeDirection = GridResizeDirection.Rows };
         Grid.SetRow(split, 1);
         grid.Children.Add(split);
@@ -183,6 +185,7 @@ public sealed class CutsceneEditorView : DockPanel
             .Add(() => _editor.ProblemsChanged += Show, () => _editor.ProblemsChanged -= Show)
             .Add(() => _shell.Cook.StateChanged += Show, () => _shell.Cook.StateChanged -= Show)
             .Add(() => _shell.CutscenePreview.Changed += Show, () => _shell.CutscenePreview.Changed -= Show)
+            .Add(() => _shell.Keying.Changed += ShowAutoKey, () => _shell.Keying.Changed -= ShowAutoKey)
             .Add(() => _editor.PlayheadChanged += OnPlayhead, () => _editor.PlayheadChanged -= OnPlayhead)
             .Add(() => _shell.Host.StateChanged += OnHostState, () => _shell.Host.StateChanged -= OnHostState);
     }
@@ -246,8 +249,13 @@ public sealed class CutsceneEditorView : DockPanel
         });
     }
 
+    readonly Border _autoKeyFrame;
+
+    void ShowAutoKey() => _autoKeyFrame.Classes.Set("on", _shell.Keying.AutoKeyShows && _shell.Keying.Cutscene == _editor);
+
     void Show()
     {
+        ShowAutoKey();
         ShowPlayhead();
         ScheduleFlush();
         var preview = _shell.CutscenePreview;

@@ -84,6 +84,29 @@ public static class CutsceneKeying
     public static int? BindingOf(CutsceneFile file, PossessRef entity) =>
         file.Bindings.FirstOrDefault(b => b.Id != null && PossessRef.Parse(b.Get("possess")) == entity)?.Id;
 
+    /// <summary>
+    /// Adds a binding that possesses an entity, as <c>@&lt;guid&gt;/&lt;id&gt;</c>, after the last binding, or with none,
+    /// before the first track. Its name is the one given, or with a number after it when another binding has that name.
+    /// Returns its ID.
+    /// </summary>
+    public static int AddBinding(CutsceneFile file, PossessRef entity, string name)
+    {
+        var id = file.NextId(CutsceneBlockKind.Binding);
+        var names = file.Bindings.Select(b => b.Name).ToHashSet();
+        var unique = name;
+        for (var n = 2; names.Contains(unique); n++)
+        {
+            unique = $"{name} {n}";
+        }
+        var binding = CutsceneBlock.Of(CutsceneBlockKind.Binding, $"binding {Format(id)} {TextQuote.Quote(unique)}");
+        var children = file.Root.Children.ToList();
+        var last = children.FindLastIndex(c => c.Kind == CutsceneBlockKind.Binding);
+        var index = last >= 0 ? last + 1 : children.FindIndex(c => c.Kind == CutsceneBlockKind.Track);
+        file.Insert(file.Root, index >= 0 ? index : children.Count, binding);
+        binding.Set("possess", $"@{entity.SceneGuid}/{entity.Id:x16}");
+        return id;
+    }
+
     /// <summary>The track that keys a target: the property track of its field, or the binding's last transform track.</summary>
     public static CutsceneBlock? TrackOf(CutsceneFile file, KeyTarget target) => target switch
     {
@@ -105,11 +128,25 @@ public static class CutsceneKeying
         {
             return "Its track is locked.";
         }
-        if (target is KeyTarget.Pose && SpaceOf(track) is not ("relative" or "absolute"))
+        if (target is KeyTarget.Pose && SpaceOf(track) is not ("relative" or "absolute") && RelativeToOf(file, target) == null)
         {
-            return "Its track is relative to another binding, which keys from here cannot measure yet.";
+            return $"Its track's space, \"{SpaceOf(track)}\", is not one that keys can measure.";
         }
         return null;
+    }
+
+    /// <summary>
+    /// The binding that a pose target's track is relative to, for a space of <c>relative &lt;id&gt;</c> that names another
+    /// binding, or null.
+    /// </summary>
+    public static int? RelativeToOf(CutsceneFile file, KeyTarget target)
+    {
+        if (target is not KeyTarget.Pose || TrackOf(file, target) is not { } track || SpaceOf(track).Split(' ', StringSplitOptions.RemoveEmptyEntries) is not ["relative", var id]
+            || !int.TryParse(id, NumberStyles.None, CultureInfo.InvariantCulture, out var other) || other == target.Binding)
+        {
+            return null;
+        }
+        return other;
     }
 
     /// <summary>Why values, one for each of the target's channels, cannot be its keys, or null when they can.</summary>

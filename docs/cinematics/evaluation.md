@@ -158,6 +158,8 @@ The cutscene editor's preview sets three things on its evaluation with `set_mix`
 - **Grains.** `no_grains` stops a scrub's grains.
 - **Events.** `preview_events` lets the event tracks send events under the `.Preview` audition, which a play in the editor has. A change forgets the open ranges without sending their ends.
 
+The editor also lays its own values over a paused preview's evaluation, outside the cutscene package (see [Cutscene editor: The game's side](../editor/cutscene-editor.md#the-games-side)). They save what they write over after the evaluation does, so a lift gives back the evaluation's writes and then the snapshot's.
+
 ## Procedures
 
 | Procedure | What it does |

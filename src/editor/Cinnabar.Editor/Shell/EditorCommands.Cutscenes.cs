@@ -46,6 +46,9 @@ static partial class EditorCommands
     public const string CutscenePreviewEvents = "cutscene.previewEvents";
     public const string CutsceneKeyTransform = "cutscene.keyTransform";
     public const string CutsceneKeyTrackedFields = "cutscene.keyTrackedFields";
+    public const string CutsceneAutoKey = "cutscene.autoKey";
+    public const string CutsceneAutoKeyAddTracks = "cutscene.autoKeyAddTracks";
+    public const string CutsceneKeyPreviewValues = "cutscene.keyPreviewValues";
 
     /// <summary>The timeline's commands, which act on the active cutscene while its timeline has the keyboard.</summary>
     public static readonly string[] CutsceneTimelineCommands =
@@ -62,7 +65,8 @@ static partial class EditorCommands
     /// The keying commands, which key the selected entities into the cutscene that holds the preview, wherever the
     /// keyboard is: the viewport, the timeline or the inspector.
     /// </summary>
-    public static readonly string[] CutsceneKeyCommands = [CutsceneKeyTransform, CutsceneKeyTrackedFields];
+    public static readonly string[] CutsceneKeyCommands =
+        [CutsceneKeyTransform, CutsceneKeyTrackedFields, CutsceneAutoKey, CutsceneAutoKeyAddTracks, CutsceneKeyPreviewValues];
 
     // The cutscene editor's timeline (see docs/editor/cutscene-editor.md#the-timeline). Its keys are bare letters, which
     // the viewport and the other panels use too, so each command acts only while the timeline has the keyboard. Delete
@@ -235,6 +239,27 @@ static partial class EditorCommands
             Icon = "cutscene",
             Shortcut = "Ctrl+Shift+K",
             CanExecuteWhen = () => shell.Keying.KeyTrackedFieldsRefusal() == null,
+        });
+        commands.Register(new Command(CutsceneAutoKey, "Auto-Key", () => shell.Keying.AutoKey = !shell.Keying.AutoKey)
+        {
+            Description = "Key each edit of a field of an entity that the previewed cutscene binds, from the inspector or a gizmo, at the playhead, in place of a scene edit.",
+            Icon = "cutscene",
+            Shortcut = "Alt+K",
+            IsCheckedWhen = () => shell.Keying.AutoKey,
+        });
+        commands.Register(new Command(CutsceneAutoKeyAddTracks, "Auto-Key: Add Tracks", () => shell.Keying.AutoKeyAddTracks = !shell.Keying.AutoKeyAddTracks)
+        {
+            Description = "With auto-key, add the track of a field that has none. Without it, an edit of a field that no track animates goes to the scene.",
+            Icon = "cutscene",
+            Shortcut = "Alt+Shift+K",
+            IsCheckedWhen = () => shell.Keying.AutoKeyAddTracks,
+        });
+        commands.Register(new Command(CutsceneKeyPreviewValues, "Key Preview Values", () => shell.Keying.KeyPreviewValues())
+        {
+            Description = "Key the values that were changed over the preview at the playhead, which a move of the playhead would drop.",
+            Icon = "cutscene",
+            Shortcut = "Enter",
+            CanExecuteWhen = () => shell.Keying.KeyPreviewValuesRefusal() == null,
         });
         commands.Register(new Command(CutsceneKeysUnderSelection, "Keys Under Selection", () =>
         {

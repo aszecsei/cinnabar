@@ -32,6 +32,15 @@ Cutscene_Preview :: struct {
 	clock:    Preview_Clock,
 	// The fields that its tracks wrote at its last lift, and the entities that they are on, in the host's heap.
 	held:     [dynamic]cutscene.Field,
+	// The editor's values over the preview, until it keys or drops them (see link.Cutscene_Preview_Values).
+	values:   Maybe(Preview_Values),
+}
+
+// Preview_Values is the editor's values over the preview: a layer of fields and poses, as an override's, that shows
+// only while the preview stands at tick. Its id is the serial.
+Preview_Values :: struct {
+	tick:  i32,
+	layer: Override,
 }
 
 // Preview_Clock is whether the preview stands at its time or moves on the game's clock.
@@ -77,11 +86,13 @@ handle_cutscene_preview_message :: proc(
 		despawned = open_cutscene_preview(e, w, scripts, m)
 	case link.Cutscene_Preview_Time:
 		if p, ok := current_preview(e, m.ticket); ok {
+			drop_preview_values(e, w, p)
 			p.clock = Preview_Paused{}
 			set_preview_time(e, w, p, m.tick)
 		}
 	case link.Cutscene_Preview_Play:
 		if p, ok := current_preview(e, m.ticket); ok {
+			drop_preview_values(e, w, p)
 			p.clock = Preview_Playing {
 				rate       = m.rate,
 				looping    = m.looping,
@@ -93,6 +104,10 @@ handle_cutscene_preview_message :: proc(
 	case link.Cutscene_Preview_Settings:
 		if p, ok := current_preview(e, m.ticket); ok {
 			cutscene.set_mix(&p.live.evaluation, w, m.silent, m.scrub_sound, m.events)
+		}
+	case link.Cutscene_Preview_Values:
+		if p, ok := current_preview(e, m.ticket); ok {
+			write_preview_values(e, w, p, m)
 		}
 	case link.Cutscene_Preview_Close:
 		if _, ok := current_preview(e, m.ticket); ok {
@@ -224,6 +239,7 @@ end_cutscene_preview :: proc(
 	}
 	// A preview is no player that finishes: lift puts back what tracks set to keep wrote too, and a scrub's audition
 	// stops the voices that a finish would let play on.
+	drop_preview_values(e, w, p)
 	cutscene.lift(e.cutscenes, &p.live.evaluation, w)
 	cutscene.set_audition(&p.live.evaluation, w, .Scrub)
 	despawned = cutscene.close_live(e.cutscenes, w, &p.live) > 0
@@ -243,6 +259,9 @@ end_cutscene_preview :: proc(
 free_cutscene_previews :: proc(previews: ^Cutscene_Previews) {
 	if p, open := &previews.open.?; open {
 		delete(p.held)
+		if v, has := &p.values.?; has {
+			free_override(&v.layer)
+		}
 	}
 	previews^ = {}
 }
@@ -263,21 +282,103 @@ lift_cutscene_preview :: proc(e: ^Editor, w: ^ecs.World) -> (lifted: bool) {
 	if !open {
 		return
 	}
+	if v, has := &p.values.?; has && lift_saved(w, &v.layer) {
+		lifted = true
+	}
 	clear(&p.held)
 	for saved in cutscene.saved_fields(&p.live.evaluation, e.platform.frame_allocator) {
 		append(&p.held, saved)
 	}
-	return cutscene.lift(e.cutscenes, &p.live.evaluation, w)
+	if cutscene.lift(e.cutscenes, &p.live.evaluation, w) {
+		lifted = true
+	}
+	return
 }
 
-// lay_cutscene_preview evaluates the preview at its time, over the world. It gives whether it changed the world.
+// lay_cutscene_preview evaluates the preview at its time, over the world, and lays the editor's values over it. It
+// gives whether it changed the world.
 @(private)
 lay_cutscene_preview :: proc(e: ^Editor, w: ^ecs.World) -> (laid: bool) {
 	p, open := &e.session.cutscene_previews.open.?
 	if !open {
 		return
 	}
-	return evaluate_preview(e, w, p)
+	laid = evaluate_preview(e, w, p)
+	if lay_preview_values(w, p) {
+		laid = true
+	}
+	return
+}
+
+// write_preview_values takes the editor's values in place of the last, while the layer is lifted. Values with no
+// fields and no transforms clear them.
+@(private)
+write_preview_values :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	p: ^Cutscene_Preview,
+	m: link.Cutscene_Preview_Values,
+) {
+	drop_preview_values(e, w, p)
+	if len(m.fields) == 0 && len(m.transforms) == 0 {
+		return
+	}
+	heap := e.platform.heap_allocator
+	p.values = Preview_Values {
+		tick = m.tick,
+		layer = {
+			id = m.serial,
+			fields = make([dynamic]Field_Write, heap),
+			poses = make([dynamic]Pose_Write, heap),
+			animators = make([dynamic]Animator_Write, heap),
+			pushes = make([dynamic]Push, heap),
+			spawned = make([dynamic]Spawned, heap),
+			saved = make([dynamic]Saved, heap),
+		},
+	}
+	v := &p.values.?
+	write_fields_and_poses(e, w, &v.layer, m.fields, m.transforms)
+}
+
+// drop_preview_values forgets the editor's values, after it puts back what they wrote over.
+@(private)
+drop_preview_values :: proc(e: ^Editor, w: ^ecs.World, p: ^Cutscene_Preview) {
+	v, has := &p.values.?
+	if !has {
+		return
+	}
+	lift_saved(w, &v.layer)
+	free_override(&v.layer)
+	p.values = nil
+}
+
+// preview_values_shown is whether the editor's values are on the world: they are while the preview stands at their
+// tick.
+@(private)
+preview_values_shown :: proc(p: ^Cutscene_Preview) -> (^Override, bool) {
+	v, has := &p.values.?
+	if !has {
+		return nil, false
+	}
+	if _, paused := p.clock.(Preview_Paused); !paused || p.live.evaluation.time != v.tick {
+		return nil, false
+	}
+	return &v.layer, true
+}
+
+// preview_values_serial is the serial of the editor's values that the world shows, or 0 for none.
+@(private)
+preview_values_serial :: proc(p: ^Cutscene_Preview) -> u64 {
+	layer, shown := preview_values_shown(p)
+	return layer.id if shown else 0
+}
+
+// lay_preview_values writes the editor's values over the preview, while it stands at their tick, and saves what they
+// write over. They are lifted before any evaluation of the preview, so what they save is the preview's.
+@(private)
+lay_preview_values :: proc(w: ^ecs.World, p: ^Cutscene_Preview) -> bool {
+	layer := preview_values_shown(p) or_return
+	return lay_fields_and_poses(w, layer)
 }
 
 @(private)
@@ -352,7 +453,17 @@ update_cutscene_preview :: proc(
 			)
 		}
 	}
-	changed = evaluate_preview(e, w, p)
+	// The values come off for the evaluation, so a track that starts to write their field in this frame saves the
+	// document's value, not theirs, and go back on over it.
+	if v, has := &p.values.?; has && lift_saved(w, &v.layer) {
+		changed = true
+	}
+	if evaluate_preview(e, w, p) {
+		changed = true
+	}
+	if lay_preview_values(w, p) {
+		changed = true
+	}
 	// The events that a play crossed go to the scripts in this frame, as a player's do at the end of update.
 	cutscene.send_events(e.cutscenes)
 	return changed, despawned
@@ -451,6 +562,10 @@ preview_entities :: proc(e: ^Editor, w: ^ecs.World, entities: ^[dynamic]u64) {
 	for f in p.held {
 		add(entities, f.entity)
 	}
+	if layer, shown := preview_values_shown(p); shown {
+		for f in layer.fields {add(entities, f.entity)}
+		for pose in layer.poses {add(entities, pose.entity)}
+	}
 	for root in cutscene.spawned_roots(&p.live, w, e.platform.frame_allocator) {
 		add(entities, root)
 	}
@@ -473,6 +588,9 @@ preview_held_fields :: proc(
 		if !slice.contains(held[:], field) {
 			append(held, field)
 		}
+	}
+	if layer, shown := preview_values_shown(p); shown {
+		add_held_fields(w, layer, entity, held)
 	}
 	for f in p.held {
 		if f.entity != entity {

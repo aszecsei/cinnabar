@@ -496,7 +496,7 @@ public abstract class HostTests : IAsyncDisposable
         await editor.Next<CutscenePreviewOpened>(o => o.Ticket == 1);
         var values = await editor.Next<EntityValues>(v => v.Entity == fox && v.Shown.Length > 0);
 
-        Assert.Equal(new ShownPreview(1, 300000, 0), values.ShownPreview);
+        Assert.Equal(new ShownPreview(1, 300000, 0, 0), values.ShownPreview);
         var own = values.Components.Single(c => c.Id == 1).Data;
         var shown = values.Shown.Single(c => c.Id == 1).Data;
         Assert.Equal(Origin, BitConverter.ToInt64(own, 0));
@@ -510,6 +510,18 @@ public abstract class HostTests : IAsyncDisposable
         Assert.Equal(2.0, keys[0], 3);
         Assert.Equal(0.0, keys[1], 3);
         Assert.Equal(0.0, keys[2], 3);
+
+        // Values over the preview show over the walk, with their serial, and a Time drops them, so the walk shows again.
+        var foxInfo = snapshot.Entities.Single(e => e.SceneId == Fox);
+        var over = new long[] { b[0] + (3L << 24), b[1], b[2] };
+        editor.Link.Send(new CutscenePreviewValues(1, 300000, 7, [],
+            [new OverrideTransform(new OverrideTarget(OverrideTargetKind.SceneEntity, foxInfo.Scene, Fox), over, [(float)q[0], (float)q[1], (float)q[2], (float)q[3]], [1, 1, 1])]));
+        var valued = await editor.Next<EntityValues>(v => v.Entity == fox && v.ShownPreview.Values == 7);
+        Assert.Equal(over[0], Shell.KeyValues.Units(position, valued.Shown.Single(c => c.Id == 1).Data)![0]);
+        Assert.Equal(Origin, BitConverter.ToInt64(valued.Components.Single(c => c.Id == 1).Data, 0));
+        editor.Link.Send(new CutscenePreviewTime(1, 300000));
+        var dropped = await editor.Next<EntityValues>(v => v.Entity == fox && v.ShownPreview.Ticket == 1 && v.ShownPreview.Values == 0);
+        Assert.Equal(b[0], Shell.KeyValues.Units(position, dropped.Shown.Single(c => c.Id == 1).Data)![0]);
 
         editor.Link.Send(new CutscenePreviewClose(1));
         await editor.Next<EntityValues>(v => v.Entity == fox && v.Held.Length == 0 && v.Shown.Length == 0);

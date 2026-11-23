@@ -4,7 +4,6 @@ The cutscene editor edits a cutscene (see [Content: Cutscenes](../content/kinds/
 
 The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, and keys from the inspector and the viewport. These come next:
 - a scene view that looks through the cut camera, and the camera tools ([#555](https://github.com/aszecsei/cinnabar/issues/555));
-- auto-key, preview values that Enter keys, and the question that possesses an entity that no binding has ([#552](https://github.com/aszecsei/cinnabar/issues/552));
 - the curve editor ([#553](https://github.com/aszecsei/cinnabar/issues/553));
 - the bindings and the viewport's selection ([#554](https://github.com/aszecsei/cinnabar/issues/554)), with the filter that shows the tracks of the entities selected in the viewport;
 - the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)).
@@ -279,7 +278,8 @@ A text without problems goes in the cache's preview area, `<cache>/dev/preview/<
 
 `lib/engine/editor/cutscene_preview.odin` holds the open preview in the editor's `Session`. It loads the cutscene with `cutscene.open_live`, as a player loads one, but without a player's slot and without its hold on gameplay. It pushes no input context, hides no UI, and suspends no systems on the bindings (`Player_Context.unheld`). It evaluates the cutscene with `seek` and `evaluate`, as a scrub does (see [Evaluation](../cinematics/evaluation.md)).
 
-- **A layer with the overrides.** The preview's writes are one more layer with the [overrides](link.md#overrides). `lift_overrides` puts them back with `cutscene.lift`, which keeps the drives, the camera cut's claim and the voices. `lay_overrides` evaluates the preview again at its time. So poll, the edit-mode behaviours and what the game sends the editor see the document. An edit of a field that the preview writes goes to the document, under the preview.
+- **A layer with the overrides.** The preview's writes are one more layer with the [overrides](link.md#overrides). `lift_overrides` puts them back with `cutscene.lift`, which keeps the drives, the camera cut's claim and the voices. `lay_overrides` evaluates the preview again at its time. So poll, the edit-mode behaviours and what the game sends the editor see the document. A scene edit of a field that the preview writes goes to the document, under the preview.
+- **Values over the preview.** `Cutscene_Preview_Values` lays the editor's [preview values](#preview-values) over the preview, after its evaluation in `lay_cutscene_preview` and again in `update_cutscene_preview`. They are an `Override`'s fields and poses, which save what they write over once, so the lift gives back the document, also of a field that no track writes. They show only while the preview is paused at their tick. A `Time`, a `Play`, a `Close`, a new ticket and `end_overrides` drop them, so a lost message from the editor cannot leave them at another time. Their fields are in `Entity_Values.held`, and `shown_preview.values` names their serial while they show.
 - **The frame.** In Edit, `update_cutscene_preview` runs once a frame after the players. It follows a newer unsaved blob and a reload's bindings, moves a playing preview by the frame's real time, and evaluates it. Forward play moves as a player's clock does, so camera cuts blend.
 - **The mix.** `Cutscene_Preview_Settings` calls `cutscene.set_mix` (see [Evaluation: The editor's mix](../cinematics/evaluation.md#the-editors-mix)). A silenced track evaluates as a muted one: it writes no field, so the next lay leaves the document's value; it plays no voice and drives no `Animator`; and a silenced camera cut track gives the views back. A silenced sub-sequence track plays no child, though the child stays loaded. With events on, `update_cutscene_preview` sends the events that a play crossed in the same frame, with `cutscene.send_events`.
 - **Marks.** The bound entities and the spawned ones are in `Overridden_Entities`, so the Outliner marks them. The fields that the preview writes are in `Entity_Values.held`.
@@ -336,8 +336,11 @@ A refused key disables the button, and its tooltip says why. The warning state n
 |---|---|---|
 | **Key Transform** (`cutscene.keyTransform`) | Ctrl+K | the position, rotation and scale of each selected entity that a binding possesses |
 | **Key Tracked Fields** (`cutscene.keyTrackedFields`) | Ctrl+Shift+K | each field of the selected entities that a property track animates, and the parts of the pose that the transform track keys |
+| **Auto-Key** (`cutscene.autoKey`) | Alt+K | turns [auto-key](#auto-key) on or off |
+| **Auto-Key: Add Tracks** (`cutscene.autoKeyAddTracks`) | Alt+Shift+K | lets auto-key add the track of a field that has none |
+| **Key Preview Values** (`cutscene.keyPreviewValues`) | Enter | the [preview values](#preview-values) at the playhead |
 
-Each is one undo entry for all the selected entities. They act wherever the keyboard is, in the viewport, the timeline and the inspector, so K stays the timeline's Shuttle Pause. Like the timeline's commands, they are not in the ribbon.
+Each key is one undo entry for all the selected entities. They act wherever the keyboard is, in the viewport, the timeline and the inspector, so K stays the timeline's Shuttle Pause. A text box keeps its own Enter, as no shortcut fires while one has the keyboard. Like the timeline's commands, they are not in the ribbon.
 
 ### Undo
 
@@ -347,8 +350,70 @@ A key is in the cutscene's history. While the cutscene's tab or another editor's
 
 So Ctrl+K and then Ctrl+Z in the viewport takes the key back, and a second Ctrl+Z takes back the cutscene's entry before it. Redo goes the same way. The cutscene's tab closing, or another tab taking the preview, makes it the scene again. Only these two edits set it, so an edit in the cutscene's tab, which is active then, does not.
 
+### Where an edit goes
+
+While a cutscene holds the preview in Edit, an edit of a field of an entity in the properties panel, or a gizmo drag in a scene view, can go to the cutscene and not to the scene. `Keying.Route` decides, as a `FieldRoute`:
+
+| Route | When | What the edit does |
+|---|---|---|
+| `Scene` | No cutscene holds the preview, or nothing holds the field and auto-key does not key it | A scene edit, as always |
+| `Preview` | The preview or values over it hold the field, and auto-key is off | Sets a [preview value](#preview-values) |
+| `Key` | [Auto-key](#auto-key) is on, and the field has a track, or **Auto-Key: Add Tracks** is on | Keys the field at the playhead |
+| `Refused` | The field is held, but the preview plays, its values are not fresh, its track is locked, a drag is under way in the cutscene, or no track can key it | Nothing. The console says why. |
+| `Possess` | Auto-key and Add Tracks are on, and no binding possesses the entity | Nothing. The edit, or a gizmo's press, asks whether to possess it (see [Possessing](#possessing)). |
+
+**A field that the preview holds never goes to the scene.** It goes to the cutscene, or nowhere with a reason, so a change is never lost and never written to the scene without a word. Reset, Override, Stop Overriding and Apply to Prefab are always scene edits.
+
+The rows of a held field show what the world shows, from `Entity_Values.shown` with the preview values over it (`Keying.ShownComponent`), and the field's name is in italics, with a tooltip that says where its edits go. A drag or a typed value starts from that value. A row of a field that nothing holds shows the document's value, which is what the world shows too.
+
+`FieldEditor` sends each edit that sets a value through one seam: its `FieldSink`, which the properties panel gives each component field's editor, and the scene when the sink says `Scene`. A drag opens an `IFieldEdit`: the scene's `SceneEdit`, or a drag of preview values or of keys. `ScrubSession` and `GizmoController` take either.
+
+### Preview values
+
+A change to a held field with auto-key off is a preview value. `EditorShell.PreviewValues` holds them, as one `PreviewValuesState`, which only `Become` changes:
+
+| State | What it holds |
+|---|---|
+| `Empty` | Nothing. |
+| `Holding` | The session's ticket, the tab, the playhead's tick, a serial, the set fields, and each set field's component's bytes with them written, from what the world showed before the first. |
+| `Settling` | The same, with the text that keyed them. |
+
+- **The world shows them.** Each change sends `Cutscene_Preview_Values` with a new serial. The game lays them over the preview, so they show in the viewport in the next frame. The scene does not change.
+- **The key button.** The button compares its key with the value, so it shows amber. A click keys the field at the value.
+- **Enter.** **Key Preview Values** keys every held value at the playhead, as one undo entry. The values then wait in `Settling` until the preview shows a blob cooked from the keyed text, so the world does not show the old curve while the daemon cooks it.
+- **Drops.** A move of the playhead, another session, another owner, a play, a lost link and a new game state drop them, through the one writer, `Follow`, which `Keying.Raise` calls. The world shows the curve again, and nothing was written.
+- **Fresh values.** A key from the world's values waits until they name the values: `shown_preview.values` must be 0 with none, or one of the serials since the state left `Empty`. Values of the editor's own are read from its bytes, so they need no word from the game.
+
+### Auto-key
+
+**Auto-Key** (Alt+K) turns each edit of a field of a bound entity, from the properties panel or a gizmo, into a key at the playhead. A field that has no track gets one only with **Auto-Key: Add Tracks** (Alt+Shift+K); without it, its edit goes to the scene, as the cutscene does not animate it. While auto-key is on and a cutscene holds the preview, a red border goes round the scene views and the cutscene's timeline.
+
+- **A typed value** is one undo entry, which keys the value. The value shows over the preview at once, and stays until the preview shows the key.
+- **A drag** is one undo entry in the cutscene from its press to its release, through `CutsceneEditor.BeginDrag` and `StepDrag`, with each step from the drag's start. The cutscene does not cook a drag's steps, so each step shows as a preview value. Esc cancels the drag: the text and the values go back as they were, and nothing goes on the undo stack.
+- **Keys are computed in the editor**, from the edited value, so a drag does not wait for the game's values. A key of a child's pose in an absolute track, or one relative to another binding, needs the world's composed `Transform`, so it waits until the world shows the values.
+- Auto-key is the session's, not saved.
+
+### Gizmo keys
+
+A gizmo drag of selected entities whose pose the cutscene holds goes to the cutscene, as a field edit does: preview values, or with auto-key, keys. `Keying.PoseRoute` routes each selected entity's position, and the entities must agree. A mix of entities whose drags go to the scene and to the cutscene is refused. The drag starts from the pose that the world shows (`Keying.ShownWorldPose`), and the gizmo stands there, not at the document's pose. `PoseEdit` takes that pose as its start. The drag is one undo entry, and Esc cancels it.
+
+### Possessing
+
+An entity that no binding possesses, in a scene that the cutscene can name by its GUID, has an empty key button. A click asks whether to possess it (`Keying.AskPossess`, which the main window answers with a dialog). **Possess** adds a binding, `possess = @<guid>/<id>`, named after the entity and made unique, after the last binding, and then its track and its key, all as one undo entry. **Cancel** changes nothing. **Key Transform** asks the same for the selected entities that no binding has, and keys them all.
+
+With auto-key and add tracks on, an edit or a gizmo drag of such an entity asks once (`FieldRoute.Possess`). A yes adds the binding, as an undo entry of its own, and the edit is refused, so the next one keys. A no is remembered for the tab, and the entity's edits go to the scene.
+
+### Several entities
+
+With several entities selected, a field that a track can key for each of them, or that possessing would let it key, has one key button. It shows their state when they agree, and otherwise a track's, with a tooltip that says their keys differ. A click keys the field of each, adding tracks where they have none, as one undo entry; Remove Key removes each one's keys at the playhead. The rows' edits route as one: the entities must agree.
+
+### Relative to another binding
+
+A transform track whose space is `relative <id>` keys the world's pose in the other binding's `Transform`, the inverse of the engine's `track_frame`: the position is the difference in units, in meters, in the other's axes, and the rotation comes after the other's. While a cutscene holds the preview, `Keying` watches each entity that its tracks are relative to (`EditorShell.Watch`), and lets it go when the cutscene gives the preview away or its tab closes. The other's pose is the document's, or what the world shows when the preview holds it, with the same freshness. A spawned binding, or one whose scene is not open, has no entity in the editor, so its tracks refuse keys with the reason. A space that names no binding, or the track's own, refuses them too.
+
 ### Limits
 
-- An inspector edit of a held field goes to the scene, under the preview, as before. So on a field with a track, a key holds the curve's value: the value shows amber only inside an ease, under a section's weight below 1, over an additive section, or where another track or a sub-sequence writes the same field, where the world's value is not the track's alone.
 - After a key's value changes, the warning can show until the daemon cooks the text and the preview follows it.
-- Buttons show for one selected entity, not for several.
+- A preview value of a child's pose in an absolute track, or one relative to another binding, keys once the world shows it, at most 20 times a second.
+- A possess names an entity by its scene's asset GUID and its folded scene ID. An entity of a sublevel's part, which a binding names by the part's GUID, has no key button, as the editor does not name it by its part yet.
+- Auto-key asks to possess an entity at an edit or a gizmo's press, never while it only routes one, and not while another question is open.

@@ -77,6 +77,103 @@ public static class KeyValues
     }
 
     /// <summary>
+    /// Writes a value into a field of its component's bytes, as the game does when it sets the field from a scene: an
+    /// enum's name takes its number. False, with the bytes as they were, for a value that does not fit the field, or for
+    /// a kind that no track keys, such as an entity or an asset.
+    /// </summary>
+    public static bool Write(FieldInfo field, Span<byte> component, Document.SceneValue value)
+    {
+        var kind = field.Kind == FieldKind.Enum ? field.EnumBase : field.Kind;
+        int size;
+        try
+        {
+            size = FieldValues.Size(kind);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return false;
+        }
+        if (field.Offset + size > component.Length)
+        {
+            return false;
+        }
+        var data = component.Slice((int)field.Offset, size);
+        var numbers = value.Numbers;
+        Int128? Integer()
+        {
+            if (field.Kind == FieldKind.Enum && value.Kind == Document.SceneValueKind.Name)
+            {
+                return field.EnumValues.FirstOrDefault(v => v.Name == value.Text) is { } e ? e.Value : null;
+            }
+            if (value.Kind == Document.SceneValueKind.Bool)
+            {
+                return value.Bool ? 1 : 0;
+            }
+            return numbers.Count == 1 ? numbers[0].Integer ?? (Int128)Math.Round(numbers[0].Float) : null;
+        }
+        static bool Floats(Span<byte> data, Document.SceneValue value, int count)
+        {
+            if (value.Kind != Document.SceneValueKind.Number || value.Numbers.Count != count)
+            {
+                return false;
+            }
+            for (var i = 0; i < count; i++)
+            {
+                BinaryPrimitives.WriteSingleLittleEndian(data[(i * 4)..], (float)value.Numbers[i].Float);
+            }
+            return true;
+        }
+        switch (field.Kind)
+        {
+            case FieldKind.F32:
+                return Floats(data, value, 1);
+            case FieldKind.Vector2:
+                return Floats(data, value, 2);
+            case FieldKind.Vector3:
+                return Floats(data, value, 3);
+            case FieldKind.Quaternion:
+                return Floats(data, value, 4);
+            case FieldKind.Position:
+                if (value.Kind != Document.SceneValueKind.Number || numbers.Count != 3 || numbers.Any(n => n.Integer == null))
+                {
+                    return false;
+                }
+                for (var i = 0; i < 3; i++)
+                {
+                    BinaryPrimitives.WriteInt64LittleEndian(data[(i * 8)..], (long)numbers[i].Integer!.Value);
+                }
+                return true;
+        }
+        if (Integer() is not { } n)
+        {
+            return false;
+        }
+        switch (kind)
+        {
+            case FieldKind.Bool:
+                data[0] = n != 0 ? (byte)1 : (byte)0;
+                return true;
+            case FieldKind.I8:
+            case FieldKind.U8:
+                data[0] = (byte)(long)n;
+                return true;
+            case FieldKind.I16:
+            case FieldKind.U16:
+                BinaryPrimitives.WriteUInt16LittleEndian(data, (ushort)(long)n);
+                return true;
+            case FieldKind.I32:
+            case FieldKind.U32:
+                BinaryPrimitives.WriteUInt32LittleEndian(data, (uint)(long)n);
+                return true;
+            case FieldKind.I64:
+            case FieldKind.U64:
+                BinaryPrimitives.WriteUInt64LittleEndian(data, (ulong)n);
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Whether a key's value is the field's: equal for a value that steps, and otherwise within the noise of the f32s
     /// that the game evaluates in.
     /// </summary>
@@ -101,6 +198,17 @@ public static class PoseKeys
 
     /// <summary>A relative track's rotation keys: the rotation after the binding's own one, as Euler angles.</summary>
     public static double[] RelativeRotation(Quat own, Quat shown) => Euler((own.Normalized().Conjugate * shown).Normalized());
+
+    /// <summary>
+    /// A track's keys that is relative to another binding: the world pose in the other binding's pose, the inverse of
+    /// the engine's <c>track_frame</c>. The position is in meters, in the other's axes, from the difference in units.
+    /// </summary>
+    public static (double[] Position, Quat Rotation) RelativeTo(IReadOnlyList<long> shown, Quat shownRotation, IReadOnlyList<long> other, Quat otherRotation)
+    {
+        var frame = otherRotation.Normalized().Conjugate;
+        var offset = new Vec3((shown[0] - other[0]) / UnitsPerMeter, (shown[1] - other[1]) / UnitsPerMeter, (shown[2] - other[2]) / UnitsPerMeter);
+        return (frame.Rotate(offset).ToArray(), (frame * shownRotation).Normalized());
+    }
 
     /// <summary>A rotation's Euler angles in degrees, as the engine's <c>euler_of</c> gives them.</summary>
     public static double[] Euler(Quat q) => FieldValues.Euler(q.X, q.Y, q.Z, q.W);

@@ -55,7 +55,7 @@ sealed class FieldEditor : IFieldEditor
     readonly Func<ulong, SceneValue?>? _stored;
     readonly (Int128 Min, Int128 Max) _range;
     readonly EnumValue[] _enum;
-    readonly ScrubSession<SceneValue?[]> _scrub = new();
+    readonly ScrubSession<SceneValue?[], IFieldEdit> _scrub = new();
 
     FieldEditor(EditorShell shell, ulong[] entities, string label, EditKind kind, Func<ulong, SceneValue?, Operation> operation, (Int128, Int128) range = default, EnumValue[]? enumValues = null, Func<ulong, SceneValue?, Operation>? flag = null, Func<ulong, SceneValue?>? stored = null)
     {
@@ -71,6 +71,20 @@ sealed class FieldEditor : IFieldEditor
         _enum = enumValues ?? [];
         Options = [.. _enum.Select(v => FieldValues.Humanize(v.Name))];
     }
+
+    /// <summary>
+    /// Where an edit goes when a cutscene holds the preview: values over it or keys, not the scene (see
+    /// docs/editor/cutscene-editor.md#where-an-edit-goes). Null for a field that only the scene sets. A reset, an override
+    /// and Apply to Prefab always go to the scene.
+    /// </summary>
+    public FieldSink? Sink { get; set; }
+
+    // An edit that sets a value: the sink's, unless it goes to the scene.
+    bool Write(string label, Operation[] operations) => Sink?.Write(label, operations) ?? _shell.Edit(label, operations);
+
+    // A drag's edit: the sink's, unless it goes to the scene, which opens an entry that commits when another interrupts it.
+    IFieldEdit? BeginWrite(string label) =>
+        Sink?.Begin(label) is (true, var edit) ? edit : _shell.TryBeginEdit(label, "a field drag", commitIfInterrupted: true);
 
     /// <summary>The scene IDs of the entities that an edit sets, the primary one last.</summary>
     public IReadOnlyList<ulong> Entities => _entities;
@@ -312,10 +326,10 @@ sealed class FieldEditor : IFieldEditor
             _shell.Console.Add(LogLevel.Warning, $"edit: {error}");
             return false;
         }
-        return _shell.Edit(_label, Operations(current => Parse(axis, text, current, out _)));
+        return Write(_label, Operations(current => Parse(axis, text, current, out _)));
     }
 
-    public void SetFlag(bool value) => _shell.Edit(_label, Operations(SceneValue.Of(value)));
+    public void SetFlag(bool value) => Write(_label, Operations(SceneValue.Of(value)));
 
     public void SetEntity(ulong handle)
     {
@@ -334,7 +348,7 @@ sealed class FieldEditor : IFieldEditor
         var index = Options.ToList().IndexOf(option);
         if (index >= 0)
         {
-            _shell.Edit(_label, Operations(SceneValue.Name(_enum[index].Name)));
+            Write(_label, Operations(SceneValue.Name(_enum[index].Name)));
         }
     }
 
@@ -344,7 +358,7 @@ sealed class FieldEditor : IFieldEditor
         {
             return;
         }
-        _scrub.Begin(_shell.TryBeginEdit($"Drag {_label["Set ".Length..]}", "a field drag", commitIfInterrupted: true), [.. _currents]);
+        _scrub.Begin(BeginWrite($"Drag {_label["Set ".Length..]}"), [.. _currents]);
     }
 
     public void Scrub(int axis, double pixels, KeyModifiers modifiers)
@@ -392,7 +406,7 @@ sealed class FieldEditor : IFieldEditor
         }
         else
         {
-            _shell.Edit(_label, Operations(value));
+            Write(_label, Operations(value));
         }
     }
 

@@ -134,6 +134,7 @@ Message :: union {
 	Cutscene_Preview_Time,
 	Cutscene_Preview_Play,
 	Cutscene_Preview_Settings,
+	Cutscene_Preview_Values,
 	Cutscene_Preview_Close,
 	Cutscene_Preview_Opened,
 	Cutscene_Preview_Ended,
@@ -334,10 +335,12 @@ Entity_Values :: struct {
 // The cutscene preview and its time when the world showed an entity's values (see Entity_Values.shown), and the
 // unsaved blob that it played: the preview area's file time in nanoseconds since the Unix epoch, or 0 for the saved
 // blob. The editor keys the values only when they show its text at its playhead.
+// values is the serial of the Cutscene_Preview_Values that the world showed over the preview, or 0 for none.
 Shown_Preview :: struct {
 	ticket: u64,
 	tick:   i32,
 	blob:   i64,
+	values: u64,
 }
 
 // A component's bytes, as they are in memory. The editor reads the fields with the Field_Info offsets.
@@ -2150,6 +2153,19 @@ Cutscene_Preview_Settings :: struct {
 	scrub_sound: bool,
 	events:      bool,
 	silent:      []u32,
+}
+
+// Editor to game: values that the world shows over the preview, outside the document and the cutscene, until the
+// editor keys them or drops them (see docs/editor/cutscene-editor.md#preview-values). They show only while the preview
+// is paused at tick, and a Time, a Play or a Close drops them. Each message replaces the last; one with no fields and
+// no transforms clears them. serial names them in Shown_Preview.values, and only goes up in a session. Their targets
+// are Scene_Entity targets.
+Cutscene_Preview_Values :: struct {
+	ticket:     u64,
+	tick:       i32,
+	serial:     u64,
+	fields:     []Override_Field,
+	transforms: []Override_Transform,
 }
 
 // Editor to game: end the preview. The world shows the document again, and the spawned entities go, in the same

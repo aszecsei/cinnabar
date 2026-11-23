@@ -7,7 +7,7 @@ namespace Cinnabar.Editor.Shell;
 /// docs/editor/document-and-scenes.md#document-model). Previews, the commit and the cancel go through it. Once the entry
 /// ends, by its owner or by the shell, the token is stale and does nothing, and <see cref="Ended"/> tells the owner.
 /// </summary>
-public sealed class SceneEdit
+public sealed class SceneEdit : IFieldEdit
 {
     readonly EditorShell _shell;
     readonly SceneDocument _document;
