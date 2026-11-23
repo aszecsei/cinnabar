@@ -213,7 +213,8 @@ public sealed class CutsceneKeyingTests
     [Fact]
     public void AnAbsoluteTracksFirstPositionKeySetsItsOrigin()
     {
-        var file = Parse(Text.Replace("track 1 transform \"Path\"\n\tbinding = 1\n\tsection 3 60000 240000\n\t\tchannel position_x\n\t\t\tkey 0 0 linear\n\t\t\tkey 120000 4 linear\n",
+        // The text's line endings are the checkout's, so they are made \n before a part of it is replaced.
+        var file = Parse(Text.ReplaceLineEndings("\n").Replace("track 1 transform \"Path\"\n\tbinding = 1\n\tsection 3 60000 240000\n\t\tchannel position_x\n\t\t\tkey 0 0 linear\n\t\t\tkey 120000 4 linear\n",
             "track 1 transform \"Path\"\n\tbinding = 1\n\tspace = absolute\n", StringComparison.Ordinal));
         Assert.Null(file.Find("section:3"));
 
