@@ -270,11 +270,11 @@ public sealed class CutsceneEditsTests
             		ease_in = 6000
             		channel position_x
             			key 0 0 linear
-            			key 40000 1.333333 linear
+            			key 40000 1.3333334 linear
             	section 6 100000 240000
             		ease_out = 6000
             		channel position_x
-            			key 0 1.333333 linear
+            			key 0 1.3333334 linear
             			key 80000 4 linear
 
             """)), file.Text);

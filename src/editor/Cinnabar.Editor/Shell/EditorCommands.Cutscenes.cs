@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Commands;
+using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Shell;
@@ -49,6 +50,14 @@ static partial class EditorCommands
     public const string CutsceneAutoKey = "cutscene.autoKey";
     public const string CutsceneAutoKeyAddTracks = "cutscene.autoKeyAddTracks";
     public const string CutsceneKeyPreviewValues = "cutscene.keyPreviewValues";
+    public const string CutsceneCurves = "cutscene.curves";
+    public const string CutsceneCurvesNormalized = "cutscene.curvesNormalized";
+    public const string CutsceneTangentAuto = "cutscene.tangentAuto";
+    public const string CutsceneTangentUnify = "cutscene.tangentUnify";
+    public const string CutsceneTangentBreak = "cutscene.tangentBreak";
+    public const string CutsceneTangentLinear = "cutscene.tangentLinear";
+    public const string CutsceneTangentConstant = "cutscene.tangentConstant";
+    public const string CutsceneTangentFlatten = "cutscene.tangentFlatten";
 
     /// <summary>The timeline's commands, which act on the active cutscene while its timeline has the keyboard.</summary>
     public static readonly string[] CutsceneTimelineCommands =
@@ -59,6 +68,8 @@ static partial class EditorCommands
         CutsceneKeysUnderSelection, CutscenePlayPause, CutsceneStepBack, CutsceneStepForward, CutsceneStepBack10, CutsceneStepForward10,
         CutsceneShuttleBack, CutsceneShuttlePause, CutsceneShuttleForward, CutsceneSetIn, CutsceneSetOut, CutsceneClearInOut, CutsceneLoop,
         CutscenePreviousKey, CutsceneNextKey, CutsceneGoToTime, CutsceneScrubSound, CutscenePreviewEvents,
+        CutsceneCurves, CutsceneCurvesNormalized, CutsceneTangentAuto, CutsceneTangentUnify, CutsceneTangentBreak, CutsceneTangentLinear,
+        CutsceneTangentConstant, CutsceneTangentFlatten,
     ];
 
     /// <summary>
@@ -155,8 +166,34 @@ static partial class EditorCommands
             e => e.ScrubSound, (e, on) => e.ScrubSound = on);
         Toggle(CutscenePreviewEvents, "Events in Preview", "Send the event tracks' events to the scripts while the preview plays, never while it is scrubbed. Each user's.", "Alt+E",
             e => e.PreviewEvents, (e, on) => e.PreviewEvents = on);
-        Register(CutsceneFrame, "Frame Selection", "frame", "Fit the selected sections, events and keys in the timeline, or the whole cutscene when none is selected.", "F",
-            e => e.RequestFrame());
+        Register(CutsceneFrame, "Frame Selection", "frame",
+            "Fit the selected sections, events and keys in the timeline, or the whole cutscene when none is selected. In the curve editor, fit the selected keys, or every curve, in time and value.", "F",
+            e =>
+            {
+                if (e.KeyboardPane == CutscenePane.Curves)
+                {
+                    e.RequestFrameCurves();
+                }
+                else
+                {
+                    e.RequestFrame();
+                }
+            });
+        // The curve editor (see docs/editor/cutscene-editor.md#curves). Its tangent keys are the digits, as in other graph
+        // editors, and they act on the selected keys while the curve editor has the keyboard.
+        Toggle(CutsceneCurves, "Curve Editor", "Show the curves of the selected tracks below the timeline, on its time.", "Ctrl+E",
+            e => e.CurvesOpen, (e, on) => e.CurvesOpen = on);
+        Toggle(CutsceneCurvesNormalized, "Normalized Curves", "Scale each curve to -1 to 1 in the curve editor, to compare curves of different sizes. The keys keep their values.", "Alt+N",
+            e => e.CurvesNormalized, (e, on) => e.CurvesNormalized = on);
+        void Tangent(string id, string label, string description, string shortcut, TangentMode mode) =>
+            Register(id, label, "cutscene", description, shortcut, e => e.SetTangents(mode),
+                e => e.KeyboardPane == CutscenePane.Curves && !e.Document.InTransaction && e.TangentKeys.Count > 0);
+        Tangent(CutsceneTangentAuto, "Auto Tangents", "Make the selected keys smooth, with slopes that the curve computes and that do not overshoot.", "D1", TangentMode.Auto);
+        Tangent(CutsceneTangentUnify, "Unify Tangents", "Give the selected keys one slope, the mean of their in and out slopes, which their handles then move together.", "D2", TangentMode.Unify);
+        Tangent(CutsceneTangentBreak, "Break Tangents", "Keep the selected keys' slopes, and let their in and out handles move apart.", "D3", TangentMode.Break);
+        Tangent(CutsceneTangentLinear, "Linear", "Join the selected keys to the next keys with straight lines.", "D4", TangentMode.Linear);
+        Tangent(CutsceneTangentConstant, "Constant", "Hold the selected keys' values until the next keys: a step.", "D5", TangentMode.Constant);
+        Tangent(CutsceneTangentFlatten, "Flatten Tangents", "Make the selected keys' slopes flat.", "D6", TangentMode.Flatten);
         Register(CutsceneGoToStart, "Go to Start", "cutscene", "Move the playhead to the cutscene's start.", "Home", e => e.SetPlayhead(0));
         Register(CutsceneGoToEnd, "Go to End", "cutscene", "Move the playhead to the cutscene's end.", "End", e => e.SetPlayhead(e.File.Length ?? 0));
         Register(CutscenePreviousEdge, "Previous Edge", "cutscene", "Move the playhead back to the marker or the edge of a section, a range or a trigger before it.", "Ctrl+Left",

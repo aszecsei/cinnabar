@@ -72,7 +72,9 @@ sealed class CutsceneTimeline : Control
         void Playhead() => Input.ShowPlayhead();
         void Played() => Input.OnPlayStarted();
         void Reveal(string path) => Input.Reveal(path);
+        void Viewed() => InvalidateVisual();
         new ViewSubscriptions(this, attached: Input.Refresh)
+            .Add(() => _editor.TimeViewChanged += Viewed, () => _editor.TimeViewChanged -= Viewed)
             .Add(() => _editor.RevealRequested += Reveal, () => _editor.RevealRequested -= Reveal)
             .Add(() => _editor.PlayStarted += Played, () => _editor.PlayStarted -= Played)
             .Add(() => _editor.Changed += Changed, () => _editor.Changed -= Changed)
@@ -83,57 +85,21 @@ sealed class CutsceneTimeline : Control
 
     public CutsceneTimelineInput Input { get; }
 
-    // The timeline's commands act while the keyboard is here, or in the command palette that the timeline opened.
-    void OnFocusChanged(object? sender, RoutedEventArgs e)
-    {
-        if (e.Source is not Visual focused)
-        {
-            return;
-        }
-        if (focused == this || focused.GetVisualAncestors().Contains(this))
-        {
-            _editor.TimelineFocused = true;
-        }
-        else if (!focused.GetVisualAncestors().OfType<CommandPalette>().Any() && focused is not CommandPalette)
-        {
-            _editor.TimelineFocused = false;
-        }
-    }
-
-    // Another window, such as a floating panel, has the keyboard: the timeline's keys are that window's.
-    void OnDeactivated(object? sender, EventArgs e) => _editor.TimelineFocused = false;
-
-    // Back in this window, the keys are the timeline's when the focus is in it.
-    void OnActivated(object? sender, EventArgs e) => _editor.TimelineFocused = IsKeyboardFocusWithin;
-
-    // The window whose focus changes the timeline follows, kept so that a detach, when the timeline may no longer find
-    // it, takes the handler off the same window.
-    TopLevel? _window;
-
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        _window = TopLevel.GetTopLevel(this);
-        _window?.AddHandler(GotFocusEvent, OnFocusChanged, RoutingStrategies.Bubble, handledEventsToo: true);
-        if (_window is Window window)
-        {
-            window.Deactivated += OnDeactivated;
-            window.Activated += OnActivated;
-        }
+        _focus = new CutscenePaneFocus(this, _editor, CutscenePane.Timeline);
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
-        _window?.RemoveHandler(GotFocusEvent, OnFocusChanged);
-        if (_window is Window window)
-        {
-            window.Deactivated -= OnDeactivated;
-            window.Activated -= OnActivated;
-        }
-        _window = null;
-        _editor.TimelineFocused = false;
+        _focus?.Dispose();
+        _focus = null;
         base.OnDetachedFromVisualTree(e);
     }
+
+    // Tells the editor when the keyboard is in the timeline.
+    CutscenePaneFocus? _focus;
 
     FormattedText Text(string text, IBrush brush, double size = 11)
     {

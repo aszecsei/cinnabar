@@ -388,8 +388,8 @@ public static class CutsceneEdits
     /// Splits each section that a time is inside into two at that time. The second half is a copy with the next
     /// section ID, which starts where the first ends: its keys move by the cut, its source starts later, and it takes
     /// the ease and blend out and the post roll, while the first keeps the ease and blend in and the pre roll. Each
-    /// channel has a key at the cut in both halves, with the curve's value there: the key before it's for a constant
-    /// key, and a straight line between the keys on each side for the others. Returns both halves' paths.
+    /// channel has a key at the cut in both halves, with the curve's value there as <see cref="CutsceneCurve.Value"/>
+    /// gives it, and the interpolation of the key before it, or <c>auto</c> for a Bezier key. Returns both halves' paths.
     /// </summary>
     public static IReadOnlyList<string> Split(CutsceneFile file, IEnumerable<string> paths, int at, IReadOnlySet<int>? locked = null, Func<string, int>? childStart = null)
     {
@@ -439,6 +439,11 @@ public static class CutsceneEdits
         var before = keys.LastOrDefault(k => k.Start <= cut);
         var after = keys.FirstOrDefault(k => k.Start > cut);
         var (value, interpolation) = ValueAt(before, after, cut);
+        // A channel that the runtime reads takes the runtime's value at the cut.
+        if (CutsceneCurveEdits.CurveOf(first) is { } curve && before?.Start != cut)
+        {
+            value = CutsceneKeying.Format(CutsceneCurve.Value(curve, cut));
+        }
         // The first half: the keys before the cut, and one at it.
         foreach (var key in keys.Where(k => k.Start > cut))
         {
@@ -471,7 +476,8 @@ public static class CutsceneEdits
     }
 
     // The value of a channel's curve at a time between two keys, and the interpolation of a key there: a constant key's
-    // value holds, the other kinds are read as a straight line, and a Bezier key's tangents are not kept.
+    // value holds, and the other kinds are read as a straight line. Split takes the runtime's value instead for a channel
+    // that CutsceneCurve reads, so only an asset's keys use this value. A Bezier key's tangents are not kept.
     static (string Value, string Interpolation) ValueAt(CutsceneBlock? before, CutsceneBlock? after, int time)
     {
         if (before == null)

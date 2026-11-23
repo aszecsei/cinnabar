@@ -4,15 +4,23 @@ using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Shell;
 
+/// <summary>A loop of the preview, from a tick to a later one.</summary>
+public sealed record CutsceneLoop(int Start, int End);
+
+/// <summary>Which of a cutscene tab's panes has the keyboard: the timeline, the curve editor, or neither.</summary>
+public enum CutscenePane
+{
+    None,
+    Timeline,
+    Curves,
+}
+
 /// <summary>
 /// An open cutscene in its editor (see docs/editor/cutscene-editor.md#the-tab): its document, the block that is
 /// selected, and the problems of the last check of its text on their blocks. The view turns input into calls here, so
 /// tests can drive the editor without a window. Blocks are named by path, since an undo reads the file again and
 /// replaces its block objects.
 /// </summary>
-/// <summary>A loop of the preview, from a tick to a later one.</summary>
-public sealed record CutsceneLoop(int Start, int End);
-
 public sealed class CutsceneEditor : IGraphEditor
 {
     readonly EditorShell _shell;
@@ -26,7 +34,13 @@ public sealed class CutsceneEditor : IGraphEditor
     int _playhead;
     bool _snap = true;
     bool _showFrames;
-    bool _timelineFocused;
+    CutscenePane _pane;
+    TimelineView _timeView = new(0, 1000, TimelineZoom.Ticks);
+    bool _follow = true;
+    bool _curvesOpen;
+    bool _curvesNormalized;
+    readonly HashSet<string> _hiddenCurves = [];
+    IReadOnlyList<string> _shownCurves = [];
     float _playRate = 1;
     int? _in;
     int? _out;
@@ -85,6 +99,7 @@ public sealed class CutsceneEditor : IGraphEditor
         // have it after a delete, an undo or a cancel: a key stays selected only while its path holds the same line.
         _selection.RemoveAll(p => File.Find(p) is not { } block
             || (!_ownEdit && block.Kind == CutsceneBlockKind.Key && _keyLines.TryGetValue(p, out var line) && line != KeyLine(block)));
+        FollowShownCurves();
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();
         if (!Document.InTransaction)
@@ -616,24 +631,212 @@ public sealed class CutsceneEditor : IGraphEditor
     public CutsceneBlock? SelectedTrack => Selected is { } block ? CutsceneEdits.TrackOf(block) : null;
 
     /// <summary>
-    /// Whether the timeline has the keyboard: its commands act only then, as their keys are bare letters that the
-    /// viewport and the other panels use too. The view sets it.
+    /// Whether the timeline or the curve editor has the keyboard: the timeline's commands act only then, as their keys
+    /// are bare letters that the viewport and the other panels use too. Setting it gives the keyboard to the timeline,
+    /// or takes it from either pane.
     /// </summary>
     public bool TimelineFocused
     {
-        get => _timelineFocused;
+        get => _pane != CutscenePane.None;
+        set => SetKeyboardPane(value ? CutscenePane.Timeline : CutscenePane.None);
+    }
+
+    /// <summary>Which pane has the keyboard. F, Delete and the tangent commands act on the curve editor while it does.</summary>
+    public CutscenePane KeyboardPane => _pane;
+
+    /// <summary>
+    /// The one writer of <see cref="KeyboardPane"/>, which each pane's view calls as the focus moves. When neither pane
+    /// has the keyboard, a held nudge and a held shuttle pause end.
+    /// </summary>
+    public void SetKeyboardPane(CutscenePane pane)
+    {
+        if (_pane == pane)
+        {
+            return;
+        }
+        _pane = pane;
+        if (pane == CutscenePane.None)
+        {
+            EndNudge();
+            EndShuttleHold();
+        }
+        _shell.Commands.InvalidateAll();
+    }
+
+    /// <summary>A pane lost the keyboard to something outside it: nothing has it, unless the other pane took it first.</summary>
+    public void LeaveKeyboardPane(CutscenePane pane)
+    {
+        if (_pane == pane)
+        {
+            SetKeyboardPane(CutscenePane.None);
+        }
+    }
+
+    /// <summary>
+    /// The part of the cutscene's time that the timeline and the curve editor show, which they share, so a pan or a zoom
+    /// of one moves the other. The tab's, and not saved.
+    /// </summary>
+    public TimelineView TimeView => _timeView;
+
+    /// <summary>The time view changed.</summary>
+    public event Action? TimeViewChanged;
+
+    /// <summary>The one writer of <see cref="TimeView"/>.</summary>
+    public void SetTimeView(TimelineView view)
+    {
+        if (view != _timeView)
+        {
+            _timeView = view;
+            TimeViewChanged?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Whether the time view follows the playhead while the preview plays. A play turns it on, and a pan or a zoom of the
+    /// time by hand, in either pane, turns it off until the next play.
+    /// </summary>
+    public bool Follow => _follow;
+
+    /// <summary>The one writer of <see cref="Follow"/>.</summary>
+    public void SetFollow(bool follow) => _follow = follow;
+
+    /// <summary>Whether the curve editor shows below the timeline: Ctrl+E. The tab's, and not saved.</summary>
+    public bool CurvesOpen
+    {
+        get => _curvesOpen;
         set
         {
-            if (_timelineFocused != value)
+            if (_curvesOpen != value)
             {
-                _timelineFocused = value;
-                if (!value)
+                _curvesOpen = value;
+                if (!value && _pane == CutscenePane.Curves)
                 {
-                    EndNudge();
-                    EndShuttleHold();
+                    SetKeyboardPane(CutscenePane.Timeline);
                 }
+                Changed?.Invoke();
                 _shell.Commands.InvalidateAll();
             }
+        }
+    }
+
+    /// <summary>Whether the curve editor scales each curve to −1..1, for display only. The tab's, and not saved.</summary>
+    public bool CurvesNormalized
+    {
+        get => _curvesNormalized;
+        set
+        {
+            if (_curvesNormalized != value)
+            {
+                _curvesNormalized = value;
+                Changed?.Invoke();
+                _shell.Commands.InvalidateAll();
+            }
+        }
+    }
+
+    /// <summary>
+    /// The paths of the channels whose curves the curve editor lists (see docs/editor/cutscene-editor.md#curves): each
+    /// channel of a selected track, and the channel of a selected section, channel or key. A selection of keys only keeps
+    /// the curves that showed before it and adds their own, so a click on a curve's key does not hide the other curves.
+    /// </summary>
+    public IReadOnlyList<string> ShownCurves => _shownCurves;
+
+    // Follows the selection, from the selection's one writer, Replace, and after an edit that can take channels away.
+    void FollowShownCurves()
+    {
+        var blocks = _selection.Select(File.Find).OfType<CutsceneBlock>().ToList();
+        if (blocks.Count > 0 && blocks.All(b => b.Kind == CutsceneBlockKind.Key))
+        {
+            var kept = _shownCurves.Where(p => File.Find(p) is { Kind: CutsceneBlockKind.Channel }).ToList();
+            var own = blocks.Select(b => CutsceneFile.PathOf(b.Parent!)).Distinct().Where(p => !kept.Contains(p));
+            _shownCurves = [.. kept, .. own];
+            return;
+        }
+        if (blocks.Count == 0)
+        {
+            // Nothing selected, as after a click in the curve editor's empty space: the curves stay.
+            _shownCurves = [.. _shownCurves.Where(p => File.Find(p) is { Kind: CutsceneBlockKind.Channel })];
+            return;
+        }
+        var channels = new List<string>();
+        foreach (var block in blocks)
+        {
+            IEnumerable<CutsceneBlock> under = block.Kind switch
+            {
+                CutsceneBlockKind.Track => block.Children.Where(c => c.Kind == CutsceneBlockKind.Section).SelectMany(s => s.Children),
+                CutsceneBlockKind.Section => block.Children,
+                CutsceneBlockKind.Channel => [block],
+                CutsceneBlockKind.Key => [block.Parent!],
+                _ => [],
+            };
+            channels.AddRange(under.Where(c => c.Kind == CutsceneBlockKind.Channel).Select(CutsceneFile.PathOf));
+        }
+        _shownCurves = [.. channels.Distinct()];
+    }
+
+    /// <summary>The channels whose curves the designer hid in the curve editor's list. The tab's, and not saved.</summary>
+    public IReadOnlySet<string> HiddenCurves => _hiddenCurves;
+
+    public void SetCurveHidden(string channel, bool hidden)
+    {
+        if (hidden ? _hiddenCurves.Add(channel) : _hiddenCurves.Remove(channel))
+        {
+            Changed?.Invoke();
+        }
+    }
+
+    /// <summary>The curve editor should fit the selected keys, or every curve it shows, in its view: F there.</summary>
+    public event Action? FrameCurvesRequested;
+
+    public void RequestFrameCurves() => FrameCurvesRequested?.Invoke();
+
+    /// <summary>
+    /// Whether a channel's field steps, as an integer, a bool or an enum does: its curve draws as steps, a new key on it
+    /// is constant, and the tangent commands leave its keys. The shell knows from the game's component types.
+    /// </summary>
+    public bool Stepped(CutsceneBlock channel) => _shell.SteppedChannel(channel);
+
+    /// <summary>The selected keys that a tangent command changes: on a curve that the runtime reads, not stepped, and not locked.</summary>
+    public IReadOnlyList<string> TangentKeys => [.. _selection.Where(p => File.Find(p) is { Kind: CutsceneBlockKind.Key, Parent: { } channel } key
+        && !CutsceneEdits.IsLocked(key, _locked) && !Stepped(channel) && CutsceneCurveEdits.KeysOf(channel) != null)];
+
+    /// <summary>Sets the tangents of the selected keys, as one undo entry. Nothing when no key changes.</summary>
+    public void SetTangents(TangentMode mode)
+    {
+        var keys = TangentKeys;
+        if (Document.InTransaction || keys.Count == 0)
+        {
+            return;
+        }
+        var label = mode switch
+        {
+            TangentMode.Auto => "Auto Tangents",
+            TangentMode.Unify => "Unify Tangents",
+            TangentMode.Break => "Break Tangents",
+            TangentMode.Linear => "Linear",
+            TangentMode.Constant => "Constant",
+            _ => "Flatten Tangents",
+        };
+        Own(() => Document.Edit(label, f => CutsceneCurveEdits.SetTangents(f, keys, mode, _locked)));
+    }
+
+    /// <summary>
+    /// Adds a key to a channel's curve at a tick on the cutscene's time, with the curve's value there, as one undo entry,
+    /// and selects it: a double-click on a curve.
+    /// </summary>
+    public void AddCurveKey(string channel, int tick)
+    {
+        if (Document.InTransaction || File.Find(channel) is not { Kind: CutsceneBlockKind.Channel } block
+            || CutsceneEdits.SectionOf(block) is not { Start: { } start })
+        {
+            return;
+        }
+        var stepped = Stepped(block);
+        string? path = null;
+        Own(() => Document.Edit("Add Key", f => path = CutsceneCurveEdits.AddKey(f, channel, tick - start, stepped, _locked)));
+        if (path != null)
+        {
+            Select([path], SelectMode.Replace);
         }
     }
 
@@ -867,6 +1070,7 @@ public sealed class CutsceneEditor : IGraphEditor
                 _keyLines[path] = KeyLine(key);
             }
         }
+        FollowShownCurves();
     }
 
     readonly Dictionary<string, string> _keyLines = [];

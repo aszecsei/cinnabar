@@ -22,6 +22,23 @@ public sealed partial class EditorShell
     public CutsceneClip? CutsceneClipboard { get; internal set; }
 
     /// <summary>
+    /// Whether a channel is of a property track whose field steps, as an integer, a bool or an enum does
+    /// (<see cref="KeyValues.Shape"/>), as the game's component types tell. A field that the game has not described is
+    /// taken as smooth.
+    /// </summary>
+    internal bool SteppedChannel(CutsceneBlock channel)
+    {
+        if (CutsceneEdits.TrackOf(channel) is not { TrackKind: "property" } track
+            || !ulong.TryParse(track.Get("component")?.Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var component)
+            || track.Get("field")?.Trim() is not { } quoted)
+        {
+            return false;
+        }
+        var name = TextQuote.Unquote(quoted) ?? quoted;
+        return World.Type(component)?.Fields.FirstOrDefault(f => f.Name == name) is { } field && KeyValues.Shape(field) == PropertyShape.Stepped;
+    }
+
+    /// <summary>
     /// Opens a cutscene in its editor, or shows its open editor. A file that does not start with <c>cutscene 1</c>
     /// opens in the script editor instead, with the reason in the console.
     /// </summary>

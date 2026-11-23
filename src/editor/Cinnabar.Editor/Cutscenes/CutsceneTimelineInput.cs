@@ -49,13 +49,14 @@ public sealed class CutsceneTimelineInput
     MouseButton _button;
     bool _fitted;
 
-    public CutsceneTimelineInput(CutsceneEditor editor)
-    {
-        _editor = editor;
-        View = new TimelineView(0, 1000, TimelineZoom.Ticks);
-    }
+    public CutsceneTimelineInput(CutsceneEditor editor) => _editor = editor;
 
-    public TimelineView View { get; private set; }
+    /// <summary>The part of the time in view, which the curve editor shares (<see cref="CutsceneEditor.TimeView"/>).</summary>
+    public TimelineView View
+    {
+        get => _editor.TimeView;
+        private set => _editor.SetTimeView(value);
+    }
 
     public double ScrollY { get; private set; }
 
@@ -141,11 +142,12 @@ public sealed class CutsceneTimelineInput
         Invalidated?.Invoke();
     }
 
-    /// <summary>
-    /// Whether the view follows the playhead while the preview plays. A play turns it on, and a pan or a zoom of the time
-    /// by hand turns it off until the next play.
-    /// </summary>
-    public bool Follow { get; private set; } = true;
+    /// <summary>Whether the view follows the playhead while the preview plays (<see cref="CutsceneEditor.Follow"/>).</summary>
+    public bool Follow
+    {
+        get => _editor.Follow;
+        private set => _editor.SetFollow(value);
+    }
 
     /// <summary>A play began: the view follows the playhead again.</summary>
     public void OnPlayStarted()
