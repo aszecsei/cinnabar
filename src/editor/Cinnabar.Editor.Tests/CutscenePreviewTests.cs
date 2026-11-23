@@ -88,7 +88,7 @@ public sealed class CutscenePreviewTests : IDisposable
         using var _ = shell;
         var first = Opened(shell);
 
-        editor.ShowProblems(editor.Document.Text, new PreviewResult("", [], []));
+        editor.Checks.Show(editor.Document.Text, new PreviewResult("", [], []));
 
         Assert.Equal(first, Assert.Single(_sent.OfType<CutscenePreviewClose>()).Ticket);
         var open = Assert.Single(_sent.OfType<CutscenePreviewOpen>());
@@ -96,7 +96,7 @@ public sealed class CutscenePreviewTests : IDisposable
         Assert.True(open.Ticket > first);
         // A second clean cook changes nothing.
         _sent.Clear();
-        editor.ShowProblems(editor.Document.Text, new PreviewResult("", [], []));
+        editor.Checks.Show(editor.Document.Text, new PreviewResult("", [], []));
         Assert.Empty(_sent);
     }
 

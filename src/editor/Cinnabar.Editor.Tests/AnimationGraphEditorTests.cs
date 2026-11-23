@@ -652,30 +652,30 @@ public sealed class AnimationGraphEditorTests : IDisposable
         var raised = 0;
         editor.ProblemsChanged += () => raised++;
 
-        editor.ShowProblems(editor.Document.Text, Answer(path, ((uint)move + 2, "there is no state named x"), ((uint)param, "another parameter is named look"), (1, "an animation graph has a state at least")));
+        editor.Checks.Show(editor.Document.Text, Answer(path, ((uint)move + 2, "there is no state named x"), ((uint)param, "another parameter is named look"), (1, "an animation graph has a state at least")));
         Assert.Equal(1, raised);
         Assert.Equal(21, editor.Problems[0].Node);
         // A line of a parameter is on no node, and keeps its line for the panel's row.
         Assert.Null(editor.Problems[1].Node);
         Assert.Same(editor.Document.Graph.Params.Last(), editor.Document.Graph.BlockAt(editor.Problems[1].Line));
         Assert.Null(editor.Problems[2].Node);
-        Assert.Equal("there is no state named x", editor.CookError);
+        Assert.Equal(new CheckState.Failed("there is no state named x"), editor.Checks.State);
 
         // A problem in another file says where, and is on no node.
-        editor.ShowProblems(editor.Document.Text, Answer("C:/elsewhere/other.animation_graph", (9, "broken")));
+        editor.Checks.Show(editor.Document.Text, Answer("C:/elsewhere/other.animation_graph", (9, "broken")));
         Assert.Equal("other.animation_graph:9: broken", Assert.Single(editor.Problems).Text);
         Assert.Null(editor.Problems[0].Node);
 
         // An answer about a text that has changed since names the wrong lines, so it waits for the next.
         var old = editor.Document.Text;
         editor.AddState(0, 0);
-        editor.ShowProblems(old, Answer(path, (3, "stale")));
+        editor.Checks.Show(old, Answer(path, (3, "stale")));
         Assert.DoesNotContain(editor.Problems, p => p.Text.Contains("stale"));
 
         // The next answer clears them.
-        editor.ShowProblems(editor.Document.Text, Answer(path));
+        editor.Checks.Show(editor.Document.Text, Answer(path));
         Assert.Empty(editor.Problems);
-        Assert.Null(editor.CookError);
+        Assert.IsType<CheckState.Clean>(editor.Checks.State);
     }
 
     [Fact]

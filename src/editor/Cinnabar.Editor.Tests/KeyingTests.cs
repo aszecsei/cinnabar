@@ -177,7 +177,7 @@ public sealed class KeyingTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllBytes(path, [1]);
         _sent.Clear();
-        editor.ShowProblems(editor.Document.Text, new PreviewResult("", [], []));
+        editor.Checks.Show(editor.Document.Text, new PreviewResult("", [], []));
         var ticket = _sent.OfType<CutscenePreviewOpen>().Single(o => o.Unsaved).Ticket;
         shell.OnGameMessage(new CutscenePreviewOpened(ticket, 0, 0, 600000));
         _sent.Clear();

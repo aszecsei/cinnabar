@@ -42,7 +42,7 @@ The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/i
 - **Toolbar:**
   - Save, and Open in Script Editor;
   - the cutscene's length as timecode (`mm:ss:ff`) and as frames at its display rate;
-  - the check's state: waiting for the cook daemon, cooks, or the count of errors, with the first error as its tooltip, and "not saved".
+  - the check's state: waiting for the cook daemon, cooking (before the first answer), cooks, or the count of errors ("does not cook" for an error on no line), with the error as its tooltip, and "not saved".
 - **Timeline:** the bindings, tracks, sections, events and keys on one time axis (see [The timeline](#the-timeline)).
 - **Details:** the primary selected block's fields, under the timeline:
   - its ID;

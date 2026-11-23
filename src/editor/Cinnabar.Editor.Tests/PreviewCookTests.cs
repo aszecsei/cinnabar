@@ -149,6 +149,36 @@ public sealed class PreviewCookTests : IDisposable
         Assert.Empty(_sent);
     }
 
+    [Fact]
+    public void AMaterialDropsAnAnswerAboutAnOlderText()
+    {
+        var (shell, owner, edit) = Open("material");
+        using var _ = shell;
+        var editor = (MaterialEditor)owner;
+        var cook = Assert.Single(_cooker.Requests);
+
+        edit();
+        cook.Answer(new PreviewResult("stale", [new Problem(editor.Document.Path, 4, 0, true, "stale")], []));
+
+        Assert.Same(CheckState.Pending, editor.Checks.State);
+        Assert.Empty(editor.Problems);
+    }
+
+    [Fact]
+    public void AMaterialProblemHasItsNodeAndItsLine()
+    {
+        var (shell, owner, _) = Open("material");
+        using var _ = shell;
+        var editor = (MaterialEditor)owner;
+        Assert.Same(CheckState.Pending, editor.Checks.State);
+
+        Assert.Single(_cooker.Requests).Answer(new PreviewResult("bad", [new Problem(editor.Document.Path, 4, 0, true, "bad")], []));
+
+        var problem = Assert.Single(editor.Problems);
+        Assert.Equal((1, 4), (problem.Node, problem.Line));
+        Assert.Equal(new CheckState.Failed("bad"), editor.Checks.State);
+    }
+
     static async Task Until(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);

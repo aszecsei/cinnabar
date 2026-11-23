@@ -92,27 +92,14 @@ public sealed class MaterialEditorView : DockPanel
     {
         ShowSettings();
         var asset = _shell.Assets.Find(_editor.Guid);
-        var parts = new List<string>();
-        if (_editor.Document.Kind == MaterialFileKind.Material && asset is { Permutations: > 0 } a)
-        {
-            parts.Add($"{a.Permutations} {(a.Permutations == 1 ? "permutation" : "permutations")}");
-        }
-        var errors = _editor.Problems.Count(p => p.Error);
-        if (_editor.CookError != null)
-        {
-            parts.Add(errors > 1 ? $"{errors} errors" : "does not cook");
-        }
-        else if (_editor.PreviewId != null)
-        {
-            parts.Add(!_shell.Cook.Linked ? "waiting for the cook daemon" : _editor.ShowsUnsaved ? "preview cooked" : "cooking the preview");
-        }
-        if (_editor.Document.IsDirty)
-        {
-            parts.Add("not saved");
-        }
-        _status.Text = string.Join("  ·  ", parts);
-        _status.Classes.Set("warning", _editor.CookError != null);
-        ToolTip.SetTip(_status, _editor.CookError);
+        var state = _editor.Checks.State;
+        CookStatus.Show(_status, state,
+            _editor.Document.Kind == MaterialFileKind.Material && asset is { Permutations: > 0 } a
+                ? $"{a.Permutations} {(a.Permutations == 1 ? "permutation" : "permutations")}"
+                : null,
+            // Without a preview, the material does not cook, so the line says nothing of its checks.
+            _editor.PreviewId != null ? CookStatus.Describe(state, _editor.Problems.Count(p => p.Error), _shell.Cook.Linked) : null,
+            _editor.Document.IsDirty ? "not saved" : null);
     }
 
     // The material's settings: its shading model, its blend with its cutoff or its transparency, two-sided and casting

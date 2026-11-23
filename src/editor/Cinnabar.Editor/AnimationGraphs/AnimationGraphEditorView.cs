@@ -74,26 +74,8 @@ public sealed class AnimationGraphEditorView : DockPanel
 
     void Show()
     {
-        var parts = new List<string>();
-        var errors = _editor.Problems.Count(p => p.Error);
-        if (!_shell.Cook.Linked)
-        {
-            parts.Add("waiting for the cook daemon");
-        }
-        else if (_editor.CookError != null)
-        {
-            parts.Add(errors == 1 ? "1 error" : $"{errors} errors");
-        }
-        else
-        {
-            parts.Add("cooks");
-        }
-        if (_editor.Document.IsDirty)
-        {
-            parts.Add("not saved");
-        }
-        _status.Text = string.Join("  ·  ", parts);
-        _status.Classes.Set("warning", _editor.CookError != null);
-        ToolTip.SetTip(_status, _editor.CookError);
+        var state = _editor.Checks.State;
+        CookStatus.Show(_status, state, CookStatus.Describe(state, _editor.Problems.Count(p => p.Error), _shell.Cook.Linked),
+            _editor.Document.IsDirty ? "not saved" : null);
     }
 }

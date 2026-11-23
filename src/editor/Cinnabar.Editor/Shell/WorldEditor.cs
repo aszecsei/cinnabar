@@ -16,14 +16,14 @@ public sealed class WorldEditor : IGraphEditor
     const double NewLoadDistance = 25;
 
     readonly EditorShell _shell;
-    readonly List<GraphProblem> _problems = [];
-    readonly PreviewCook _cook;
 
     internal WorldEditor(EditorShell shell, WorldDocument document)
     {
         _shell = shell;
         Document = document;
-        _cook = new PreviewCook(() => _shell.PreviewCooker.Linked, () => Document.Text, text => _shell.PreviewCooker.CookPreview(Guid, text), ShowProblems);
+        Checks = new CookChecks<GraphProblem>(shell, document.Guid, () => Document.Text, () => Document.Path,
+            l => new GraphProblem(null, l.Text, l.Error, l.Line));
+        Checks.Changed += () => ProblemsChanged?.Invoke();
         Document.Changed += OnDocumentChanged;
     }
 
@@ -41,7 +41,10 @@ public sealed class WorldEditor : IGraphEditor
     public IReadOnlyList<WorldScene> Scenes => [.. File.Scenes];
 
     /// <summary>The problems of the last check, each with its scene's line, or 0 for one of no line.</summary>
-    public IReadOnlyList<GraphProblem> Problems => _problems;
+    public IReadOnlyList<GraphProblem> Problems => Checks.Problems;
+
+    /// <summary>The checks of the unsaved text.</summary>
+    public CookChecks<GraphProblem> Checks { get; }
 
     /// <summary>The world or its document's state changed.</summary>
     public event Action? Changed;
@@ -55,7 +58,7 @@ public sealed class WorldEditor : IGraphEditor
         _shell.OnWorldChanged();
         if (!Document.InTransaction)
         {
-            _cook.Schedule();
+            Checks.Schedule();
         }
     }
 
@@ -64,7 +67,7 @@ public sealed class WorldEditor : IGraphEditor
     {
         var first = File.LineOf(scene);
         var last = first + scene.LineTexts.Count() - 1;
-        return _problems.Where(p => p.Line >= first && p.Line <= last);
+        return Problems.Where(p => p.Line >= first && p.Line <= last);
     }
 
     /// <summary>The scene that has a line, from 1, or null for a line of no scene.</summary>
@@ -159,28 +162,11 @@ public sealed class WorldEditor : IGraphEditor
         });
 
     /// <summary>Sends the unsaved text to the cook daemon now, and shows the answer's problems.</summary>
-    public Task CookNow() => _cook.CookNow();
-
-    /// <summary>Shows the answer to a check of a text, unless the world has changed since it was sent.</summary>
-    public void ShowProblems(string text, PreviewResult result)
-    {
-        if (text != Document.Text)
-        {
-            return;
-        }
-        _problems.Clear();
-        foreach (var p in result.Problems)
-        {
-            var mine = string.Equals(Path.GetFullPath(p.File == "" ? "." : p.File), Document.Path, StringComparison.OrdinalIgnoreCase);
-            var where = mine || p.File == "" ? "" : $"{Path.GetFileName(p.File)}:{p.Line}: ";
-            _problems.Add(new GraphProblem(null, where + p.Text, p.Error, mine ? (int)p.Line : 0));
-        }
-        ProblemsChanged?.Invoke();
-    }
+    public Task CookNow() => Checks.CookNow();
 
     public void Dispose()
     {
-        _cook.Dispose();
+        Checks.Dispose();
         Document.Changed -= OnDocumentChanged;
     }
 }

@@ -24,20 +24,21 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor, IGraphCan
     const float MaxDistance = 40f;
 
     readonly HashSet<int> _selection = [];
-    readonly List<GraphProblem> _checked = [];
     readonly List<GraphProblem> _problems = [];
-    readonly PreviewCook _cook;
 
-    // The mesh that the user picked, and whether the game has been told that the daemon cooked the unsaved text.
+    // The mesh that the user picked.
     string? _pickedMesh;
     string? _sentMesh;
-    bool _showsUnsaved;
 
     internal AnimationGraphEditor(EditorShell shell, AnimationGraphDocument document, int? previewId = null)
         : base(shell, previewId, StartYaw, StartPitch, StartDistance, MaxDistance)
     {
         Document = document;
-        _cook = new PreviewCook(() => _shell.PreviewCooker.Linked, () => Document.Text, text => _shell.PreviewCooker.CookPreview(Guid, text), OnCooked);
+        Checks = new CookChecks<GraphProblem>(shell, document.Guid, () => Document.Text, () => Document.Path,
+            l => new GraphProblem(l.Line > 0 ? File.NodeAt(l.Line) : null, l.Text, l.Error, l.Line));
+        // From the first text that cooks, the preview plays what the daemon cooks and not the saved one.
+        Checks.FirstClean += SendPreview;
+        Checks.Changed += GatherProblems;
         Document.Changed += OnDocumentChanged;
         _shell.Assets.Changed += GatherProblems;
         _shell.World.AnimatorChanged += OnAnimatorChanged;
@@ -60,7 +61,7 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor, IGraphCan
 
     public override string Waiting => "The preview draws once the graph cooks and a mesh is picked.";
 
-    protected override bool ShowsUnsavedText => _showsUnsaved;
+    protected override bool ShowsUnsavedText => Checks.CookedClean;
 
     protected override byte[] MeshAsset => MeshGuid is { } guid ? Convert.FromHexString(guid) : new byte[16];
 
@@ -70,10 +71,11 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor, IGraphCan
 
     public IReadOnlyCollection<int> Selection => _selection;
 
+    /// <summary>The check's problems and the clips'.</summary>
     public IReadOnlyList<GraphProblem> Problems => _problems;
 
-    /// <summary>The last check found an error, so the graph's blob stays as it last cooked.</summary>
-    public string? CookError { get; private set; }
+    /// <summary>The checks of the unsaved text. While they fail, the graph's blob stays as it last cooked.</summary>
+    public CookChecks<GraphProblem> Checks { get; }
 
     /// <summary>The graph or its document's state changed.</summary>
     public event Action? Changed;
@@ -101,7 +103,7 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor, IGraphCan
         _shell.Commands.InvalidateAll();
         if (!Document.InTransaction)
         {
-            _cook.Schedule();
+            Checks.Schedule();
         }
     }
 
@@ -594,47 +596,14 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor, IGraphCan
         });
 
     /// <summary>Sends the unsaved text to the cook daemon now, and shows the answer's problems.</summary>
-    public Task CookNow() => _cook.CookNow();
-
-    void OnCooked(string text, PreviewResult result)
-    {
-        // From the first text that cooks, the preview plays what the daemon cooks and not the saved one.
-        if (result.Error == "" && !_showsUnsaved)
-        {
-            _showsUnsaved = true;
-            SendPreview();
-        }
-        ShowProblems(text, result);
-    }
-
-    /// <summary>
-    /// Shows the answer to a check of a text. An answer about another text is too late to name its lines: the graph
-    /// changed since it was sent, so another check will come.
-    /// </summary>
-    public void ShowProblems(string text, PreviewResult result)
-    {
-        if (text != Document.Text)
-        {
-            return;
-        }
-        _checked.Clear();
-        foreach (var p in result.Problems)
-        {
-            var mine = string.Equals(Path.GetFullPath(p.File == "" ? "." : p.File), Document.Path, StringComparison.OrdinalIgnoreCase);
-            var node = mine && p.Line > 0 ? File.NodeAt((int)p.Line) : null;
-            var where = mine || p.File == "" ? "" : $"{Path.GetFileName(p.File)}:{p.Line}: ";
-            _checked.Add(new GraphProblem(node, where + p.Text, p.Error, mine ? (int)p.Line : 0));
-        }
-        CookError = result.Error == "" ? null : result.Error;
-        GatherProblems();
-    }
+    public Task CookNow() => Checks.CookNow();
 
     // The check's problems and the clips', which the cooker does not look up: it depends on any GUID that a graph names.
     void GatherProblems()
     {
         FollowDefaultMesh();
         _problems.Clear();
-        _problems.AddRange(_checked);
+        _problems.AddRange(Checks.Problems);
         if (_shell.Assets.Linked)
         {
             foreach (var clip in File.Clips)
@@ -655,7 +624,7 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor, IGraphCan
 
     public override void Dispose()
     {
-        _cook.Dispose();
+        Checks.Dispose();
         base.Dispose();
         Document.Changed -= OnDocumentChanged;
         _shell.Assets.Changed -= GatherProblems;

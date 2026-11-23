@@ -231,8 +231,9 @@ public sealed class DecisionEditorTests : IDisposable
         Assert.Equal(Blackboard, editor.Document.Text);
 
         // A problem goes on its key's row.
-        editor.ShowProblems(editor.Document.Text, new PreviewResult("bad", [new Problem(editor.Document.Path, 5, 0, true, "the enum mood has the value calm twice")], []));
+        editor.Checks.Show(editor.Document.Text, new PreviewResult("bad", [new Problem(editor.Document.Path, 5, 0, true, "the enum mood has the value calm twice")], []));
         Assert.Single(editor.ProblemsOf(editor.Find("mood")!));
+        Assert.Equal(new CheckState.Failed("bad"), editor.Checks.State);
         Assert.Empty(editor.ProblemsOf(editor.Find("health")!));
     }
 
@@ -243,16 +244,16 @@ public sealed class DecisionEditorTests : IDisposable
         using var _ = shell;
         var editor = OpenGuard(shell, guard);
         var path = editor.Document.Path;
-        editor.ShowProblems(editor.Document.Text, new PreviewResult("bad",
+        editor.Checks.Show(editor.Document.Text, new PreviewResult("bad",
         [
             new Problem(path, 9, 0, true, "the blackboard has no key named target"),
             new Problem(path, 3, 0, true, "no asset has the GUID"),
         ], []));
         Assert.Equal(new int?[] { 2, null }, editor.Problems.Select(p => p.Node));
-        Assert.Equal("bad", editor.CookError);
+        Assert.Equal(new CheckState.Failed("bad"), editor.Checks.State);
         // An answer about a text that has changed since is dropped.
         editor.SetField(2, "cooldown", "1");
-        editor.ShowProblems(Tree(), new PreviewResult("", [], []));
+        editor.Checks.Show(Tree(), new PreviewResult("", [], []));
         Assert.Equal(2, editor.Problems.Count);
     }
 

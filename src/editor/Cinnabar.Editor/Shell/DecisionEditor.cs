@@ -67,8 +67,6 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
 
     readonly EditorShell _shell;
     readonly HashSet<int> _selection = [];
-    readonly List<GraphProblem> _problems = [];
-    readonly PreviewCook _cook;
     // The blackboard that the keys were last read from: its GUID and text, and the keys.
     (string? Guid, string? Text, IReadOnlyList<BlackboardKey> Keys) _board = (null, null, []);
     // The plan preview's goal and the start state's values that the user set, by planning key, and the last answer, with
@@ -84,7 +82,13 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
     {
         _shell = shell;
         Document = document;
-        _cook = new PreviewCook(() => _shell.PreviewCooker.Linked, () => Document.Text, Cook, ShowProblems);
+        Checks = new CookChecks<GraphProblem>(shell, document.Guid, () => Document.Text, () => Document.Path,
+            l => new GraphProblem(l.Line > 0 ? File.NodeAt(l.Line) : null, l.Text, l.Error, l.Line), cook: Cook);
+        Checks.Changed += () =>
+        {
+            ProblemsChanged?.Invoke();
+            PlanChanged?.Invoke();
+        };
         Document.Changed += OnDocumentChanged;
         _shell.Assets.Changed += OnAssetsChanged;
         _shell.World.AgentChanged += OnAgentChanged;
@@ -104,10 +108,10 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
 
     public IReadOnlyCollection<int> Selection => _selection;
 
-    public IReadOnlyList<GraphProblem> Problems => _problems;
+    public IReadOnlyList<GraphProblem> Problems => Checks.Problems;
 
-    /// <summary>The last check found an error, so the decision's blob stays as it last cooked.</summary>
-    public string? CookError { get; private set; }
+    /// <summary>The checks of the unsaved text. While they fail, the decision's blob stays as it last cooked.</summary>
+    public CookChecks<GraphProblem> Checks { get; }
 
     /// <summary>The decision or its document's state changed.</summary>
     public event Action? Changed;
@@ -146,7 +150,7 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
         _shell.Commands.InvalidateAll();
         if (!Document.InTransaction)
         {
-            _cook.Schedule();
+            Checks.Schedule();
         }
     }
 
@@ -161,7 +165,7 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
             if (PlanQuery() is { } query && QueryKey(query) != _planAnswered?.Query)
             {
                 PlanChanged?.Invoke();
-                _cook.Schedule();
+                Checks.Schedule();
             }
         }
     }
@@ -699,7 +703,7 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
     void PlanSetupChanged()
     {
         PlanChanged?.Invoke();
-        _cook.Schedule();
+        Checks.Schedule();
     }
 
     /// <summary>
@@ -752,34 +756,11 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
     // Problems.
 
     /// <summary>Sends the unsaved text to the cook daemon now, and shows the answer's problems.</summary>
-    public Task CookNow() => _cook.CookNow();
-
-    /// <summary>
-    /// Shows the answer to a check of a text. An answer about another text is too late to name its lines: the decision
-    /// changed since it was sent, so another check will come.
-    /// </summary>
-    public void ShowProblems(string text, PreviewResult result)
-    {
-        if (text != Document.Text)
-        {
-            return;
-        }
-        _problems.Clear();
-        foreach (var p in result.Problems)
-        {
-            var mine = string.Equals(Path.GetFullPath(p.File == "" ? "." : p.File), Document.Path, StringComparison.OrdinalIgnoreCase);
-            var node = mine && p.Line > 0 ? File.NodeAt((int)p.Line) : null;
-            var where = mine || p.File == "" ? "" : $"{Path.GetFileName(p.File)}:{p.Line}: ";
-            _problems.Add(new GraphProblem(node, where + p.Text, p.Error, mine ? (int)p.Line : 0));
-        }
-        CookError = result.Error == "" ? null : result.Error;
-        ProblemsChanged?.Invoke();
-        PlanChanged?.Invoke();
-    }
+    public Task CookNow() => Checks.CookNow();
 
     public void Dispose()
     {
-        _cook.Dispose();
+        Checks.Dispose();
         Document.Changed -= OnDocumentChanged;
         _shell.Assets.Changed -= OnAssetsChanged;
         _shell.World.AgentChanged -= OnAgentChanged;
