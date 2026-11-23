@@ -9,6 +9,7 @@ import "core:testing"
 import "core:time"
 
 import "cinnabar:core"
+import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
 import "cinnabar:core/testlog"
 import "cinnabar:engine/asset"
@@ -1174,4 +1175,106 @@ preview_values_move_a_binding_by_its_id :: proc(t: ^testing.T) {
 		},
 	)
 	testing.expect_value(t, x_of(f, shot), 0)
+}
+
+// A scene view that looks through a camera draws the frame from that camera's view, with its lens, and its histories
+// start again only on the frame that the camera changes: at the look, at a cut, and back at its own camera.
+@(test)
+a_looking_scene_view_draws_from_the_camera_and_cuts_when_it_changes :: proc(t: ^testing.T) {
+	f := setup(t, cameras = true)
+	renderer := new(render.Renderer)
+	defer free(renderer)
+	defer teardown(f)
+	renderer.platform = &f.platform
+	f.platform.gpu_viewport_target = proc(id: int, size: [2]u32) -> (gpu.Preview_Target, bool) {
+		return {
+				texture = {index = u32(20 + id), generation = 1},
+				prefix = "test.viewport",
+				generation = 1,
+				size = size,
+			},
+			true
+	}
+	f.platform.gpu_release_viewport_target = proc(id: int) {}
+	f.platform.gpu_create_buffer = proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
+		return {index = 1, generation = 1}
+	}
+	f.platform.gpu_destroy_buffer = proc(buffer: gpu.Buffer) {}
+	f.platform.gpu_destroy_texture = proc(_: gpu.Texture) {}
+	f.platform.gpu_destroy_sampler = proc(_: gpu.Sampler) {}
+	f.platform.gpu_destroy_accel = proc(_: gpu.Accel_Struct) {}
+	f.platform.gpu_destroy_upscaler = proc(_: gpu.Upscaler) {}
+	f.platform.gpu_destroy_pipeline = proc(_: gpu.Pipeline) {}
+	f.editor.renderer = renderer
+	own := link.Editor_Camera {
+		viewport     = 0,
+		position     = {-(3 * METER), 0, 0},
+		rotation     = {0, 0, 0, 1},
+		vertical_fov = 1,
+		near         = 0.05,
+	}
+	step(
+		f,
+		open(1, SECOND / 2),
+		link.Open_Viewport{viewport = 0, kind = .Scene, width = 64, height = 64},
+		own,
+	)
+
+	Drawn :: struct {
+		view: render.View,
+		cut:  bool,
+	}
+	draw :: proc(t: ^testing.T, f: ^Fixture, loc := #caller_location) -> Drawn {
+		views := frame_viewports(&f.editor, &f.world)
+		testing.expect_value(t, len(views), 1, loc = loc)
+		if len(views) != 1 {
+			return {}
+		}
+		drawn := Drawn{views[0].view.? or_else {}, views[0].cut}
+		free_all(f.platform.frame_allocator)
+		return drawn
+	}
+	shot :: proc(t: ^testing.T, f: ^Fixture, binding: u32) -> render.View {
+		v := f.editor.session.view.viewports[0]
+		v.look = {
+			serial  = 99,
+			ticket  = 1,
+			source  = .Binding,
+			binding = binding,
+		}
+		entity, _, ok := look_camera(&f.editor, &f.world, &v)
+		testing.expect(t, ok)
+		view, _ := render.camera_view(&f.world, entity)
+		return view
+	}
+
+	drawn := draw(t, f)
+	testing.expect_value(t, drawn.view.position, ecs.World_Position{own.position})
+	testing.expect(t, !drawn.cut)
+
+	// Through the cuts: shot A before 1 s, with its 50 mm lens's field of view.
+	step(f, look(1, .Cuts))
+	a := shot(t, f, SHOT_A)
+	drawn = draw(t, f)
+	testing.expect_value(t, drawn.view.position, a.position)
+	testing.expect_value(t, drawn.view.projection, a.projection)
+	testing.expect_value(
+		t,
+		drawn.view.projection.(render.Perspective).vertical_fov,
+		render.cinematic_vertical_fov({focal_length = 50}),
+	)
+	testing.expect(t, drawn.cut)
+	testing.expect(t, !draw(t, f).cut)
+
+	// The cut to shot B at 1 s is a cut in the view too.
+	step(f, link.Cutscene_Preview_Time{ticket = 1, tick = 3 * SECOND / 2})
+	drawn = draw(t, f)
+	testing.expect_value(t, drawn.view.position, shot(t, f, SHOT_B).position)
+	testing.expect(t, drawn.cut)
+
+	// Its own camera again.
+	step(f, look(2, .Editor_Camera))
+	drawn = draw(t, f)
+	testing.expect_value(t, drawn.view.position, ecs.World_Position{own.position})
+	testing.expect(t, drawn.cut)
 }

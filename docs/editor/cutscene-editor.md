@@ -688,7 +688,7 @@ While a scene view looks through a spawned camera, its fly, orbit and pan contro
 - a binding, "Camera", that spawns the camera prefab with the view's position and rotation;
 - a transform key with no offset at the playhead;
 - a `focal_length` key at the playhead, from the view's field of view on the prefab's sensor (`Lens.FocalLength`);
-- a cut to the camera at the playhead, when no cut is over it (`CutsceneEdits.AddCut`). The cut runs to the next cut's start, else to the range's end, else to the length, else for a second. It adds the camera cut track when there is none.
+- a cut to the camera at the playhead, when no cut is over it and the playhead is before the length (`CutsceneEdits.AddCut`). The cut runs to the next cut's start, else to the range's end, else to the length, else for a second. It adds the camera cut track when there is none.
 
 The view's pose is the one that it draws: the camera that it looks through, or its editor camera. An orthographic editor camera has no lens, so the command does not run there.
 
@@ -708,6 +708,7 @@ The guides are each user's, for each viewport, in `viewport.json`. `FrameGuides`
 
 - **Pilot moves only a spawned camera with no parent binding.** A possessed camera moves with the gizmo, and its keys go as [Gizmo keys](#gizmo-keys) says. A camera whose track is relative to another binding is not piloted.
 - **No roll.** The pilot's camera has a yaw and a pitch, so a rolled camera loses its roll at the first move.
+- **A cut's constraints win.** A camera cut section's `look_at` and `follow` write the camera's rotation and position after its track. While a pilot's pose is held over the preview, the view shows the pose. Once the keys settle, the constraint aims or moves the camera again, so a pilot's keys show only where no constraint writes the same part.
 - **The wheel changes the flying speed.** It does not dolly, because a pilot's move ends with a mouse release. Alt and the right button dolly.
 - **The editing tools are off in a view that looks through a camera.** The gizmo, a box select, mesh mode, the landscape brush and drops act in the editor camera's view. A click still selects.
 - **Lens controls, focus picking, the cut strip and the frustums' colours are next** ([#555](https://github.com/aszecsei/cinnabar/issues/555)).

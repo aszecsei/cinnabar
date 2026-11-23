@@ -659,10 +659,15 @@ public static class CutsceneEdits
     /// <summary>
     /// Adds a cut to a camera at a time (see docs/editor/cutscene-editor.md#new-camera-from-view), on the cutscene's camera
     /// cut track, which it adds when there is none. The cut runs to the next cut's start, else to the range's end, else to
-    /// the length, else for a second. False, and nothing changes, when a cut is over the time already.
+    /// the length, else for a second. False, and nothing changes, when a cut is over the time already, or the time is at
+    /// the length or past it, where a cut would show nothing.
     /// </summary>
     public static bool AddCut(CutsceneFile file, int tick, int camera)
     {
+        if (file.Length is { } last && tick >= last)
+        {
+            return false;
+        }
         var track = file.Tracks.FirstOrDefault(t => t.TrackKind == "camera_cut");
         var sections = track?.Children.Where(s => s.Kind == CutsceneBlockKind.Section && s.Start != null && s.End != null).ToList() ?? [];
         if (sections.Any(s => s.Start <= tick && tick < s.End))

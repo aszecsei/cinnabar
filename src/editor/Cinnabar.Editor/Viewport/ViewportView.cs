@@ -462,6 +462,13 @@ public sealed class ViewportView : Grid
     void OnDragOver(DragEventArgs e)
     {
         _shell.ActivateViewport(_viewport);
+        // A drop places by the editor camera's ray, which a view that looks through a camera does not draw from.
+        if (Looking)
+        {
+            e.DragEffects = DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
         if (DraggedPrefab(e) is var (prefab, node, at))
         {
             e.DragEffects = SpawnTarget(e, node) != null ? DragDropEffects.Link : DragDropEffects.Copy;
@@ -525,6 +532,11 @@ public sealed class ViewportView : Grid
 
     void OnDrop(DragEventArgs e)
     {
+        if (Looking)
+        {
+            EndMaterialDrag();
+            return;
+        }
         if (DraggedPrefab(e) is var (prefab, node, at))
         {
             e.Handled = true;
@@ -971,6 +983,16 @@ public sealed class ViewportView : Grid
         {
             return;
         }
+        // Esc in a view that looks through a camera takes back a pilot's gesture, a flight too, or else ends the look.
+        if (e.Key == Key.Escape && Looking && _shell.Looks.Escape(_viewport.Index))
+        {
+            if (_gesture is Gesture.Fly or Gesture.Dolly or Gesture.Pan or Gesture.Orbit)
+            {
+                EndGesture();
+            }
+            e.Handled = true;
+            return;
+        }
         // A key that flies is the camera's until it is released: when the right button goes up first, the key's repeats
         // would pick a tool, as W picks Move.
         if (_gesture == Gesture.Fly || _held.Contains(e.Key))
@@ -1026,16 +1048,7 @@ public sealed class ViewportView : Grid
             Key.OemCloseBrackets => EditorCommands.MeshGridCoarser,
             _ => null,
         };
-        if (e.Key == Key.Escape && Looking && _shell.Looks.Escape(_viewport.Index))
-        {
-            // Esc takes back a pilot's gesture under way, or gives the view its own camera back.
-            if (_gesture is Gesture.Fly or Gesture.Dolly or Gesture.Pan or Gesture.Orbit)
-            {
-                EndGesture();
-            }
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Escape && _gesture == Gesture.Gizmo)
+        if (e.Key == Key.Escape && _gesture == Gesture.Gizmo)
         {
             _shell.CancelGizmo();
             _gesture = Gesture.None;

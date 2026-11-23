@@ -240,6 +240,9 @@ public sealed class CutsceneCameraTests : IDisposable
         Assert.Equal(6, editor.NewCameraFromView(shell.Viewports[0]));
         Assert.Equal([3, 4, 5], CutsceneEdits.CutCameras(editor.File).Order());
 
+        // At the length a cut would show nothing, so none is added.
+        Assert.False(CutsceneEdits.AddCut(editor.File, 720000, 6));
+
         shell.Viewports[0].Camera.SetProjection(CameraProjection.Orthographic);
         Assert.NotNull(editor.NewCameraRefusal(shell.Viewports[0]));
         Assert.False(shell.Commands.Get(EditorCommands.CutsceneNewCameraFromView).CanExecute);
