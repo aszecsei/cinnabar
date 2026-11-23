@@ -154,7 +154,7 @@ public sealed class CutsceneCurveEditorTests : IDisposable
         var row = input.Layout.Rows[0];
         var value = row.ValueAt(300000);
         Assert.False(input.Press(X(300000), Y(value), MouseButton.Left, KeyModifiers.None, clicks: 2));
-        var line = $"\t\t\tkey 300000 {CutsceneKeying.Format(CutsceneCurve.Value(row.Keys, 300000))} auto\n";
+        var line = $"\t\t\tkey 300000 {CutsceneKeying.Format(CutsceneCurve.Value(row.Keys, 300000, CurveInfinity.Constant, CurveInfinity.Constant))} auto\n";
         Assert.Equal(text.Replace(Peak + "\n", Peak + "\n" + line), editor.Document.Text);
         Assert.Equal([$"{Gain}/key:2"], editor.SelectedPaths);
 
@@ -269,6 +269,35 @@ public sealed class CutsceneCurveEditorTests : IDisposable
         var y = Y(input.Layout.Rows[0].ValueAt(300000));
         input.Press(X(300000), y, MouseButton.Left, KeyModifiers.None, clicks: 2);
         input.Release(X(300000), y, KeyModifiers.None);
+        Assert.Equal(text, editor.Document.Text);
+    }
+
+    [Fact]
+    public void TheInfinityCommandsStepTheShownCurvesModesAsUndoEntries()
+    {
+        var (shell, editor, _, text) = Intro();
+        var post = shell.Commands.Get(EditorCommands.CutscenePostInfinity);
+        editor.SetKeyboardPane(CutscenePane.Timeline);
+        Assert.False(post.CanExecute);
+        editor.SetKeyboardPane(CutscenePane.Curves);
+        Assert.True(post.CanExecute);
+        Assert.Equal([Gain], editor.InfinityCurves);
+        Assert.Equal(CurveInfinity.Constant, editor.Infinity(InfinitySide.Post));
+        post.Execute();
+        var linear = text.Replace("\t\tchannel gain\n", "\t\tchannel gain\n\t\t\tpost_infinity = linear\n");
+        Assert.Equal(linear, editor.Document.Text);
+        post.Execute();
+        Assert.Equal(text.Replace("\t\tchannel gain\n", "\t\tchannel gain\n\t\t\tpost_infinity = cycle\n"), editor.Document.Text);
+        shell.Commands.Get(EditorCommands.CutscenePreInfinity).Execute();
+        Assert.Equal(CurveInfinity.Linear, editor.Infinity(InfinitySide.Pre));
+        Assert.Equal(CurveInfinity.Cycle, editor.Infinity(InfinitySide.Post));
+        Assert.Equal(["Post-Infinity", "Post-Infinity", "Pre-Infinity"], editor.Document.History.TakeLast(3));
+        shell.Commands.Get("edit.undo").Execute();
+        shell.Commands.Get("edit.undo").Execute();
+        Assert.Equal(linear, editor.Document.Text);
+        // Oscillate, and after it constant again, which writes nothing.
+        editor.SetInfinity(InfinitySide.Post, CurveInfinity.Oscillate);
+        post.Execute();
         Assert.Equal(text, editor.Document.Text);
     }
 }

@@ -76,11 +76,20 @@ public sealed class CurveRow
 
     public double Max { get; init; }
 
-    /// <summary>The curve's value at a tick on the cutscene's time, clamped to its section, as the runtime samples it.</summary>
+    /// <summary>What the curve does before its first key, inside its section.</summary>
+    public CurveInfinity Pre { get; init; }
+
+    /// <summary>What the curve does after its last key, inside its section.</summary>
+    public CurveInfinity Post { get; init; }
+
+    /// <summary>
+    /// The curve's value at a tick on the cutscene's time, clamped to its section, as the runtime samples it, with its
+    /// infinity between the section's edges and its end keys.
+    /// </summary>
     public double ValueAt(int tick)
     {
         var local = Math.Clamp(tick, Start, End) - Start;
-        return Stepped ? CutsceneCurve.Step(Keys, local) : CutsceneCurve.Value(Keys, local);
+        return Stepped ? CutsceneCurve.Step(Keys, local, Pre, Post) : CutsceneCurve.Value(Keys, local, Pre, Post);
     }
 
     /// <summary>A value as it shows: itself, or normalized, from −1 at Min to 1 at Max, and 0 for a flat curve.</summary>
@@ -188,7 +197,8 @@ public sealed class CutsceneCurveLayout
             var label = $"{track?.Name ?? "track"} · {name}" + (sections > 1 ? $" ({section.Id})" : "");
             List<CurveKey> curve = [.. keys.Select(k => k.Key)];
             var isStepped = stepped?.Invoke(channel) == true;
-            var (min, max) = SpanOf(curve, isStepped);
+            var (pre, post) = CutsceneCurveEdits.InfinityOf(channel);
+            var (min, max) = SpanOf(curve, isStepped, end - start, pre, post);
             rows.Add(new CurveRow
             {
                 Path = path,
@@ -202,13 +212,16 @@ public sealed class CutsceneCurveLayout
                 Locked = CutsceneEdits.IsLocked(channel, locked),
                 Min = min,
                 Max = max,
+                Pre = pre,
+                Post = post,
             });
         }
         return new CutsceneCurveLayout(rows);
     }
 
-    // A curve's least and most value from its first key to its last: at its keys, and at even ticks between them.
-    static (double Min, double Max) SpanOf(List<CurveKey> keys, bool stepped)
+    // A curve's least and most value in its section: at its keys, at even ticks between them, and at even ticks from the
+    // section's edges to the end keys on a side whose infinity is not constant.
+    static (double Min, double Max) SpanOf(List<CurveKey> keys, bool stepped, int duration, CurveInfinity pre, CurveInfinity post)
     {
         double min = double.MaxValue, max = double.MinValue;
         foreach (var key in keys)
@@ -219,8 +232,17 @@ public sealed class CutsceneCurveLayout
         var last = keys[^1].Time;
         for (var i = 0; i <= SpanSamples && last > first && !stepped; i++)
         {
-            double v = CutsceneCurve.Value(keys, first + (int)((long)(last - first) * i / SpanSamples));
+            double v = CutsceneCurve.Value(keys, first + (int)((long)(last - first) * i / SpanSamples), pre, post);
             (min, max) = (Math.Min(min, v), Math.Max(max, v));
+        }
+        foreach (var (from, to) in (ReadOnlySpan<(int, int)>)[(pre == CurveInfinity.Constant ? first : 0, first), (last, post == CurveInfinity.Constant ? last : duration)])
+        {
+            for (var i = 0; i <= SpanSamples && to > from; i++)
+            {
+                var t = from + (int)((long)(to - from) * i / SpanSamples);
+                double v = stepped ? CutsceneCurve.Step(keys, t, pre, post) : CutsceneCurve.Value(keys, t, pre, post);
+                (min, max) = (Math.Min(min, v), Math.Max(max, v));
+            }
         }
         return (min, max);
     }
@@ -337,7 +359,8 @@ public sealed class CutsceneCurveLayout
 
     /// <summary>
     /// What F fits (see docs/editor/cutscene-editor.md#curves): the times and shown values of the selected keys, or with
-    /// none of them shown, of every curve over its keys. Null when there is no curve.
+    /// none of them shown, of every curve over its keys, and to its section's edge on a side whose infinity is not
+    /// constant. Null when there is no curve.
     /// </summary>
     public (int Start, int End, double Min, double Max)? FrameSpan(IReadOnlySet<string> selected, bool normalized)
     {
@@ -351,18 +374,20 @@ public sealed class CutsceneCurveLayout
         {
             return null;
         }
-        return (Rows.Min(r => r.TickOf(0)), Rows.Max(r => r.TickOf(r.Keys.Count - 1)),
+        return (Rows.Min(r => r.Pre == CurveInfinity.Constant ? r.TickOf(0) : r.Start),
+            Rows.Max(r => r.Post == CurveInfinity.Constant ? r.TickOf(r.Keys.Count - 1) : r.End),
             Rows.Min(r => r.Shown(r.Min, normalized)), Rows.Max(r => r.Shown(r.Max, normalized)));
     }
 
     /// <summary>
     /// A curve's points to draw across the time area's width: one sample at a whole tick for each pixel of its section
-    /// that is in view, and one at each end of what is in view, as the runtime would give them.
+    /// that is in view, and one at each end of what is in view, as the runtime would give them. A part, from and to on
+    /// the cutscene's time, limits them to it, as the curve editor draws the parts outside the keys apart.
     /// </summary>
-    public static IEnumerable<(double X, double Y)> Samples(CurveRow row, CurveView view, double width)
+    public static IEnumerable<(double X, double Y)> Samples(CurveRow row, CurveView view, double width, (int From, int To)? part = null)
     {
-        var from = Math.Max(row.Start, (int)Math.Floor(view.Time.At(0)));
-        var to = Math.Min(row.End, (int)Math.Ceiling(view.Time.At(width)));
+        var from = Math.Max(Math.Max(row.Start, part?.From ?? int.MinValue), (int)Math.Floor(view.Time.At(0)));
+        var to = Math.Min(Math.Min(row.End, part?.To ?? int.MaxValue), (int)Math.Ceiling(view.Time.At(width)));
         if (to < from)
         {
             yield break;

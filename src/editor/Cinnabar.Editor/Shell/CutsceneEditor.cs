@@ -816,6 +816,51 @@ public sealed class CutsceneEditor : IGraphEditor
     }
 
     /// <summary>
+    /// The channels whose infinity the Pre-Infinity and Post-Infinity commands and boxes set: the channels of the selected
+    /// keys, or with no key selected, every curve that the curve editor shows and does not hide. Each is one that the
+    /// runtime reads, on a track that is not locked.
+    /// </summary>
+    public IReadOnlyList<string> InfinityCurves
+    {
+        get
+        {
+            var ofKeys = _selection.Select(File.Find).Where(b => b?.Kind == CutsceneBlockKind.Key).Select(b => CutsceneFile.PathOf(b!.Parent!)).Distinct().ToList();
+            var channels = ofKeys.Count > 0 ? ofKeys : _shownCurves.Where(p => !_hiddenCurves.Contains(p));
+            return [.. channels.Where(p => File.Find(p) is { Kind: CutsceneBlockKind.Channel } c && !CutsceneEdits.IsLocked(c, _locked)
+                && CutsceneCurveEdits.KeysOf(c) != null)];
+        }
+    }
+
+    /// <summary>The infinity on a side that every one of <see cref="InfinityCurves"/> has, or null when they differ or there are none.</summary>
+    public CurveInfinity? Infinity(InfinitySide side)
+    {
+        var modes = InfinityCurves.Select(p => File.Find(p)!).Select(c => side == InfinitySide.Pre ? CutsceneCurveEdits.InfinityOf(c).Pre : CutsceneCurveEdits.InfinityOf(c).Post).Distinct().ToList();
+        return modes.Count == 1 ? modes[0] : null;
+    }
+
+    /// <summary>
+    /// Sets one side's infinity on <see cref="InfinityCurves"/>, as one undo entry. A curve that does not take the mode,
+    /// such as an audio track's pitch for any but constant, keeps its own. Nothing when no curve changes.
+    /// </summary>
+    public void SetInfinity(InfinitySide side, CurveInfinity mode)
+    {
+        var curves = InfinityCurves;
+        if (Document.InTransaction || curves.Count == 0)
+        {
+            return;
+        }
+        var label = side == InfinitySide.Pre ? "Pre-Infinity" : "Post-Infinity";
+        Own(() => Document.Edit(label, f => CutsceneCurveEdits.SetInfinity(f, curves, side, mode, _locked)));
+    }
+
+    /// <summary>Sets one side's infinity on <see cref="InfinityCurves"/> to the mode after the one they share, or after constant when they differ.</summary>
+    public void NextInfinity(InfinitySide side)
+    {
+        var count = Enum.GetValues<CurveInfinity>().Length;
+        SetInfinity(side, (CurveInfinity)(((int)(Infinity(side) ?? CurveInfinity.Constant) + 1) % count));
+    }
+
+    /// <summary>
     /// Adds a key to a channel's curve at a tick on the cutscene's time, with the curve's value there, as one undo entry,
     /// and selects it: a double-click on a curve.
     /// </summary>

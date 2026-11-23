@@ -17,6 +17,9 @@ public enum TangentMode
     Flatten,
 }
 
+/// <summary>The side of a curve that an infinity mode is for: before its first key, or after its last.</summary>
+public enum InfinitySide { Pre, Post }
+
 /// <summary>A side of a key: its in tangent, from the key before, or its out tangent, to the key after.</summary>
 public enum TangentSide
 {
@@ -46,6 +49,68 @@ public static class CutsceneCurveEdits
             keys.Add((block, key));
         }
         return keys;
+    }
+
+    /// <summary>The settings that hold a channel's infinity modes, before its first key and after its last.</summary>
+    public static readonly string[] InfinitySettings = ["pre_infinity", "post_infinity"];
+
+    /// <summary>The infinity modes' names, as the settings write them, in <see cref="CurveInfinity"/>'s order.</summary>
+    public static readonly string[] InfinityNames = ["constant", "linear", "cycle", "cycle_offset", "oscillate"];
+
+    /// <summary>
+    /// A channel's pre and post infinity, as the cooker reads them: constant without the setting, and constant for a
+    /// mode that it does not know, which the cooker reports.
+    /// </summary>
+    public static (CurveInfinity Pre, CurveInfinity Post) InfinityOf(CutsceneBlock channel)
+    {
+        CurveInfinity Read(string setting) =>
+            Array.IndexOf(InfinityNames, channel.Get(setting)) is var i and >= 0 ? (CurveInfinity)i : CurveInfinity.Constant;
+        return (Read(InfinitySettings[0]), Read(InfinitySettings[1]));
+    }
+
+    /// <summary>
+    /// Whether a channel can take an infinity mode, as the cooker checks: a channel of assets has no slope or change of
+    /// value, so no linear or offset mode, and an audio track's pitch is constant, since the sound's place is its
+    /// integral.
+    /// </summary>
+    public static bool TakesInfinity(CutsceneBlock channel, CurveInfinity mode)
+    {
+        if (mode == CurveInfinity.Constant)
+        {
+            return true;
+        }
+        if (channel.Name == "pitch" && CutsceneEdits.SectionOf(channel)?.Parent?.TrackKind == "audio")
+        {
+            return false;
+        }
+        var assets = channel.Children.Any(c => c.KeyValue?.StartsWith('$') == true);
+        return !(assets && mode is CurveInfinity.Linear or CurveInfinity.CycleOffset);
+    }
+
+    /// <summary>
+    /// Sets one side's infinity on channels: the setting, or none for constant, the default. It skips a channel on a
+    /// locked track, and one that does not take the mode (<see cref="TakesInfinity"/>). Whether the text changed.
+    /// </summary>
+    public static bool SetInfinity(CutsceneFile file, IEnumerable<string> channelPaths, InfinitySide side, CurveInfinity mode, IReadOnlySet<int>? locked = null)
+    {
+        var changed = false;
+        var setting = InfinitySettings[(int)side];
+        foreach (var path in channelPaths.Distinct())
+        {
+            if (file.Find(path) is not { Kind: CutsceneBlockKind.Channel } channel || CutsceneEdits.IsLocked(channel, locked)
+                || !TakesInfinity(channel, mode))
+            {
+                continue;
+            }
+            var text = mode == CurveInfinity.Constant ? null : InfinityNames[(int)mode];
+            if (channel.Get(setting) == text)
+            {
+                continue;
+            }
+            channel.Set(setting, text);
+            changed = true;
+        }
+        return changed;
     }
 
     /// <summary>A channel's keys as the runtime reads them, or null when one does not read.</summary>
@@ -171,7 +236,8 @@ public static class CutsceneCurveEdits
             return CutsceneFile.PathOf(there);
         }
         var curve = keys.Select(k => k.Key).ToList();
-        var value = stepped ? CutsceneCurve.Step(curve, tick) : CutsceneCurve.Value(curve, tick);
+        var (pre, post) = InfinityOf(channel);
+        var value = stepped ? CutsceneCurve.Step(curve, tick, pre, post) : CutsceneCurve.Value(curve, tick, pre, post);
         var text = stepped ? Math.Round(value).ToString(System.Globalization.CultureInfo.InvariantCulture) : CutsceneKeying.Format(value);
         var before = curve.LastOrDefault(k => k.Time < tick);
         var interpolation = stepped ? "constant" : curve.Any(k => k.Time < tick) && before.Interp is CurveInterp.Linear or CurveInterp.Constant

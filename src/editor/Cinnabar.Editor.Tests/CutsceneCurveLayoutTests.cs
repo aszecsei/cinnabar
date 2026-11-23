@@ -162,8 +162,37 @@ public sealed class CutsceneCurveLayoutTests
         // From 0 to 100000, one a pixel, and the end of the view.
         Assert.Equal(101, samples.Count);
         Assert.Equal(L.Gutter, samples[0].X, 9);
-        Assert.Equal(500 - 100 * CutsceneCurve.Value(row.Keys, 37000), samples[37].Y, 4);
+        Assert.Equal(500 - 100 * CutsceneCurve.Value(row.Keys, 37000, CurveInfinity.Constant, CurveInfinity.Constant), samples[37].Y, 4);
         // Past the section's end, nothing.
         Assert.Empty(CutsceneCurveLayout.Samples(row, View with { Time = new TimelineView(300000, 1000, TimelineZoom.Ticks) }, 100));
+    }
+
+    [Fact]
+    public void ACurvesInfinityShowsToItsSectionsEdgeAndCountsInItsSpanAndFraming()
+    {
+        // speed goes from -4 to 4 over 2 seconds with flat ends, and then repeats, each repeat 8 higher: 8 at 180000,
+        // halfway through the first repeat, and 12 at the section's end, 240000.
+        var file = Parse();
+        Assert.True(CutsceneCurveEdits.SetInfinity(file, [Speed], InfinitySide.Post, CurveInfinity.CycleOffset));
+        var row = CutsceneCurveLayout.Build(file, [Speed]).Rows[0];
+        Assert.Equal(CurveInfinity.CycleOffset, row.Post);
+        Assert.Equal(8, row.ValueAt(180000), 6);
+        Assert.Equal(12, row.ValueAt(240000), 6);
+        Assert.Equal(12, row.ValueAt(300000), 6);
+        Assert.Equal(-4, row.Min, 6);
+        Assert.Equal(12, row.Max, 6);
+        // F frames the repeats too, to the section's end.
+        Assert.Equal((0, 240000, -4.0, 12.0), CutsceneCurveLayout.Build(file, [Speed]).FrameSpan(new HashSet<string>(), false));
+        // The part after the last key samples from it to the section's end.
+        var after = CutsceneCurveLayout.Samples(row, View, 300, (120000, 240000)).ToList();
+        Assert.Equal(L.Gutter + 120, after[0].X, 9);
+        Assert.Equal(L.Gutter + 240, after[^1].X, 9);
+        Assert.Equal(500 - 100 * 8, after[60].Y, 4);
+        // A double-click on the repeat adds a key with its value there, constant after the constant key.
+        var hit = CutsceneCurveLayout.Build(file, [Speed]).HitTest(L.Gutter + 180, 500 - 800, View, new HashSet<string>());
+        Assert.Equal(CurveHitKind.Curve, hit.Kind);
+        Assert.Equal(180000, hit.Tick);
+        Assert.NotNull(CutsceneCurveEdits.AddKey(file, Speed, 180000));
+        Assert.Equal("key 180000 8 constant", file.Find($"{Speed}/key:2")!.LineTexts.Last().Trim());
     }
 }

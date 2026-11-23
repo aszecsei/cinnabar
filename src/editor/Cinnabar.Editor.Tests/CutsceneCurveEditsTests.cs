@@ -100,7 +100,7 @@ public sealed class CutsceneCurveEditsTests
         var curve = CutsceneCurveEdits.CurveOf(file.Find("section:1/channel:value")!)!;
         var path = CutsceneCurveEdits.AddKey(file, "section:1/channel:value", 30000);
         Assert.Equal("section:1/channel:value/key:1", path);
-        Assert.Equal($"key 30000 {CutsceneKeying.Format(CutsceneCurve.Value(curve, 30000))} auto", Key(file, 1));
+        Assert.Equal($"key 30000 {CutsceneKeying.Format(CutsceneCurve.Value(curve, 30000, CurveInfinity.Constant, CurveInfinity.Constant))} auto", Key(file, 1));
         // A key already there stays as it is.
         Assert.Equal("section:1/channel:value/key:2", CutsceneCurveEdits.AddKey(file, "section:1/channel:value", 60000));
         // A stepped field's new key is constant and whole.
@@ -122,7 +122,62 @@ public sealed class CutsceneCurveEditsTests
         var file = Parse();
         var curve = CutsceneCurveEdits.CurveOf(file.Find("section:1/channel:value")!)!;
         CutsceneEdits.Split(file, ["section:1"], 60000 + 90000);
-        Assert.Equal($"key 90000 {CutsceneKeying.Format(CutsceneCurve.Value(curve, 90000))} auto", file.Find("section:1/channel:value/key:2")!.LineTexts.Last().Trim());
-        Assert.NotEqual("3.5", CutsceneKeying.Format(CutsceneCurve.Value(curve, 90000)));
+        Assert.Equal($"key 90000 {CutsceneKeying.Format(CutsceneCurve.Value(curve, 90000, CurveInfinity.Constant, CurveInfinity.Constant))} auto", file.Find("section:1/channel:value/key:2")!.LineTexts.Last().Trim());
+        Assert.NotEqual("3.5", CutsceneKeying.Format(CutsceneCurve.Value(curve, 90000, CurveInfinity.Constant, CurveInfinity.Constant)));
+    }
+
+    [Fact]
+    public void AnInfinityIsAChannelSettingBeforeItsKeysAndConstantHasNone()
+    {
+        var file = Parse();
+        Assert.Equal((CurveInfinity.Constant, CurveInfinity.Constant), CutsceneCurveEdits.InfinityOf(file.Find("section:1/channel:value")!));
+        Assert.True(CutsceneCurveEdits.SetInfinity(file, ["section:1/channel:value"], InfinitySide.Post, CurveInfinity.CycleOffset));
+        Assert.True(CutsceneCurveEdits.SetInfinity(file, ["section:1/channel:value"], InfinitySide.Pre, CurveInfinity.Oscillate));
+        var set = Text.ReplaceLineEndings("\n").Replace("\t\tchannel value\n", "\t\tchannel value\n\t\t\tpost_infinity = cycle_offset\n\t\t\tpre_infinity = oscillate\n");
+        Assert.Equal(set, file.Text);
+        Assert.Equal((CurveInfinity.Oscillate, CurveInfinity.CycleOffset), CutsceneCurveEdits.InfinityOf(file.Find("section:1/channel:value")!));
+        // The same mode again changes nothing, and constant takes the setting away.
+        Assert.False(CutsceneCurveEdits.SetInfinity(file, ["section:1/channel:value"], InfinitySide.Pre, CurveInfinity.Oscillate));
+        Assert.True(CutsceneCurveEdits.SetInfinity(file, ["section:1/channel:value"], InfinitySide.Pre, CurveInfinity.Constant));
+        Assert.True(CutsceneCurveEdits.SetInfinity(file, ["section:1/channel:value"], InfinitySide.Post, CurveInfinity.Constant));
+        Assert.Equal(Text.ReplaceLineEndings("\n"), file.Text);
+        // A locked track keeps its own.
+        Assert.False(CutsceneCurveEdits.SetInfinity(file, ["section:1/channel:value"], InfinitySide.Post, CurveInfinity.Cycle, new HashSet<int> { 1 }));
+    }
+
+    [Fact]
+    public void APitchAndAChannelOfAssetsTakeOnlyTheModesThatTheCookerTakes()
+    {
+        var file = CutsceneFile.Parse("""
+            cutscene 1
+            length = 60000
+            track 1 audio "Music"
+            	section 1 0 60000
+            		asset = $0123456789abcdef0123456789abcdef
+            		channel pitch
+            			key 0 1 linear
+            		channel gain
+            			key 0 1 linear
+            track 2 property "Swap"
+            	binding = 1
+            	component = 7
+            	field = "material"
+            	section 2 0 60000
+            		channel value
+            			key 0 $0123456789abcdef0123456789abcdef constant
+            """.ReplaceLineEndings("\n")).File!;
+        var pitch = file.Find("section:1/channel:pitch")!;
+        var assets = file.Find("section:2/channel:value")!;
+        Assert.False(CutsceneCurveEdits.TakesInfinity(pitch, CurveInfinity.Cycle));
+        Assert.True(CutsceneCurveEdits.TakesInfinity(pitch, CurveInfinity.Constant));
+        Assert.True(CutsceneCurveEdits.TakesInfinity(file.Find("section:1/channel:gain")!, CurveInfinity.Linear));
+        Assert.False(CutsceneCurveEdits.TakesInfinity(assets, CurveInfinity.Linear));
+        Assert.False(CutsceneCurveEdits.TakesInfinity(assets, CurveInfinity.CycleOffset));
+        Assert.True(CutsceneCurveEdits.TakesInfinity(assets, CurveInfinity.Oscillate));
+        // Set on all three, the gain takes linear, and the others keep constant.
+        Assert.True(CutsceneCurveEdits.SetInfinity(file, ["section:1/channel:pitch", "section:1/channel:gain", "section:2/channel:value"], InfinitySide.Post, CurveInfinity.Linear));
+        Assert.Null(pitch.Get("post_infinity"));
+        Assert.Null(assets.Get("post_infinity"));
+        Assert.Equal("linear", file.Find("section:1/channel:gain")!.Get("post_infinity"));
     }
 }

@@ -442,7 +442,8 @@ public static class CutsceneEdits
         // A channel that the runtime reads takes the runtime's value at the cut.
         if (CutsceneCurveEdits.CurveOf(first) is { } curve && before?.Start != cut)
         {
-            value = CutsceneKeying.Format(CutsceneCurve.Value(curve, cut));
+            var (pre, post) = CutsceneCurveEdits.InfinityOf(first);
+            value = CutsceneKeying.Format(CutsceneCurve.Value(curve, cut, pre, post));
         }
         // The first half: the keys before the cut, and one at it.
         foreach (var key in keys.Where(k => k.Start > cut))
