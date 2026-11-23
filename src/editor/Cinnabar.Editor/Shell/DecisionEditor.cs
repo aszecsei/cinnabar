@@ -66,7 +66,7 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
     };
 
     readonly EditorShell _shell;
-    readonly HashSet<int> _selection = [];
+    readonly NodeSelection _selection = new();
     // The blackboard that the keys were last read from: its GUID and text, and the keys.
     (string? Guid, string? Text, IReadOnlyList<BlackboardKey> Keys) _board = (null, null, []);
     // The plan preview's goal and the start state's values that the user set, by planning key, and the last answer, with
@@ -118,7 +118,11 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
     /// <summary>The decision or its document's state changed.</summary>
     public event Action? Changed;
 
-    public event Action? SelectionChanged;
+    public event Action? SelectionChanged
+    {
+        add => _selection.Changed += value;
+        remove => _selection.Changed -= value;
+    }
 
     public event Action? ProblemsChanged;
 
@@ -144,10 +148,7 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
     void OnDocumentChanged()
     {
         // A node that undo or a delete took is no longer selected.
-        if (_selection.RemoveWhere(id => File.Find(id) == null) > 0)
-        {
-            SelectionChanged?.Invoke();
-        }
+        _selection.Prune(id => File.Find(id) != null);
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();
         if (!Document.InTransaction)
@@ -174,28 +175,10 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
 
     // Selection.
 
-    public void Select(IEnumerable<int> ids, SelectMode mode = SelectMode.Replace)
-    {
-        if (mode == SelectMode.Replace)
-        {
-            _selection.Clear();
-        }
-        foreach (var id in ids)
-        {
-            if (mode == SelectMode.Toggle && !_selection.Add(id))
-            {
-                _selection.Remove(id);
-            }
-            else
-            {
-                _selection.Add(id);
-            }
-        }
-        SelectionChanged?.Invoke();
-    }
+    public void Select(IEnumerable<int> ids, SelectMode mode = SelectMode.Replace) => _selection.Select(ids, mode);
 
     /// <summary>The selected node, when exactly one is.</summary>
-    public DecisionNode? SelectedNode => _selection.Count == 1 ? File.Find(_selection.First()) : null;
+    public DecisionNode? SelectedNode => _selection.One is { } id ? File.Find(id) : null;
 
     /// <summary>What a node is called on the canvas and in undo entries: its action's name, or its kind.</summary>
     public string Label(int id) => File.Find(id) switch
@@ -375,7 +358,7 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
 
     // Moving nodes.
 
-    public void BeginMove() => Document.Begin(_selection.Count == 1 ? $"Move {Label(_selection.First())}" : $"Move {_selection.Count} Nodes");
+    public void BeginMove() => _selection.BeginMove(Document, Label);
 
     /// <summary>Where the selected nodes' corners are now, which a drag's steps start from.</summary>
     public Dictionary<int, Vec2> MoveStarts()
@@ -393,13 +376,7 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
     }
 
     public void MoveSelected(IReadOnlyDictionary<int, Vec2> starts, Vec2 offset) =>
-        Document.Step(f =>
-        {
-            foreach (var (id, start) in starts)
-            {
-                f.Find(id)?.SetPosition(start.X + offset.X, start.Y + offset.Y);
-            }
-        });
+        NodeSelection.MoveSelected(Document, starts, offset, (f, id, at) => f.Find(id)?.SetPosition(at.X, at.Y));
 
     /// <summary>
     /// Ends a drag. The parents of the moved nodes order their children from left to right, as the tree runs them or a
@@ -407,13 +384,9 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
     /// </summary>
     public void EndMove(bool cancel = false)
     {
-        if (cancel)
+        if (cancel || !Document.InTransaction)
         {
-            Document.Cancel();
-            return;
-        }
-        if (!Document.InTransaction)
-        {
+            NodeSelection.EndMove(Document, cancel);
             return;
         }
         var geometry = Geometry();

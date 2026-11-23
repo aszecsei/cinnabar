@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Graphs;
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Tools;
@@ -16,7 +17,7 @@ public sealed record GraphProblem(int? Node, string Text, bool Error, int Line =
 /// cooks the unsaved text again for the preview, a moment after the last change. The view turns input into calls here,
 /// so tests can drive the editor without a window.
 /// </summary>
-public sealed class MaterialEditor : PreviewOwner, IGraphEditor
+public sealed class MaterialEditor : PreviewOwner, IGraphEditor, IGraphCanvasEditor
 {
     // The preview's camera starts here.
     const float StartYaw = 0.6f;
@@ -24,7 +25,7 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
     const float StartDistance = 1.9f;
     const float MaxDistance = 20f;
 
-    readonly HashSet<int> _selection = [];
+    readonly NodeSelection _selection = new();
 
     PreviewMesh _mesh = PreviewMesh.Sphere;
 
@@ -71,7 +72,11 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
     /// <summary>The graph or its document's state changed.</summary>
     public event Action? Changed;
 
-    public event Action? SelectionChanged;
+    public event Action? SelectionChanged
+    {
+        add => _selection.Changed += value;
+        remove => _selection.Changed -= value;
+    }
 
     /// <summary>A preview cook finished, with its problems.</summary>
     public event Action? ProblemsChanged;
@@ -83,10 +88,7 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
     void OnDocumentChanged()
     {
         // A node that undo or a delete took is no longer selected.
-        if (_selection.RemoveWhere(id => Document.Graph.Find(id) == null) > 0)
-        {
-            SelectionChanged?.Invoke();
-        }
+        _selection.Prune(id => Document.Graph.Find(id) != null);
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();
         if (!Document.InTransaction)
@@ -95,28 +97,10 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
         }
     }
 
-    public void Select(IEnumerable<int> nodes, SelectMode mode = SelectMode.Replace)
-    {
-        if (mode == SelectMode.Replace)
-        {
-            _selection.Clear();
-        }
-        foreach (var id in nodes)
-        {
-            if (mode == SelectMode.Toggle && !_selection.Add(id))
-            {
-                _selection.Remove(id);
-            }
-            else
-            {
-                _selection.Add(id);
-            }
-        }
-        SelectionChanged?.Invoke();
-    }
+    public void Select(IEnumerable<int> nodes, SelectMode mode = SelectMode.Replace) => _selection.Select(nodes, mode);
 
     /// <summary>The selected node, when exactly one is.</summary>
-    public GraphNode? SelectedNode => _selection.Count == 1 ? Document.Graph.Find(_selection.First()) : null;
+    public GraphNode? SelectedNode => _selection.One is { } id ? Document.Graph.Find(id) : null;
 
     /// <summary>Adds a node of a kind at a point of the canvas, selected. A parameter node can name its parameter.</summary>
     public int AddNode(string kind, double x, double y, string? parameter = null)
@@ -175,31 +159,22 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
     }
 
     /// <summary>A drag of the selected nodes: begin, a move per step by the drag's offset from its start, then end.</summary>
-    public void BeginMove() => Document.Begin(_selection.Count == 1 ? $"Move {Label(_selection.First())}" : $"Move {_selection.Count} Nodes");
+    public void BeginMove() => _selection.BeginMove(Document, Label);
+
+    /// <summary>Where the selected nodes' corners are now, which a drag's steps start from.</summary>
+    public Dictionary<int, Vec2> MoveStarts() =>
+        _selection.Select(Document.Graph.Find).OfType<GraphNode>().ToDictionary(n => n.Id, n => new Vec2(n.X, n.Y));
 
     public void MoveSelected(IReadOnlyDictionary<int, Vec2> starts, Vec2 offset) =>
-        Document.Step(g =>
+        NodeSelection.MoveSelected(Document, starts, offset, (g, id, at) =>
         {
-            foreach (var (id, start) in starts)
+            if (g.Find(id) is { } node)
             {
-                if (g.Find(id) is { } node)
-                {
-                    (node.X, node.Y) = (start.X + offset.X, start.Y + offset.Y);
-                }
+                (node.X, node.Y) = (at.X, at.Y);
             }
         });
 
-    public void EndMove(bool cancel = false)
-    {
-        if (cancel)
-        {
-            Document.Cancel();
-        }
-        else if (Document.InTransaction)
-        {
-            Document.Commit();
-        }
-    }
+    public void EndMove(bool cancel = false) => NodeSelection.EndMove(Document, cancel);
 
     /// <summary>Links an output to an input, which replaces what the input had. A link that would loop is refused.</summary>
     public bool Link(int from, string output, int to, string input)

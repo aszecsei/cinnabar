@@ -1,6 +1,9 @@
+using Avalonia;
+using Avalonia.Input;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Maths;
+using Cinnabar.Editor.Materials;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Tools;
 
@@ -241,6 +244,91 @@ public sealed class MaterialTests : IDisposable
         Assert.Equal([2, 3], geometry.InBox(new Vec2(-250, -170), new Vec2(-200, -30)).Order());
         Assert.False(GraphGeometry.CanLink(PinType.Texture, PinType.Float3));
         Assert.True(GraphGeometry.CanLink(PinType.Float4, PinType.Any));
+    }
+
+    // Where a point of the graph is in the canvas's view, which is where a press there lands.
+    static Point At(GraphCanvas canvas, Vec2 at)
+    {
+        var v = canvas.View.ToView(at);
+        return new Point(v.X, v.Y);
+    }
+
+    [Fact]
+    public void EscapeAndALostPointerCancelALinkDragOnTheCanvas()
+    {
+        using var shell = NewShell();
+        var editor = shell.OpenMaterial(shell.Assets.Find(MaterialGuid)!)!;
+        var canvas = new GraphCanvas(shell, editor);
+        var text = editor.Document.Text;
+        var geometry = editor.Geometry();
+        var roughness = geometry.Find(5)!;
+        var sample = geometry.Find(3)!;
+        var output = At(canvas, roughness.OutputAt(roughness.OutputIndex("value")));
+        var uv = At(canvas, sample.InputAt(sample.InputIndex("uv")));
+
+        // Escape during the drag cancels it, and the release on the input that follows links nothing.
+        Assert.True(canvas.Press(output, MouseButton.Left, KeyModifiers.None));
+        canvas.MovePointer(uv);
+        Assert.True(canvas.PressKey(Key.Escape, KeyModifiers.None));
+        canvas.Release(uv, KeyModifiers.None);
+        Assert.Equal(text, editor.Document.Text);
+        Assert.Empty(editor.Document.History);
+
+        // So does losing the pointer.
+        Assert.True(canvas.Press(output, MouseButton.Left, KeyModifiers.None));
+        canvas.MovePointer(uv);
+        canvas.LoseCapture();
+        canvas.Release(uv, KeyModifiers.None);
+        Assert.Equal(text, editor.Document.Text);
+
+        // The same drag, released, links the output to the input.
+        Assert.True(canvas.Press(output, MouseButton.Left, KeyModifiers.None));
+        canvas.MovePointer(uv);
+        canvas.Release(uv, KeyModifiers.None);
+        Assert.Equal(new GraphLink(5, "value"), editor.Document.Graph.Find(3)!.Get("uv"));
+        Assert.Single(editor.Document.History);
+    }
+
+    [Fact]
+    public void TheCanvasMovesSelectsAndDuplicatesNodesThroughTheSharedGestures()
+    {
+        using var shell = NewShell();
+        var editor = shell.OpenMaterial(shell.Assets.Find(MaterialGuid)!)!;
+        var canvas = new GraphCanvas(shell, editor);
+        var tint = editor.Geometry().Find(2)!.Bounds;
+        var body = At(canvas, new Vec2(tint.X + 90, tint.Y + 10));
+        var away = new Point(body.X + 30, body.Y + 20);
+
+        // A press on a node selects it, and a drag moves it by as much, in one entry that Escape puts back.
+        Assert.True(canvas.Press(body, MouseButton.Left, KeyModifiers.None));
+        Assert.Equal([2], editor.Selection);
+        canvas.MovePointer(away);
+        canvas.MovePointer(away);
+        Assert.True(editor.Document.InTransaction);
+        Assert.NotEqual(tint.X, editor.Document.Graph.Find(2)!.X);
+        Assert.True(canvas.PressKey(Key.Escape, KeyModifiers.None));
+        canvas.Release(away, KeyModifiers.None);
+        Assert.False(editor.Document.InTransaction);
+        Assert.Empty(editor.Document.History);
+
+        Assert.True(canvas.Press(body, MouseButton.Left, KeyModifiers.None));
+        // The first move past the slop begins the drag, and each move after it steps it.
+        canvas.MovePointer(away);
+        canvas.MovePointer(away);
+        canvas.Release(away, KeyModifiers.None);
+        Assert.Equal(["Move tint"], editor.Document.History);
+        Assert.Equal((tint.X + 30, tint.Y + 20), (editor.Document.Graph.Find(2)!.X, editor.Document.Graph.Find(2)!.Y));
+
+        // The second press of a double click takes nothing: no drag follows it.
+        Assert.False(canvas.Press(away, MouseButton.Left, KeyModifiers.None, clickCount: 2));
+
+        // Ctrl+D duplicates the selection, and a click on nothing clears it.
+        Assert.True(canvas.PressKey(Key.D, KeyModifiers.Control));
+        Assert.Equal("Duplicate tint", editor.Document.History[^1]);
+        Assert.DoesNotContain(2, editor.Selection);
+        Assert.True(canvas.Press(At(canvas, new Vec2(-2000, 0)), MouseButton.Left, KeyModifiers.None));
+        canvas.Release(At(canvas, new Vec2(-2000, 0)), KeyModifiers.None);
+        Assert.Empty(editor.Selection);
     }
 
     EditorShell NewShell()

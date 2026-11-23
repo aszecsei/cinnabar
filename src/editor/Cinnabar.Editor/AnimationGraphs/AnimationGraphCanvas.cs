@@ -309,7 +309,7 @@ public sealed class AnimationGraphCanvas : NodeGraphCanvas
         }
     }
 
-    protected override CanvasPress PressAt(Vec2 at, KeyModifiers modifiers)
+    protected override CanvasPress PressAt(Vec2 at, KeyModifiers modifiers, int clickCount)
     {
         var hit = _geometry.HitTest(at, View.Zoom);
         _dragEnd = at;
