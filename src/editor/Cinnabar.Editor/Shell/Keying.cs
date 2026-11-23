@@ -15,7 +15,7 @@ public sealed record KeyButton(KeyState State, string? Refusal, string Tip);
 /// override holds is keyed as the world shows it, which the game sends with the values; the document's value is the
 /// value of a field that nothing holds.
 /// </summary>
-public sealed class Keying
+public sealed partial class Keying
 {
     readonly EditorShell _shell;
 
@@ -29,6 +29,8 @@ public sealed class Keying
 
     internal void Raise()
     {
+        // Values over the preview go with the session, the playhead or the text that they were set or keyed at.
+        _shell.PreviewValues.Follow();
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();
     }
@@ -102,6 +104,12 @@ public sealed class Keying
         if (TargetOf(handle, component, field) is { } target && StateOf(handle, component, field) is { Refusal: null })
         {
             Edit($"Key {FieldValues.Humanize(field.Name)}", file => SetKeys(file, handle, target, TrackName(target, field)));
+            // Values over the preview of this field alone are keyed now, and stay until the preview shows the key.
+            if (_shell.PreviewValues.State is PreviewValuesState.Holding holding
+                && holding.Values.Keys.All(k => k.Handle == handle && k.Component == component && k.Field == field.Name))
+            {
+                _shell.PreviewValues.Keyed();
+            }
         }
     }
 
@@ -296,9 +304,11 @@ public sealed class Keying
         {
             return (null, null);
         }
-        var held = type.Fields.Any(f => _shell.World.IsHeld(handle, component, Fnv.Hash64(System.Text.Encoding.UTF8.GetBytes(f.Name))));
-        var shown = document;
-        if (held)
+        // Values over the preview are the editor's own, so their component needs no word from the game.
+        var overlay = _shell.PreviewValues.ComponentOf(handle, component);
+        var held = overlay != null || ComponentHeld(handle, component, type);
+        var shown = overlay ?? document;
+        if (held && overlay == null)
         {
             if (Fresh(handle) is { } wait)
             {
@@ -317,7 +327,12 @@ public sealed class Keying
         var part = ((KeyTarget.Pose)target).Part;
         if (CutsceneKeying.OriginOf(file, target) is { } originMeters)
         {
-            // An absolute track keys the world's pose: a child's composed Transform.
+            // An absolute track keys the world's pose: a child's composed Transform, which the game composes, so values
+            // over a child's Local_Transform key once the world shows them.
+            if (overlay != null && node.Parent != 0 && _shell.World.ShownPreviewOf(handle)?.Values != _shell.PreviewValues.Serial)
+            {
+                return (null, "Waiting for the preview to show the values.");
+            }
             if (WorldPose(handle, held) is not { } world)
             {
                 return (null, null);
@@ -367,7 +382,8 @@ public sealed class Keying
         {
             return null;
         }
-        var shown = held != false ? _shell.World.ShownOf(handle, SceneEdits.TransformId) : null;
+        var shown = _shell.PreviewValues.ComponentOf(handle, SceneEdits.TransformId)
+            ?? (held != false ? _shell.World.ShownOf(handle, SceneEdits.TransformId) : null);
         var bytes = shown ?? values.Components.FirstOrDefault(c => c.Id == SceneEdits.TransformId)?.Data;
         if (bytes == null || type.Fields.FirstOrDefault(f => f.Name == "position") is not { } position
             || type.Fields.FirstOrDefault(f => f.Name == "rotation") is not { } rotation
@@ -395,6 +411,12 @@ public sealed class Keying
         {
             return "Waiting for the preview to show the playhead.";
         }
+        // Values over the preview from before the last were dropped may still show in fields that the editor does not
+        // hold now.
+        if (!_shell.PreviewValues.Shows(shown.Values))
+        {
+            return "Waiting for the preview to show the values.";
+        }
         // The world must show the cutscene as the tab has it: its unsaved text's blob, or the saved file unchanged.
         if (open.Unsaved ? shown.Blob == 0 || shown.Blob != open.Editor.CleanBlob : open.Editor.Document.IsDirty)
         {
@@ -402,6 +424,12 @@ public sealed class Keying
         }
         return null;
     }
+
+    // Whether something in the world holds a field of an entity's component, so the world may show another value.
+    bool ComponentHeld(ulong handle, ulong component, ComponentType type) =>
+        type.Fields.Any(f => _shell.World.IsHeld(handle, component, Hash(f.Name)));
+
+    static ulong Hash(string field) => Fnv.Hash64(System.Text.Encoding.UTF8.GetBytes(field));
 
     static bool Same(KeyTarget target, IReadOnlyList<double?> keys, IReadOnlyList<double> values)
     {

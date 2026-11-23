@@ -211,6 +211,10 @@ public sealed class PropertiesView : ScrollViewer
             var fields = type.Fields.Select(f =>
             {
                 var editor = editable ? FieldEditor.ForComponent(_shell, document!.Id, id, f) : null;
+                if (editor != null)
+                {
+                    editor.Sink = _shell.Keying.Sink(new Dictionary<ulong, ulong> { [document!.Id] = node.Handle }, id, f);
+                }
                 var isSet = editor != null ? ComponentSet(document!.Id, id, f) : null;
                 return FieldRow.Of(owner, f, editor, isSet, () => editor?.Reset()) with
                 {
@@ -308,13 +312,15 @@ public sealed class PropertiesView : ScrollViewer
         {
             if (_world.Type(component.Id) is { } type)
             {
-                _grid.ShowComponent(component.Id.ToString("x16"), type, component.Data, ReferenceOf);
+                // While a cutscene holds the preview, a held field's edits go there, so its row shows what the world shows.
+                var data = _shell.Keying.ShownComponent(_selection.Entity, component.Id) ?? component.Data;
+                _grid.ShowComponent(component.Id.ToString("x16"), type, data, ReferenceOf);
                 if (component.Id == CinematicCameraText.CinematicCameraId && _lens != null)
                 {
                     _lens.Text = CinematicCameraText.Describe(type.Fields, component.Data);
                 }
                 var entity = _selection.Entity;
-                _grid.ShowHeld(component.Id.ToString("x16"), type, field => _world.IsHeld(entity, component.Id, Fnv.Hash64(Encoding.UTF8.GetBytes(field.Name))));
+                _grid.ShowHeld(component.Id.ToString("x16"), type, field => IsHeld(entity, component.Id, field), _shell.Keying.Cutscene != null);
             }
         }
         _grid.ShowKeys();
@@ -334,6 +340,12 @@ public sealed class PropertiesView : ScrollViewer
             }
         }
     }
+
+    // Whether the world shows another value of a field than the document's: an override or the preview holds it, or a
+    // value over the preview sets it.
+    bool IsHeld(ulong entity, ulong component, Link.Protocol.FieldInfo field) =>
+        _world.IsHeld(entity, component, Fnv.Hash64(Encoding.UTF8.GetBytes(field.Name)))
+        || _shell.PreviewValues.ValueOf(entity, component, field.Name) != null;
 
     // What decides the panel's controls: the entity, its components, its behaviours, how each of their fields shows,
     // what the document has of them, and the host's problems with it. Values do not.

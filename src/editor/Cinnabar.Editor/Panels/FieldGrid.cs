@@ -245,18 +245,23 @@ sealed class FieldGrid(EditorShell shell)
     }
 
     /// <summary>
-    /// Marks the fields of an owner that an override holds in the game's world (see docs/editor/link.md#overrides). Their
-    /// rows show the document's value, and the world shows another.
+    /// Marks the fields of an owner that an override or the cutscene's preview holds in the game's world (see
+    /// docs/editor/link.md#overrides). Their rows show the document's value, and the world shows another; while a
+    /// cutscene holds the preview, they show the world's, and their edits go to the cutscene (see
+    /// docs/editor/cutscene-editor.md#where-an-edit-goes).
     /// </summary>
-    public void ShowHeld(string owner, Link.Protocol.ComponentType type, Func<Link.Protocol.FieldInfo, bool> isHeld)
+    public void ShowHeld(string owner, Link.Protocol.ComponentType type, Func<Link.Protocol.FieldInfo, bool> isHeld, bool cutscene = false)
     {
+        var why = cutscene
+            ? "The cutscene's preview holds this field, and this is what the world shows. An edit sets a value over the preview, or with auto-key on, a key. The scene does not change."
+            : "A preview holds this field in the world, which shows another value. This is the scene's.";
         foreach (var field in type.Fields)
         {
             if (_names.TryGetValue((owner, field.Name), out var name))
             {
                 var held = isHeld(field);
                 name.Name.Classes.Set("held", held);
-                ToolTip.SetTip(name.Name, held ? $"{name.Tip}\nA preview holds this field in the world, which shows another value. This is the scene's." : name.Tip);
+                ToolTip.SetTip(name.Name, held ? $"{name.Tip}\n{why}" : name.Tip);
             }
         }
     }

@@ -121,7 +121,7 @@ public sealed class KeyingTests : IDisposable
             world.Add(new ComponentValue(LightId, Lamp(s.Brightness ?? brightness)));
         }
         shell.OnGameMessage(new EntityValues(Door, [new ComponentValue(SceneEdits.TransformId, pose), new ComponentValue(LightId, Lamp(brightness))], [],
-            [.. held], [.. world], shown?.Stamp ?? new ShownPreview(0, 0, 0)));
+            [.. held], [.. world], shown?.Stamp ?? new ShownPreview(0, 0, 0, 0)));
     }
 
     static KeyState? State(EditorShell shell) => shell.Keying.StateOf(Door, LightId, Brightness)?.State;
@@ -145,23 +145,23 @@ public sealed class KeyingTests : IDisposable
         Assert.Contains("\t\t\tkey 0 2 auto", editor.Document.Text.Split('\n'));
 
         // The world shows the saved cutscene, not the key: the key holds until the preview plays the edit.
-        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(ticket, 0, 0)));
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(ticket, 0, 0, 0)));
         Assert.Equal(KeyState.Keyed, State(shell));
         Assert.Contains("last edit", shell.Keying.StateOf(Door, LightId, Brightness)!.Refusal);
 
         // The text cooks clean, and the preview plays its blob, where the world shows another value at the playhead.
         var (unsaved, blob) = Cooked(shell, editor);
-        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(unsaved, 0, blob)));
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(unsaved, 0, blob, 0)));
         Assert.Equal(KeyState.Differs, State(shell));
         Assert.Null(shell.Keying.StateOf(Door, LightId, Brightness)!.Refusal);
 
         // What the world showed at another time is not the playhead's: the key holds, and a key must wait.
-        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(unsaved, 2000, blob)));
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(unsaved, 2000, blob, 0)));
         Assert.Equal(KeyState.Keyed, State(shell));
         Assert.NotNull(shell.Keying.StateOf(Door, LightId, Brightness)!.Refusal);
 
         // An edit that has not cooked yet is not what the world shows either.
-        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(unsaved, 0, blob)));
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(unsaved, 0, blob, 0)));
         editor.Document.Edit("Rename", f => f.Find("track:1")!.SetName("Glow"));
         Assert.Contains("last edit", shell.Keying.StateOf(Door, LightId, Brightness)!.Refusal);
         var before = editor.Document.Text;
@@ -190,7 +190,7 @@ public sealed class KeyingTests : IDisposable
         var (shell, editor, ticket) = NewShell();
         using var _ = shell;
         var target = new KeyTarget.Property(1, LightId, "brightness", PropertyShape.Number);
-        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(ticket, 0, 0)));
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(ticket, 0, 0, 0)));
 
         editor.SetPlayhead(2000);
         var before = editor.Document.Text;
@@ -198,7 +198,7 @@ public sealed class KeyingTests : IDisposable
         Assert.Equal(before, editor.Document.Text);
         Assert.Contains("Waiting", shell.Keying.StateOf(Door, LightId, Brightness)!.Refusal);
 
-        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 4, new ShownPreview(ticket, 2000, 0)));
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 4, new ShownPreview(ticket, 2000, 0, 0)));
         shell.Keying.Key(Door, LightId, Brightness);
         Assert.Equal([4.0], CutsceneKeying.KeysAt(editor.File, target, 2000));
 
@@ -219,7 +219,7 @@ public sealed class KeyingTests : IDisposable
         // The door stands at 1 m, turned 90° about y. The preview shows it 2 m on along its own x, turned 30° more.
         var own = Yaw(90);
         var moved = own.Rotate(new Vec3(2, 0, 0));
-        Values(shell, Pose([1, 0, 0], own), 2, (Pose([1 + moved.X, moved.Y, moved.Z], own * Yaw(30), 2), null, new ShownPreview(ticket, 0, 0)));
+        Values(shell, Pose([1, 0, 0], own), 2, (Pose([1 + moved.X, moved.Y, moved.Z], own * Yaw(30), 2), null, new ShownPreview(ticket, 0, 0, 0)));
 
         shell.Commands.Get(EditorCommands.CutsceneKeyTransform).Execute();
 
@@ -370,7 +370,7 @@ public sealed class KeyingTests : IDisposable
         var (shell, editor, ticket) = NewShell(rangeEnd: 300000);
         using var _ = shell;
         editor.SetPlayhead(400000);
-        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(ticket, 300000, 0)));
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(ticket, 300000, 0, 0)));
 
         Assert.Null(shell.Keying.StateOf(Door, LightId, Brightness)!.Refusal);
         shell.Keying.Key(Door, LightId, Brightness);
@@ -418,7 +418,135 @@ public sealed class KeyingTests : IDisposable
 
         Assert.Equal("Ctrl+K", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneKeyTransform));
         Assert.Equal("Ctrl+Shift+K", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneKeyTrackedFields));
+        Assert.Equal("Alt+K", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneAutoKey));
+        Assert.Equal("Alt+Shift+K", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneAutoKeyAddTracks));
+        Assert.Equal("Enter", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneKeyPreviewValues));
         Assert.Equal("K", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneShuttlePause));
         Assert.Empty(shell.KeyBindings.Warnings);
+    }
+
+    // The cutscene with the door's brightness keyed at 2 at 0 s, as a held field.
+    const string Glowing = Cutscene + "track 1 property \"Brightness\"\n\tbinding = 1\n\tcomponent = 160\n\tfield = \"brightness\"\n"
+        + "\tsection 1 0 600000\n\t\tchannel value\n\t\t\tkey 0 2 auto\n";
+
+    // A field editor of the door's brightness, as the properties panel makes it, with what the world shows.
+    static FieldEditor BrightnessEditor(EditorShell shell, double shown)
+    {
+        var editor = FieldEditor.ForComponent(shell, 1, LightId, Brightness)!;
+        editor.Sink = shell.Keying.Sink(new Dictionary<ulong, ulong> { [1] = Door }, LightId, Brightness);
+        editor.Current = SceneEdits.Floats(shown);
+        return editor;
+    }
+
+    [Fact]
+    public void WithAutoKeyAFieldDragOfABoundEntityIsOneKeyAndTheSceneStaysClean()
+    {
+        var (shell, editor, _) = NewShell();
+        using var _ = shell;
+        shell.Commands.Get(EditorCommands.CutsceneAutoKey).Execute();
+        shell.Commands.Get(EditorCommands.CutsceneAutoKeyAddTracks).Execute();
+        Assert.True(shell.Keying.AutoKeyShows);
+        var field = BrightnessEditor(shell, 2);
+        Assert.IsType<FieldRoute.Key>(field.Sink!.Route);
+
+        field.BeginScrub(-1);
+        field.SetNumbers([3]);
+        field.SetNumbers([5]);
+        // The drag's steps show over the preview at once, as the cutscene does not cook them.
+        var shown = _sent.OfType<CutscenePreviewValues>().Last();
+        Assert.Equal(5.0, Assert.Single(shown.Fields).Value.Floats[0]);
+        field.EndScrub();
+
+        var target = new KeyTarget.Property(1, LightId, "brightness", PropertyShape.Number);
+        Assert.Equal([5.0], CutsceneKeying.KeysAt(editor.File, target, 0));
+        Assert.Equal(["Drag Brightness"], editor.Document.History);
+        Assert.False(shell.Scene!.IsDirty);
+        Assert.Empty(shell.Scene.History);
+        Assert.Equal(new UndoTarget.Cutscene(editor), shell.LastEdited);
+        // The values stay until the preview shows the key.
+        Assert.IsType<PreviewValuesState.Settling>(shell.PreviewValues.State);
+
+        // A typed value keys too, in one entry.
+        Assert.True(field.Commit(0, "7"));
+        Assert.Equal([7.0], CutsceneKeying.KeysAt(editor.File, target, 0));
+        Assert.Equal(2, editor.Document.History.Count);
+        Assert.Empty(shell.Scene.History);
+    }
+
+    [Fact]
+    public void WithoutAutoKeyAHeldFieldsEditShowsOverThePreviewUntilAScrubDropsItOrEnterKeysIt()
+    {
+        var (shell, editor, ticket) = NewShell(Glowing);
+        using var _ = shell;
+        var target = new KeyTarget.Property(1, LightId, "brightness", PropertyShape.Number);
+        // The preview holds the brightness, at its key's value; the document's is 1.
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 1, (null, 2, new ShownPreview(ticket, 0, 0, 0)));
+        Assert.Equal(new byte[] { 0, 0, 0, 64 }, shell.Keying.ShownComponent(Door, LightId));
+        var field = BrightnessEditor(shell, 2);
+        Assert.IsType<FieldRoute.Preview>(field.Sink!.Route);
+        var original = editor.Document.Text;
+
+        Assert.True(field.Commit(0, "6"));
+        var values = _sent.OfType<CutscenePreviewValues>().Last();
+        Assert.Equal((ticket, 0), (values.Ticket, values.Tick));
+        Assert.Equal(6.0, Assert.Single(values.Fields).Value.Floats[0]);
+        Assert.Equal(original, editor.Document.Text);
+        Assert.Empty(shell.Scene!.History);
+        // The world shows the value: the button says it differs from the key, and the row shows it.
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 1, (null, 6, new ShownPreview(ticket, 0, 0, values.Serial)));
+        Assert.Equal(KeyState.Differs, State(shell));
+        Assert.Equal(6f, BinaryPrimitives.ReadSingleLittleEndian(shell.Keying.ShownComponent(Door, LightId)));
+
+        // A scrub away drops it: the game hears that, and nothing was written.
+        editor.SetPlayhead(2000);
+        var cleared = _sent.OfType<CutscenePreviewValues>().Last();
+        Assert.Empty(cleared.Fields);
+        Assert.Empty(cleared.Transforms);
+        Assert.IsType<PreviewValuesState.Empty>(shell.PreviewValues.State);
+        Assert.Equal(original, editor.Document.Text);
+        Assert.Empty(shell.Scene.History);
+        Assert.False(shell.Scene.IsDirty);
+
+        // Back at the key, a new value waits for Enter, which keys it as one entry.
+        editor.SetPlayhead(0);
+        shell.CutscenePreview.Flush();
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 1, (null, 2, new ShownPreview(ticket, 0, 0, 0)));
+        Assert.True(field.Commit(0, "4"));
+        var key = shell.Commands.Get(EditorCommands.CutsceneKeyPreviewValues);
+        Assert.True(key.CanExecute);
+        key.Execute();
+        Assert.Equal([4.0], CutsceneKeying.KeysAt(editor.File, target, 0));
+        Assert.Equal(["Key Preview Values"], editor.Document.History);
+        Assert.IsType<PreviewValuesState.Settling>(shell.PreviewValues.State);
+        Assert.Empty(shell.Scene.History);
+    }
+
+    [Fact]
+    public void AHeldFieldNeverGoesToTheScene()
+    {
+        var (shell, editor, ticket) = NewShell(Glowing);
+        using var _ = shell;
+        var field = BrightnessEditor(shell, 2);
+        // Nothing holds it yet, so it is the scene's, as before.
+        Assert.IsType<FieldRoute.Scene>(field.Sink!.Route);
+
+        // While the preview plays, an edit of a held field goes nowhere, and says why.
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 1, (null, 2, new ShownPreview(ticket, 0, 0, 0)));
+        shell.CutscenePreview.PlayPause();
+        Assert.Contains("Pause", Assert.IsType<FieldRoute.Refused>(field.Sink.Route).Why);
+        Assert.False(field.Commit(0, "6"));
+        Assert.Empty(shell.Scene!.History);
+        Assert.Empty(_sent.OfType<CutscenePreviewValues>());
+
+        // Paused at another time, it waits for the world to show the playhead.
+        shell.CutscenePreview.PlayPause();
+        editor.SetPlayhead(4000);
+        Assert.Contains("Waiting", Assert.IsType<FieldRoute.Refused>(field.Sink.Route).Why);
+
+        // With auto-key on, a field with no track and no add tracks is the scene's.
+        shell.Keying.AutoKey = true;
+        var other = FieldEditor.ForComponent(shell, 1, SceneEdits.TransformId, Transform.Fields[2])!;
+        Assert.IsType<FieldRoute.Scene>(shell.Keying.Route([Door], SceneEdits.TransformId, Transform.Fields[2]));
+        Assert.NotNull(other);
     }
 }
