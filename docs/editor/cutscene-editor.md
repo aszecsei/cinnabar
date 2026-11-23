@@ -467,7 +467,7 @@ These commands act on the active cutscene, or on the cutscene that holds the pre
   - entities that the game spawned;
   - entities of a scene that has no GUID yet.
 
-  An entity dragged from the Outliner onto the timeline is possessed too. If the entity is in the selection, the whole selection is possessed. In a scene view, a drag that starts on a selected entity drags it to the timeline in the same way. While a cutscene's tab is open, the view picks under each press. A drag is a box select, as before, in these conditions:
+  An entity dragged from the Outliner onto the timeline is possessed too. If the entity is in the selection, the whole selection is possessed. In a scene view, a drag that starts on a selected entity drags it to the timeline in the same way. While a cutscene's tab is active or holds the preview, the view picks under each press. Only the entity in front counts, as for a click. A drag is a box select, as before, in these conditions:
   - the pick has not answered when the pointer moves;
   - the pick found no selected entity.
 - **Spawn.** A prefab dragged from the content browser onto the timeline adds a binding that spawns the prefab, with the prefab's name. Some files make a prefab, for example a USD stage. A drop of such a file spawns its prefab, as a drop in the viewport places it.
@@ -485,7 +485,7 @@ These commands act on the active cutscene, or on the cutscene that holds the pre
   - the binding does not possess: to point it at an entity is a [convert](#convert);
   - another binding possesses the entity, or it is a slot's stand-in.
 - **Fix a broken binding.** The details strip of a broken possessed binding has these items:
-  - **Pick** arms a pick (`CutsceneEditor.Picking`). The next entity that you select in the viewport or the Outliner becomes the binding's, as one undo entry, and the row stays selected. The Outliner works without the game. Esc, in the viewport or the tab, cancels the pick. Another row cancels it too. The selection is the shell's, so the shell holds the one pick, with its cutscene. Another cutscene's tab, or the close of the pick's own tab, cancels it, and a pick armed in one cutscene ends any other.
+  - **Pick** arms a pick (`CutsceneEditor.Picking`). The next entity that you select in the viewport or the Outliner becomes the binding's, as one undo entry, and the row stays selected. An entity that another binding has, or that is a slot's stand-in, does not become the binding's: the pick stays armed, and the row stays selected. The Outliner works without the game. Esc, in the viewport or the tab, cancels the pick. Another row cancels it too. The selection is the shell's, so the shell holds the one pick, with its cutscene. Another cutscene's tab, or the close of the pick's own tab, cancels it, and a pick armed in one cutscene ends any other.
   - A button for each entity of the open scenes that has the binding's name, up to eight (`CutsceneEditor.CandidatesOf`). A new binding has its entity's name, so these are the entities that have the old name. A button rebinds to its entity.
 - **Delete.** Delete, while the timeline has the keyboard and a binding's row is selected, removes the binding and its tracks as one undo entry. A row that the filter hides is not deleted.
   - If the binding has tracks, the editor asks first (`EditorShell.AskDeleteBinding`). The main window answers with a dialog.

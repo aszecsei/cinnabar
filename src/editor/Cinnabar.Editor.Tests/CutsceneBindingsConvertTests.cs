@@ -233,6 +233,30 @@ public sealed class CutsceneBindingsConvertTests : IDisposable
     }
 
     [Fact]
+    public void AnEntityThatAnotherBindingHasLeavesThePickArmedAndANewSlotHasNoOldStandIn()
+    {
+        var broken = Possessed.Replace("0000000000000003\n", "0000000000000009\n", StringComparison.Ordinal);
+        var (shell, editor) = NewShell(broken);
+        using var _ = shell;
+        // A slot that was deleted had a stand-in, which stays for an undo. A new slot with its ID starts with none.
+        editor.SetStandIn(2, $"@{SceneGuid}/0000000000000004");
+        editor.AddSlot("Guard");
+        Assert.Null(editor.StandInOf(2));
+        editor.SetStandIn(2, $"@{SceneGuid}/0000000000000001");
+
+        editor.Select(Binding(editor, 1));
+        editor.ArmPick();
+        shell.Selection.Set([Door]);
+        Assert.Equal(new BindingPick(1), editor.Picking);
+        Assert.Equal([CutsceneFile.PathOf(Binding(editor, 1))], editor.SelectedPaths);
+        Assert.Equal(["Add Script Slot"], editor.Document.History);
+
+        shell.Selection.Set([Lamp]);
+        Assert.Null(editor.Picking);
+        Assert.Equal(["Add Script Slot", "Rebind"], editor.Document.History);
+    }
+
+    [Fact]
     public void AnArmedPickEndsWhenAnotherRowIsSelected()
     {
         var broken = Possessed.Replace("0000000000000003\n", "0000000000000009\n", StringComparison.Ordinal);

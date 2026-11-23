@@ -25,7 +25,24 @@ public sealed partial class CutsceneEditor
     /// The text that the preview cooks: the document's, with each script slot's stand-in in place of its
     /// <c>provided = true</c> (see <see cref="CutsceneStandIns.PreviewText"/>).
     /// </summary>
-    public string CookText => CutsceneStandIns.PreviewText(Document.Text, _standIns);
+    public string CookText
+    {
+        get
+        {
+            // The keying's waits read it often, so the text is made again only when the document or a stand-in changes.
+            var text = Document.Text;
+            if (_cookText is not { } made || !string.Equals(made.Source, text, StringComparison.Ordinal) || made.StandIns != _standInsVersion)
+            {
+                made = (text, _standInsVersion, CutsceneStandIns.PreviewText(text, _standIns));
+                _cookText = made;
+            }
+            return made.Text;
+        }
+    }
+
+    // The last CookText, with the document's text and the stand-ins' version that it was made from.
+    (string Source, int StandIns, string Text)? _cookText;
+    int _standInsVersion;
 
     /// <summary>A script slot's stand-in, as <c>@&lt;guid&gt;/&lt;id&gt;</c> or <c>$&lt;guid&gt;</c>, or null for none.</summary>
     public string? StandInOf(int binding) => _standIns.GetValueOrDefault(binding);
@@ -48,6 +65,7 @@ public sealed partial class CutsceneEditor
         {
             _standIns[binding] = standIn;
         }
+        _standInsVersion++;
         SaveView();
         _cook.Schedule();
         _entityBindings = BindingsOfEntities(_shell.Selection.Entities);
@@ -111,6 +129,8 @@ public sealed partial class CutsceneEditor
         }
         var id = 0;
         Key("Add Script Slot", f => id = CutsceneBindings.AddProvided(f, name));
+        // A deleted slot's stand-in stays for an undo, and a new slot can take its ID: the new one starts with none.
+        SetStandIn(id, null);
         SelectBindings([id]);
     }
 
@@ -300,12 +320,18 @@ public sealed partial class CutsceneEditor
         }
     }
 
-    // While a pick is armed, a newly selected entity that a scene names becomes the binding's, and the pick ends.
+    // While a pick is armed, a newly selected entity that a scene names becomes the binding's, and the pick ends. One that
+    // another binding has does not: the pick stays armed, and so does its row's selection. True when the pick took the
+    // selection, so the row sync leaves it.
     bool TakePick(IReadOnlyList<ulong> next)
     {
         if (Picking is not { } pick || next is not [var handle] || _shell.Keying.PossessOf(handle) is not { } entity)
         {
             return false;
+        }
+        if (BindingOfEntity(entity) is { } other && other != pick.Binding)
+        {
+            return true;
         }
         SetPicking(null);
         RebindTo(pick.Binding, entity);

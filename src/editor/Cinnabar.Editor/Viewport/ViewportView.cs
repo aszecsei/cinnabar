@@ -92,9 +92,9 @@ public sealed class ViewportView : Grid
     int _dragGeneration;
     // Where the last pick under a prefab drag put the prefab, which a Ctrl drop spawns a cutscene's binding at.
     long[]? _dropPoint;
-    // A click's press while a cutscene is open and entities are selected: the pick under it, which a drag that starts on
-    // a selected entity turns into a drag of the entity to the timeline. Null for none. Each press has its number, so an
-    // answer to an earlier press does nothing.
+    // A click's press while a cutscene's tab is active or holds the preview, and entities are selected: the pick under
+    // it, which a drag that starts on a selected entity turns into a drag of the entity to the timeline. Null for none.
+    // Each press has its number, so an answer to an earlier press does nothing.
     PressPick? _pressPick;
     int _presses;
 
@@ -760,12 +760,12 @@ public sealed class ViewportView : Grid
         EndGesture();
     }
 
-    // Picks under a click's press while a cutscene's tab is open and entities are selected, so a drag from a selected
-    // entity can take it to the timeline (see docs/editor/cutscene-editor.md#possess-and-spawn).
+    // Picks under a click's press while a cutscene's tab is active or holds the preview, and entities are selected, so a
+    // drag from a selected entity can take it to the timeline (see docs/editor/cutscene-editor.md#possess-and-spawn).
     void PickUnderPress(Point position, PointerPressedEventArgs e)
     {
         _pressPick = null;
-        if (_shell.Cutscenes.Count == 0 || _shell.Selection.Entities.Count == 0 || _shell.Mesh.InMeshMode || _control.FramePoint(position) is not { } pixel)
+        if ((_shell.ActiveCutscene ?? _shell.CutscenePreview.Owner) == null || _shell.Selection.Entities.Count == 0 || _shell.Mesh.InMeshMode || _control.FramePoint(position) is not { } pixel)
         {
             return;
         }
