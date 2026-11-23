@@ -2,13 +2,13 @@
 
 The cutscene editor edits a cutscene (see [Content: Cutscenes](../content/kinds/cutscenes.md)), which the game plays as [Cinematics](../cinematics/README.md) describes. Each open one is a tab, `CutsceneEditorDocument`, over a `CutsceneEditor` in the shell, which holds its state. Docking can rebuild the view, and tests drive the editor without a window.
 
-The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, and keys from the inspector and the viewport. These come next:
+The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, and the curve editor. These come next:
 - a scene view that looks through the cut camera, and the camera tools ([#555](https://github.com/aszecsei/cinnabar/issues/555));
-- the curve editor ([#553](https://github.com/aszecsei/cinnabar/issues/553));
+- the curve editor's pre- and post-infinity, weighted tangents, typed times and values, and value snapping ([#553](https://github.com/aszecsei/cinnabar/issues/553));
 - the bindings and the viewport's selection ([#554](https://github.com/aszecsei/cinnabar/issues/554)), with the filter that shows the tracks of the entities selected in the viewport;
 - the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)).
 
-**In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Preview](#preview) · [Keying](#keying)
+**In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Preview](#preview) · [Keying](#keying) · [Curves](#curves)
 
 ## The file
 
@@ -124,7 +124,7 @@ Each drag is one undo entry, through `Begin`, `StepFromStart` and `Commit`. Each
 - **Split** (S) splits each selected section at the playhead.
   - The second half has the next section ID and starts where the first ends. Its keys move back by the cut, and its source starts later.
   - The second half takes the ease out, the blend out and the post roll. The first half keeps the ease in, the blend in and the pre roll.
-  - Each channel gets a key at the cut in both halves. After a constant key, the value holds. After the other kinds, the value is on a straight line between the keys on each side. A Bezier key's tangents are not kept. The curve editor ([#553](https://github.com/aszecsei/cinnabar/issues/553)) will give exact values.
+  - Each channel gets a key at the cut in both halves, with the curve's value there as the runtime evaluates it ([The evaluator](#the-evaluator)). The new key has the interpolation of the key before it, or `auto` after a Bezier key, so a Bezier key's tangents are not kept. A channel of assets, whose keys the evaluator does not read, holds the key before the cut.
 - **Delete** deletes the selected sections, events, keys and markers. When a channel loses its last key, the channel is deleted too. A subtitle whose audio section is deleted stays, but loses its `audio`, so that it does not name a section that is gone.
 - **Nudge:** `,` and `.` move the selection one frame, and with Shift, 10 frames.
   - The repeats of a held key are one undo entry (`GraphDocument.EditMerged`). The release of the key ends the entry.
@@ -179,7 +179,8 @@ The **M** and **S** buttons in a track's header, and **Mute Track** and **Solo T
 ### Keys
 
 Each action is a command, so it is in the command palette, and `keybindings.json` can change its key. None of them is in the ribbon.
-- **The timeline's keys are bare letters,** which the viewport and the other panels also use. So each command acts only while the timeline has the keyboard, or while the command palette opened from it has it. When another window, such as a floating panel, becomes active, the timeline does not have the keyboard.
+- **The timeline's keys are bare letters,** which the viewport and the other panels also use. So each command acts only while the timeline or the curve editor has the keyboard, or while the command palette opened from one of them has it. When another window, such as a floating panel, becomes active, neither has the keyboard. Which pane has it is one value, `CutsceneEditor.KeyboardPane`, which each pane's `CutscenePaneFocus` sets.
+- **Frame Selection and Delete** act on the pane that has the keyboard: in the curve editor, F frames the curves and Delete deletes the selected keys.
 - **Delete and Duplicate.** While the timeline has the keyboard, the scene's Delete deletes the timeline's selection, and its Duplicate duplicates it.
 - **Copy and paste.** A command that cannot act leaves its key to the focused control, and a text box keeps Ctrl+C, Ctrl+X and Ctrl+V. So the timeline's copy and paste take those keys only while it has the keyboard.
 - **Keying.** Key Transform and Key Tracked Fields act on the selected entities wherever the keyboard is (see [Keying](#keying)). K is Shuttle Pause, so they use Ctrl+K and Ctrl+Shift+K.
@@ -216,6 +217,10 @@ Each action is a command, so it is in the command palette, and `keybindings.json
 | Events in Preview | `cutscene.previewEvents` | Alt+E |
 | Key Transform | `cutscene.keyTransform` | Ctrl+K |
 | Key Tracked Fields | `cutscene.keyTrackedFields` | Ctrl+Shift+K |
+| Curve Editor | `cutscene.curves` | Ctrl+E |
+| Normalized Curves | `cutscene.curvesNormalized` | Alt+N |
+| Auto Tangents, Unify Tangents, Break Tangents | `cutscene.tangentAuto`, `cutscene.tangentUnify`, `cutscene.tangentBreak` | 1, 2, 3 (`D1`, `D2`, `D3`) |
+| Linear, Constant, Flatten Tangents | `cutscene.tangentLinear`, `cutscene.tangentConstant`, `cutscene.tangentFlatten` | 4, 5, 6 (`D4`, `D5`, `D6`) |
 
 ### Cost
 
@@ -417,3 +422,79 @@ A transform track whose space is `relative <id>` keys the world's pose in the ot
 - A preview value of a child's pose in an absolute track, or one relative to another binding, keys once the world shows it, at most 20 times a second.
 - A possess names an entity by its scene's asset GUID and its folded scene ID. An entity of a sublevel's part, which a binding names by the part's GUID, has no key button, as the editor does not name it by its part yet.
 - Auto-key asks to possess an entity at an edit or a gizmo's press, never while it only routes one, and not while another question is open.
+
+## Curves
+
+The curve editor shows the curves of the selected tracks over time, below the timeline. A designer shapes the motion between keys there: drags keys in time and value, drags tangent handles, and sets tangent modes. Every edit is one undo entry and shows in the preview as soon as the text cooks, as the timeline's edits do.
+
+### The pane
+
+- **Curve Editor** (Ctrl+E), or the toolbar's **Curves** button, opens it below the timeline, with a split between them. It is the tab's, and not saved.
+- **The curves are the selection's.** A selected track shows each of its channels. A selected section, channel or key shows its channel. A selection of keys only keeps the curves that showed and adds its own, so a click on a key does not hide the other curves. With nothing selected, the curves stay.
+- **The list** on the left is as wide as the timeline's headers. Each row is one channel of one section, with its color. A click on the color hides or shows the curve. A click on the name selects the curve's keys.
+- **Colors:** the part of a channel's name after its last `_`, or the whole name, sets its color: `x` or `r` is red, `y` or `g` green, `z` or `b` blue, and `w` or `a` grey. So `position_x` is red. Other channels take colors from a palette in the order that they show.
+- **A channel of assets,** such as a property track's `$<guid>` keys, has no curve.
+
+### The view
+
+- **Time is the timeline's.** The two panes share one `TimelineView` (`CutsceneEditor.TimeView`), so a zoom or a pan in one moves the other, and the playhead and the markers are at the same pixels. A zoom or a pan by hand in either pane turns off the timeline's follow, as in [Scrub, play and step](#scrub-play-and-step).
+- **The value axis is the pane's own** (`ValueAxis`), with values going up. It fits the curves when the set of curves changes. `Canvas2DView` is not used, as it has one zoom for both axes.
+- **Navigation:**
+  - The wheel zooms the time about the pointer, and Shift and the wheel zoom the values.
+  - The middle button pans both axes.
+  - Alt and a right drag zoom each axis about the press: right and left zoom the time, and up and down the values.
+- **F** (Frame Selection, with the curve editor's keyboard) fits the selected keys in time and value, or every curve when no key of the curves is selected.
+- **Normalized Curves** (Alt+N, or the toolbar's **Normalized** button) shows each curve from its least value at -1 to its most at 1, so curves of different sizes can be compared. It changes no value: a drag moves a key by the curve's own amount. A flat curve shows at 0.
+- **The grid** has a line for each round value, with 0 brighter, and a line for each frame or group of frames, as the timeline has.
+
+### Keys
+
+- **A click** on a key selects it. Ctrl adds or removes it, and Shift adds it. A drag in empty space selects the keys in a box. A click in empty space clears the selection.
+- **The selection is the timeline's.** A key selected in the curve editor is selected on the timeline too. Undo and Esc put it back as the timeline's drags do.
+- **A drag** of a selected key moves every selected key in time and value, as one undo entry (`Move Keys`). Esc cancels it.
+  - Time snaps as the timeline's drags do: to the edges of the sections, the triggers, the other keys, the markers and the playhead within 6 pixels, or else to frames. Ctrl turns snapping off for the drag, and Snap (N) for all of them.
+  - Shift moves only along the axis that has moved more.
+  - A key stays inside its section, and keys that pass each other change places, as on the timeline.
+- **A double-click** on a curve adds a key there, with the value that the curve has there, and selects it (`Add Key`). After a `linear` or a `constant` key, the new key takes that interpolation, so a straight line or a step stays as it was. Otherwise the new key is `auto`, which can change the curve's shape around it.
+- **Delete,** with the curve editor's keyboard, deletes the selected keys. A channel that loses its last key goes too.
+- A locked track's curve is dim. Its keys do not move, and it takes no key.
+
+### Tangents
+
+A key's interpolation decides the segment from it to the next key, as [Tracks: Curves](../cinematics/tracks.md#curves) says. The commands act on the selected keys, with the curve editor's keyboard, as one undo entry. Each writes only the key's interpolation and what follows it, so `teleport` and the line's comment stay.
+
+| Command | Key | The key becomes |
+|---|---|---|
+| Auto Tangents | 1 | `auto`. The evaluator computes the slope, which does not overshoot. A new key is `auto`. |
+| Unify Tangents | 2 | `bezier <s>`: one slope, the mean of the key's in and out slopes. |
+| Break Tangents | 3 | `bezier <in> <out>`: the slopes that the curve has at the key, which its handles then move apart. |
+| Linear | 4 | `linear`: a straight line to the next key. |
+| Constant | 5 | `constant`: the value holds until the next key. |
+| Flatten Tangents | 6 | `bezier 0`, or `bezier 0 0` when broken: flat. |
+
+- Auto, Linear and Constant drop the slopes and the weights. Unify, Break and Flatten keep a Bezier key's weights.
+- For a key that is not a Bezier key, Unify and Break start from the slopes that the evaluator gives it. So an `auto` key keeps its curve's shape. A `linear` or a `constant` key's segment to the next key becomes a curve.
+- **Handles.** A selected `bezier` or `auto` key shows a handle on each side that has a key. A handle is 40 pixels long and shows the slope's direction on screen. Its length is not a weight.
+- **A drag of a handle** sets the slope from the key to the pointer, as one undo entry (`Drag Tangent`) that Esc cancels. An `auto` key becomes a Bezier key. A key that is not broken takes the slope on both sides, and a broken key on the handle's side only.
+- **The preview follows a drag when it ends.** The text cooks when the undo entry closes, as for the timeline's drags, so the viewport shows a drag of a key or a handle at its release.
+
+### Stepped curves
+
+A property track whose field is an integer, a bool or an enum steps, as the runtime's `curve_step` evaluates it. The editor knows from the game's component types (`EditorShell.SteppedChannel`). Before the game describes them, the curve draws as smooth.
+- The curve draws as steps, and its keys have no handles.
+- The tangent commands leave its keys.
+- A double-click adds a `constant` key with a whole value, and a drag moves its keys by whole values.
+
+### The evaluator
+
+`CutsceneCurve` in `Cinnabar.Editor.Document` is the editor's copy of the runtime's evaluator (`lib/engine/cutscene/curve.odin`), line for line. It does the same `f64` arithmetic in the same order, without fused multiply-adds, with the same 48 halvings for a weighted segment. `CurveKey.Parse` reads a key line as the cooker does: each number as an `f64` that must be finite, then an `f32`.
+- `CutsceneCurveTests` reads `lib/engine/cutscene/testdata/curve.txt`, the curve that the runtime's test writes, and checks that the editor gives the same `f32` bits at each of its ticks.
+- The curve editor samples each curve at whole ticks only, one sample for each pixel, clamped to its section, as the runtime samples it.
+- Split takes its values from it.
+
+### Limits
+
+- **No pre- or post-infinity yet.** Before a section's first key and after its last, a curve holds that key's value, as the runtime does. Cycle, linear and oscillate modes need the runtime and the blob, and come with the second part of [#553](https://github.com/aszecsei/cinnabar/issues/553).
+- **Weights show but cannot be set.** A weighted key evaluates and draws exactly, and its weights stay through the tangent commands that keep tangents. A handle's length does not show or set a weight.
+- **No typed times or values,** and no value snapping, yet.
+- **A curve per section.** A track with several sections has a curve for each section's channel, named with the section's ID.

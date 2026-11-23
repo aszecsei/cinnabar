@@ -80,7 +80,7 @@ public sealed class CutsceneTimelineTests : IDisposable
         Assert.Equal(trimmed, editor.Document.Text);
 
         // Split at the playhead: the second half's sound starts 40000 ticks in.
-        editor.TimelineFocused = true;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
         editor.SetPlayhead(440000);
         shell.Commands.Get(EditorCommands.CutsceneSplit).Execute();
         var split = BarkAs(text, """
@@ -198,7 +198,7 @@ public sealed class CutsceneTimelineTests : IDisposable
         var (shell, editor, input, text) = Intro();
         input.Press(X(390000), Y(input, "track:3"), MouseButton.Left, KeyModifiers.None);
         input.Release(X(390000), Y(input, "track:3"), KeyModifiers.None);
-        editor.TimelineFocused = true;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
         var later = shell.Commands.Get(EditorCommands.CutsceneNudgeLater);
         later.Execute();
         later.Execute();
@@ -234,7 +234,7 @@ public sealed class CutsceneTimelineTests : IDisposable
         Drag(input, X(390000), Y(input, "track:3"), X(430000));
         Assert.Equal(text, editor.Document.Text);
         Assert.Empty(editor.Document.History);
-        editor.TimelineFocused = true;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
         editor.Nudge(5);
         Assert.Empty(editor.Document.History);
 
@@ -291,7 +291,7 @@ public sealed class CutsceneTimelineTests : IDisposable
     public void MAddsAMarkerThatTheRulerDragsAndEscPutsBack()
     {
         var (shell, editor, input, text) = Intro();
-        editor.TimelineFocused = true;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
         editor.SetPlayhead(100000);
         shell.Commands.Get(EditorCommands.CutsceneAddMarker).Execute();
         var marked = text.Replace("skip_color = \"#000000\"\n", "skip_color = \"#000000\"\nmarker 1 100000 \"Marker 1\"\n");
@@ -333,7 +333,7 @@ public sealed class CutsceneTimelineTests : IDisposable
         input.Press(X(390000), Y(input, "track:3"), MouseButton.Left, KeyModifiers.None);
         input.Release(X(390000), Y(input, "track:3"), KeyModifiers.None);
         Assert.False(shell.Commands.Get(EditorCommands.CutsceneCopy).CanExecute);
-        editor.TimelineFocused = true;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
         var id = editor.File.NextId(Cinnabar.Editor.Document.CutsceneBlockKind.Section);
 
         shell.Commands.Get(EditorCommands.CutsceneCopy).Execute();
@@ -368,7 +368,7 @@ public sealed class CutsceneTimelineTests : IDisposable
 
         // Without the keyboard, the timeline's copy and paste leave their keys to the rest of the editor, and Duplicate
         // is the scene's.
-        editor.TimelineFocused = false;
+        editor.LeaveKeyboardPane(CutscenePane.Timeline);
         editor.Select([$"section:3"], SelectMode.Replace);
         Assert.False(shell.Commands.Get(EditorCommands.CutsceneCopy).CanExecute);
         Assert.False(shell.Commands.Get(EditorCommands.CutscenePaste).CanExecute);
@@ -380,7 +380,7 @@ public sealed class CutsceneTimelineTests : IDisposable
     public void APasteOntoABindingWithoutTheTrackAsksFirst()
     {
         var (shell, editor, input, text) = Intro();
-        editor.TimelineFocused = true;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
         editor.Select(["section:3"], SelectMode.Replace);
         editor.Copy();
         IReadOnlyList<string>? asked = null;
@@ -442,7 +442,7 @@ public sealed class CutsceneTimelineTests : IDisposable
         editor.Select([], SelectMode.Replace);
         Assert.Equal((200000, 400000), editor.RowFilter.KeysIn);
         // The command turns it off, as the strip's toggle does.
-        editor.TimelineFocused = true;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
         Assert.True(shell.Commands.Get(EditorCommands.CutsceneKeysUnderSelection).IsChecked);
         shell.Commands.Get(EditorCommands.CutsceneKeysUnderSelection).Execute();
         Assert.True(editor.RowFilter.IsNone);
@@ -478,7 +478,7 @@ public sealed class CutsceneTimelineTests : IDisposable
         Assert.Contains("\"Soloed\":[3,7]", settings);
 
         // The commands act on the selected track.
-        editor.TimelineFocused = true;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
         editor.Select(["section:3"], SelectMode.Replace);
         shell.Commands.Get(EditorCommands.CutsceneSoloTrack).Execute();
         shell.Commands.Get(EditorCommands.CutsceneMuteTrack).Execute();
@@ -520,7 +520,7 @@ public sealed class CutsceneTimelineTests : IDisposable
         editor.SetPlayhead(390000);
         Assert.False(shell.Commands.Get(EditorCommands.CutsceneSplit).CanExecute);
         Assert.False(shell.Commands.Get(EditorCommands.CutsceneFrame).CanExecute);
-        editor.TimelineFocused = true;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
         Assert.True(shell.Commands.Get(EditorCommands.CutsceneSplit).CanExecute);
 
         shell.Commands.Get(EditorCommands.CutsceneGoToEnd).Execute();

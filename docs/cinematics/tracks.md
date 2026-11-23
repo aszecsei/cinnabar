@@ -28,13 +28,13 @@ A channel of a section is a **curve**: keys in rising time, each with a time in 
   - A key that is a peak or a trough, or level with a neighbour, is flat. So keys of one value hold that value between them.
   - Otherwise the slope is that of the line through the neighbours, limited to three times the gentler of the two segments' slopes. This is the condition of Fritsch and Carlson for a monotone cubic, so the curve stays between the keys' values.
 - **Steps.** `curve_step` evaluates a curve as if each key were `Constant`. A field that cannot take a value between two keys, such as an integer, steps.
-- **Vectors and colors** are one curve for each number, so the curve editor ([#553](https://github.com/aszecsei/cinnabar/issues/553)) edits them one at a time.
+- **Vectors and colors** are one curve for each number, so the [curve editor](../editor/cutscene-editor.md#curves) shows them as one curve each.
 
 **Exact and shared.** The evaluator is a pure procedure of the keys and a time.
 - It never bakes, so a value at any tick is exact.
 - It finds the segment by halves. The `hint` from the last call finds it at once in playback, and never changes the value.
 - Its arithmetic is `f64` `+ - * /` in a fixed order. A weighted segment's solve takes a fixed number of halvings (`CURVE_SOLVE_STEPS`, 48), not a tolerance.
-- `lib/engine/cutscene/testdata/curve.txt` holds a shared test curve and its value at every 250 ticks, as `f32` bits. The runtime's test reads it, and the editor's evaluator must give the same bits ([#553](https://github.com/aszecsei/cinnabar/issues/553)). Run the cutscene tests with `CINNABAR_WRITE_CURVE_GOLDEN=1` to write it again after a deliberate change.
+- `lib/engine/cutscene/testdata/curve.txt` holds a shared test curve and its value at every 250 ticks, as `f32` bits. The runtime's test reads it, and so does the test of the editor's evaluator, `CutsceneCurve`, which gives the same bits (see [Editor: Cutscene editor](../editor/cutscene-editor.md#the-evaluator)). Run the cutscene tests with `CINNABAR_WRITE_CURVE_GOLDEN=1` to write it again after a deliberate change.
 
 The text of a key is in [Content: Cutscenes](../content/kinds/cutscenes.md#channels-and-keys). The cooker checks that keys are in order, that numbers are finite, and that weights are from 0 to 1.
 

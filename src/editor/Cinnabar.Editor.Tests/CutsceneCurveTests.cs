@@ -1,0 +1,110 @@
+using System.Globalization;
+using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Shell;
+
+namespace Cinnabar.Editor.Tests;
+
+/// <summary>The editor's curve evaluator, which gives the runtime's bits, and the key line's reader and writer.</summary>
+public sealed class CutsceneCurveTests
+{
+    // The shared test curve that lib/engine/cutscene/curve_test.odin writes and checks.
+    static string[] Golden() =>
+        File.ReadAllLines(Path.Combine(EditorOptions.RepositoryRoot(), "lib", "engine", "cutscene", "testdata", "curve.txt"));
+
+    // A golden key line: time, value, interpolation, flags, in slope, in weight, out slope, out weight.
+    static CurveKey GoldenKey(string[] w)
+    {
+        float F(string s) => float.Parse(s, CultureInfo.InvariantCulture);
+        var flags = w[4] == "-" ? [] : w[4].Split(',');
+        var interp = w[3] switch
+        {
+            "constant" => CurveInterp.Constant,
+            "linear" => CurveInterp.Linear,
+            "bezier" => CurveInterp.Bezier,
+            _ => CurveInterp.Auto,
+        };
+        return new CurveKey(int.Parse(w[1], CultureInfo.InvariantCulture), F(w[2]), interp,
+            Broken: flags.Contains("broken"), Weighted: flags.Contains("weighted"),
+            InSlope: F(w[5]), InWeight: F(w[6]), OutSlope: F(w[7]), OutWeight: F(w[8]));
+    }
+
+    [Fact]
+    public void TheCurveGivesTheRuntimesBitsAtEveryTick()
+    {
+        var keys = new List<CurveKey>();
+        var count = 0;
+        foreach (var line in Golden())
+        {
+            var w = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (w.Length == 0 || w[0].StartsWith('#'))
+            {
+                continue;
+            }
+            if (w[0] == "key")
+            {
+                keys.Add(GoldenKey(w));
+                continue;
+            }
+            Assert.Equal("at", w[0]);
+            var tick = int.Parse(w[1], CultureInfo.InvariantCulture);
+            var want = uint.Parse(w[2], NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            var got = BitConverter.SingleToUInt32Bits(CutsceneCurve.Value(keys, tick));
+            Assert.True(got == want, $"at {tick}: {got:x8}, not {want:x8}");
+            count++;
+        }
+        // Every interpolation and both tangent options are in the curve.
+        Assert.Equal(10, keys.Count);
+        Assert.Contains(keys, k => k.Interp == CurveInterp.Constant);
+        Assert.Contains(keys, k => k.Interp == CurveInterp.Linear);
+        Assert.Contains(keys, k => k is { Interp: CurveInterp.Bezier, Broken: true });
+        Assert.Contains(keys, k => k is { Interp: CurveInterp.Bezier, Weighted: true });
+        Assert.Equal(120000 / 250 + 3, count);
+    }
+
+    [Fact]
+    public void AKeyLineReadsAsTheCookerReadsIt()
+    {
+        Assert.Equal(new CurveKey(0, 0, CurveInterp.Auto), CurveKey.Parse(0, "0", "auto"));
+        Assert.Equal(new CurveKey(30000, 2, CurveInterp.Bezier, InSlope: 0.5f, OutSlope: 0.5f), CurveKey.Parse(30000, "2", "bezier 0.5"));
+        Assert.Equal(
+            new CurveKey(45000, 1, CurveInterp.Bezier, Broken: true, Weighted: true, InSlope: 2, OutSlope: -1, InWeight: 0.25f, OutWeight: 0.75f),
+            CurveKey.Parse(45000, "1", "bezier 2 -1 weights 0.25 0.75"));
+        Assert.Equal(new CurveKey(50000, 3, CurveInterp.Linear, Teleport: true), CurveKey.Parse(50000, "3", "linear teleport"));
+        // A value is read as an f64 and then made an f32, as the cooker does.
+        Assert.Equal((float)0.1, CurveKey.Parse(0, "0.1", "auto")!.Value.Value);
+        // What the cooker refuses, and an asset's key, give no key.
+        Assert.Null(CurveKey.Parse(0, "$0d9b84a2116a5529c2cd33741edd33a4", "constant"));
+        Assert.Null(CurveKey.Parse(0, "1", "linear 2"));
+        Assert.Null(CurveKey.Parse(0, "1", "bezier"));
+        Assert.Null(CurveKey.Parse(0, "1", "bezier 1 2 3"));
+        Assert.Null(CurveKey.Parse(0, "1", "bezier 1 weights 2 0"));
+        Assert.Null(CurveKey.Parse(0, "1", "spline"));
+        Assert.Null(CurveKey.Parse(0, "1e39", "auto"));
+    }
+
+    [Theory]
+    [InlineData("auto")]
+    [InlineData("constant teleport")]
+    [InlineData("bezier 0.5")]
+    [InlineData("bezier 2 -1")]
+    [InlineData("bezier 2 -1 weights 0.25 0.75")]
+    [InlineData("bezier 0 weights 0.5 0.5 teleport")]
+    public void AKeyWritesBackAsItReads(string interpolation) =>
+        Assert.Equal(interpolation, CurveKey.Parse(0, "1", interpolation)!.Value.Interpolation());
+
+    [Fact]
+    public void AnAutoKeyIsFlatAtTheEndsAndAtTurnsAndLimitedElsewhere()
+    {
+        CurveKey K(int t, float v) => new(t, v, CurveInterp.Auto);
+        // The ends.
+        Assert.Equal(0, CutsceneCurve.AutoSlope([K(0, 0), K(60000, 1), K(120000, 2)], 0));
+        Assert.Equal(0, CutsceneCurve.AutoSlope([K(0, 0), K(60000, 1), K(120000, 2)], 2));
+        // A straight line keeps its slope: 1 a second.
+        Assert.Equal(1, CutsceneCurve.AutoSlope([K(0, 0), K(60000, 1), K(120000, 2)], 1));
+        // A peak and a plateau are flat.
+        Assert.Equal(0, CutsceneCurve.AutoSlope([K(0, 0), K(60000, 1), K(120000, 0)], 1));
+        Assert.Equal(0, CutsceneCurve.AutoSlope([K(0, 1), K(60000, 1), K(120000, 2)], 1));
+        // A steep side is limited to three times the gentle one: (10 - 0) / 2 = 5 is above 3 × 0.1.
+        Assert.Equal(0.3, CutsceneCurve.AutoSlope([K(0, 0), K(60000, 0.1f), K(120000, 10)], 1), 6);
+    }
+}
