@@ -156,21 +156,21 @@ public sealed class UiEditorTests : IDisposable
         var fieldLine = Array.FindIndex(lines, l => l.Contains("<field")) + 1;
         var fieldColumn = lines[fieldLine - 1].IndexOf("width", StringComparison.Ordinal) + 1;
         var styleLine = Array.FindIndex(lines, l => l.Contains("name=\"caption\"")) + 1;
-        editor.ShowProblems(editor.Document.Text, Answer(path, ((uint)fieldLine, (uint)fieldColumn, "width is wrong"), ((uint)styleLine, 2, "a style's problem"), (1, 1, "the header")));
+        editor.Checks.Show(editor.Document.Text, Answer(path, ((uint)fieldLine, (uint)fieldColumn, "width is wrong"), ((uint)styleLine, 2, "a style's problem"), (1, 1, "the header")));
         Assert.Equal(editor.File.NodeById("name")!.Index, editor.Problems[0].Node);
         Assert.Equal((fieldLine, fieldColumn), (editor.Problems[0].Line, editor.Problems[0].Column));
         Assert.Equal("caption", editor.Problems[1].Style);
         Assert.Null(editor.Problems[1].Node);
         Assert.Null(editor.Problems[2].Node);
-        Assert.Equal("width is wrong", editor.CookError);
+        Assert.Equal(new CheckState.Failed("width is wrong"), editor.Checks.State);
 
         // An answer about a text that has changed since is dropped.
         var old = editor.Document.Text;
         editor.SetAttribute(0, "size", "21");
-        editor.ShowProblems(old, Answer(path));
-        Assert.Equal("width is wrong", editor.CookError);
-        editor.ShowProblems(editor.Document.Text, Answer(path));
-        Assert.Null(editor.CookError);
+        editor.Checks.Show(old, Answer(path));
+        Assert.Equal(new CheckState.Failed("width is wrong"), editor.Checks.State);
+        editor.Checks.Show(editor.Document.Text, Answer(path));
+        Assert.IsType<CheckState.Clean>(editor.Checks.State);
         Assert.Empty(editor.Problems);
     }
 

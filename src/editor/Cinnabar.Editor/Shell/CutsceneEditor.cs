@@ -26,8 +26,6 @@ public enum CutscenePane
 public sealed partial class CutsceneEditor : IGraphEditor
 {
     readonly EditorShell _shell;
-    readonly List<GraphProblem> _problems = [];
-    readonly PreviewCook _cook;
     readonly List<string> _selection = [];
     readonly HashSet<string> _folds = [];
     readonly HashSet<int> _locked;
@@ -55,7 +53,10 @@ public sealed partial class CutsceneEditor : IGraphEditor
     {
         _shell = shell;
         Document = document;
-        _cook = new PreviewCook(() => _shell.PreviewCooker.Linked, () => CookText, text => _shell.PreviewCooker.CookPreview(Guid, text), ShowProblems);
+        Checks = new CookChecks<GraphProblem>(shell, document.Guid, () => CookText, () => Document.Path,
+            l => new GraphProblem(null, l.Text, l.Error, l.Line));
+        Checks.Changed += OnChecked;
+        Checks.CookedCleanChanged += () => _shell.CutscenePreview.OnCookedCleanChanged(this);
         Document.Changed += OnDocumentChanged;
         var view = shell.CutsceneTimelineSettingsOf(Guid);
         _showFrames = view.ShowFrames;
@@ -76,6 +77,8 @@ public sealed partial class CutsceneEditor : IGraphEditor
 
     IGraphDocument IGraphEditor.Document => Document;
 
+    ICookChecks IGraphEditor.Checks => Checks;
+
     public string Noun => "cutscene";
 
     public string Guid => Document.Guid;
@@ -95,7 +98,10 @@ public sealed partial class CutsceneEditor : IGraphEditor
     public CutsceneBlock? Selected => Selection is { } path ? File.Find(path) : null;
 
     /// <summary>The problems of the last check, each with its line, or 0 for one of no line of this file.</summary>
-    public IReadOnlyList<GraphProblem> Problems => _problems;
+    public IReadOnlyList<GraphProblem> Problems => Checks.Problems;
+
+    /// <summary>The checks of the tab's text.</summary>
+    public CookChecks<GraphProblem> Checks { get; }
 
     /// <summary>The cutscene, its document's state or the selection changed.</summary>
     public event Action? Changed;
@@ -116,7 +122,7 @@ public sealed partial class CutsceneEditor : IGraphEditor
         _shell.Commands.InvalidateAll();
         if (!Document.InTransaction)
         {
-            _cook.Schedule();
+            Checks.Schedule();
             // A track added, deleted or muted in the asset changes which tracks a solo silences.
             _shell.CutscenePreview.OnMixChanged(this);
         }
@@ -162,7 +168,7 @@ public sealed partial class CutsceneEditor : IGraphEditor
     }
 
     /// <summary>The problems on a block's own lines.</summary>
-    public IEnumerable<GraphProblem> ProblemsOf(CutsceneBlock block) => _problems.Where(p => p.Line > 0 && File.BlockAt(p.Line) == block);
+    public IEnumerable<GraphProblem> ProblemsOf(CutsceneBlock block) => Problems.Where(p => p.Line > 0 && File.BlockAt(p.Line) == block);
 
     /// <summary>The block whose own lines hold a line, from 1, or null.</summary>
     public CutsceneBlock? BlockAt(int line) => File.BlockAt(line);
@@ -1358,35 +1364,17 @@ public sealed partial class CutsceneEditor : IGraphEditor
     bool _ownEdit;
 
     /// <summary>Sends the unsaved text to the cook daemon now, and shows the answer's problems.</summary>
-    public Task CookNow() => _cook.CookNow();
+    public Task CookNow() => Checks.CookNow();
 
-    /// <summary>Shows the answer to a check of a text, unless the cutscene has changed since it was sent.</summary>
-    public void ShowProblems(string text, PreviewResult result)
+    void OnChecked()
     {
-        if (text != CookText)
-        {
-            return;
-        }
-        _problems.Clear();
-        foreach (var p in result.Problems)
-        {
-            var mine = string.Equals(Path.GetFullPath(p.File == "" ? "." : p.File), Document.Path, StringComparison.OrdinalIgnoreCase);
-            var where = mine || p.File == "" ? "" : $"{Path.GetFileName(p.File)}:{p.Line}: ";
-            _problems.Add(new GraphProblem(null, where + p.Text, p.Error, mine ? (int)p.Line : 0));
-        }
-        CookError = result.Error == "" ? null : result.Error;
-        if (CookError == null)
+        if (Checks.State is CheckState.Clean { Text: var text })
         {
             // The daemon wrote this text's blob before it answered, so its file time names this text in the game.
             _cleanBlob = _shell.PreviewBlobTime(Guid) is var time and not 0 ? (text, time) : null;
             _shell.Keying.Raise();
         }
         ProblemsChanged?.Invoke();
-        if (CookError == null && !CookedClean)
-        {
-            CookedClean = true;
-            _shell.CutscenePreview.OnCooked(this);
-        }
     }
 
     // The text of the last clean cook, and its blob's file time in the preview area.
@@ -1399,14 +1387,11 @@ public sealed partial class CutsceneEditor : IGraphEditor
     public long? CleanBlob => _cleanBlob is { } clean && clean.Text == CookText ? clean.Blob : null;
 
     /// <summary>Whether the daemon cooked this tab's text clean, so its unsaved text is in the preview area.</summary>
-    public bool CookedClean { get; private set; }
-
-    /// <summary>The last check's error, or null when the text cooked.</summary>
-    public string? CookError { get; private set; }
+    public bool CookedClean => Checks.CookedClean;
 
     public void Dispose()
     {
-        _cook.Dispose();
+        Checks.Dispose();
         Document.Changed -= OnDocumentChanged;
         _shell.SceneChanged -= OnBindingTargetsChanged;
         _shell.Assets.Changed -= OnBindingTargetsChanged;

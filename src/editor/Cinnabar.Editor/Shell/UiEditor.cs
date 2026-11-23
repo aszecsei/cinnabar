@@ -49,16 +49,16 @@ public sealed class UiEditor : PreviewOwner, IGraphEditor
     const double MaxScaleFactor = 4;
     public const string ScaleKey = "ui.scale";
 
-    readonly List<UiProblem> _problems = [];
     readonly Dictionary<string, string> _bindings = [];
     readonly HashSet<string> _states = [];
-    readonly PreviewCook _cook;
-    bool _showsUnsaved;
 
     internal UiEditor(EditorShell shell, UiDocument document, int? previewId = null) : base(shell, previewId, 0, 0, 1, 1)
     {
         Document = document;
-        _cook = new PreviewCook(() => _shell.PreviewCooker.Linked, () => Document.Text, text => _shell.PreviewCooker.CookPreview(Guid, text), OnCooked);
+        Checks = new CookChecks<UiProblem>(shell, document.Guid, () => Document.Text, () => Document.Path, Place);
+        // From the first text that cooks, the preview draws what the daemon cooks and not the saved one.
+        Checks.CookedCleanChanged += SendPreview;
+        Checks.Changed += () => ProblemsChanged?.Invoke();
         Document.Changed += OnDocumentChanged;
         ScaleFactor = ProjectScale(shell.ProjectPath);
     }
@@ -66,6 +66,8 @@ public sealed class UiEditor : PreviewOwner, IGraphEditor
     public UiDocument Document { get; }
 
     IGraphDocument IGraphEditor.Document => Document;
+
+    ICookChecks IGraphEditor.Checks => Checks;
 
     public string Noun => "UI document";
 
@@ -77,7 +79,7 @@ public sealed class UiEditor : PreviewOwner, IGraphEditor
 
     public override string Waiting => "The document draws once it cooks.";
 
-    protected override bool ShowsUnsavedText => _showsUnsaved;
+    protected override bool ShowsUnsavedText => Checks.CookedClean;
 
     public override void SetMesh(PreviewMesh mesh)
     {
@@ -91,10 +93,10 @@ public sealed class UiEditor : PreviewOwner, IGraphEditor
     /// <summary>The selected style, by its name, which the properties show in place of a node's, or null.</summary>
     public string? SelectedStyle { get; private set; }
 
-    public IReadOnlyList<UiProblem> Problems => _problems;
+    public IReadOnlyList<UiProblem> Problems => Checks.Problems;
 
-    /// <summary>The last check found an error, so the preview draws the last text that cooked.</summary>
-    public string? CookError { get; private set; }
+    /// <summary>The checks of the unsaved text. While they fail, the preview draws the last text that cooked.</summary>
+    public CookChecks<UiProblem> Checks { get; }
 
     /// <summary>The screen that the document is laid out on, in pixels.</summary>
     public (int Width, int Height) Screen { get; private set; } = (1920, 1080);
@@ -182,7 +184,7 @@ public sealed class UiEditor : PreviewOwner, IGraphEditor
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();
         // A color picker's steps check too, a moment after the last, so the canvas follows the picker.
-        _cook.Schedule();
+        Checks.Schedule();
     }
 
     // Selection.
@@ -641,46 +643,19 @@ public sealed class UiEditor : PreviewOwner, IGraphEditor
     static UiRect Rect(float[] r) => new(r[0], r[1], r[2], r[3]);
 
     /// <summary>Sends the unsaved text to the cook daemon now, and shows the answer's problems.</summary>
-    public Task CookNow() => _cook.CookNow();
+    public Task CookNow() => Checks.CookNow();
 
-    void OnCooked(string text, PreviewResult result)
+    // A problem of this document is on the element or the style at its line and column.
+    UiProblem Place(CookLine l)
     {
-        // From the first text that cooks, the preview draws what the daemon cooks and not the saved one.
-        if (result.Error == "" && !_showsUnsaved)
-        {
-            _showsUnsaved = true;
-            SendPreview();
-        }
-        ShowProblems(text, result);
-    }
-
-    /// <summary>
-    /// Shows the answer to a check of a text, each problem on the element or the style at its line and column. An
-    /// answer about another text is dropped: the document changed since, so another check will come.
-    /// </summary>
-    public void ShowProblems(string text, PreviewResult result)
-    {
-        if (text != Document.Text)
-        {
-            return;
-        }
-        _problems.Clear();
-        foreach (var p in result.Problems)
-        {
-            var mine = string.Equals(Path.GetFullPath(p.File == "" ? "." : p.File), Document.Path, StringComparison.OrdinalIgnoreCase);
-            var (line, column) = ((int)p.Line, (int)Math.Max(p.Column, 1));
-            var node = mine && line > 0 ? File.NodeAt(line, column) : null;
-            var style = mine && line > 0 && node == null ? File.StyleAt(line, column)?.Name : null;
-            var where = mine || p.File == "" ? "" : $"{Path.GetFileName(p.File)}:{p.Line}: ";
-            _problems.Add(new UiProblem(node, style, where + p.Text, p.Error, mine ? line : 0, mine ? column : 0));
-        }
-        CookError = result.Error == "" ? null : result.Error;
-        ProblemsChanged?.Invoke();
+        var node = l.Line > 0 ? File.NodeAt(l.Line, l.Column) : null;
+        var style = l.Line > 0 && node == null ? File.StyleAt(l.Line, l.Column)?.Name : null;
+        return new UiProblem(node, style, l.Text, l.Error, l.Line, l.Column);
     }
 
     public override void Dispose()
     {
-        _cook.Dispose();
+        Checks.Dispose();
         base.Dispose();
         Document.Changed -= OnDocumentChanged;
     }

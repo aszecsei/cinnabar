@@ -171,14 +171,14 @@ public sealed partial class EditorShell
         Cook.LogsReceived += (logs, dropped) =>
             Console.AddRange([.. logs.Select(log => new LogLine(ConsoleLog.Level(log.Level), ConsoleLog.Format(log)))], dropped, "cook daemon");
         Cook.StateChanged += Commands.InvalidateAll;
-        // A new cook link has cooked no previews.
+        // A new cook link has cooked no previews: the daemon clears its preview area when it starts.
         Cook.StateChanged += () =>
         {
             if (Cook.Linked)
             {
                 foreach (var editor in GraphEditors)
                 {
-                    _ = editor.CookNow();
+                    _ = editor.Checks.Restart();
                 }
             }
         };

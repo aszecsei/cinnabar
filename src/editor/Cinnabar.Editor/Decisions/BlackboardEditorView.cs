@@ -61,9 +61,9 @@ public sealed class BlackboardEditorView : DockPanel
 
     void Refresh()
     {
-        var errors = _editor.Problems.Count(p => p.Error);
-        var status = !_shell.Cook.Linked ? "waiting for the cook daemon" : errors == 0 ? "cooks" : errors == 1 ? "1 error" : $"{errors} errors";
-        _status.Text = _editor.Document.IsDirty ? $"{status}  ·  not saved" : status;
+        var state = _editor.Checks.State;
+        CookStatus.Show(_status, state, CookStatus.Describe(state, _editor.Problems.Count(p => p.Error), _shell.Cook.Linked),
+            _editor.Document.IsDirty ? "not saved" : null);
         var shown = string.Join("|", _editor.Keys.Select(k => $"{k.Type} {k.Name} {string.Join(",", k.Values)} {k.Default}"))
             + "#" + string.Join("|", _editor.Problems.Select(p => p.Line + p.Text));
         if (shown == _shown)

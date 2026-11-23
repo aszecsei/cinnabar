@@ -138,8 +138,8 @@ public sealed class CutsceneEditorTests : IDisposable
         static PreviewResult Answer(string file, params (uint Line, string Text)[] problems) =>
             new(problems.Length == 0 ? "" : problems[0].Text, [.. problems.Select(p => new Problem(file, p.Line, 0, true, p.Text))], []);
 
-        editor.ShowProblems(editor.Document.Text, Answer(path, ((uint)close + 1, "the camera is not a binding"), ((uint)key, "keys are in order of time")));
-        Assert.Equal("the camera is not a binding", editor.CookError);
+        editor.Checks.Show(editor.Document.Text, Answer(path, ((uint)close + 1, "the camera is not a binding"), ((uint)key, "keys are in order of time")));
+        Assert.Equal(new CheckState.Failed("the camera is not a binding"), editor.Checks.State);
         var section = editor.File.Find("section:6")!;
         Assert.Equal("the camera is not a binding", Assert.Single(editor.ProblemsOf(section)).Text);
         // A key's problem is on the key, whose section's row shows it.
@@ -148,7 +148,7 @@ public sealed class CutsceneEditorTests : IDisposable
         Assert.Single(editor.ProblemsOf(keyBlock));
 
         // A problem in another file says where, and has no line here.
-        editor.ShowProblems(editor.Document.Text, Answer("C:/elsewhere/shot.cutscene", (9, "broken")));
+        editor.Checks.Show(editor.Document.Text, Answer("C:/elsewhere/shot.cutscene", (9, "broken")));
         Assert.Equal("shot.cutscene:9: broken", Assert.Single(editor.Problems).Text);
         Assert.Equal(0, editor.Problems[0].Line);
 
@@ -156,13 +156,13 @@ public sealed class CutsceneEditorTests : IDisposable
         var old = editor.Document.Text;
         editor.Select(section);
         editor.EditSelected("Set look_at_damping", b => b.Set("look_at_damping", "6000"));
-        editor.ShowProblems(old, Answer(path, (3, "stale")));
+        editor.Checks.Show(old, Answer(path, (3, "stale")));
         Assert.DoesNotContain(editor.Problems, p => p.Text.Contains("stale"));
 
         // The next answer clears them.
-        editor.ShowProblems(editor.Document.Text, Answer(path));
+        editor.Checks.Show(editor.Document.Text, Answer(path));
         Assert.Empty(editor.Problems);
-        Assert.Null(editor.CookError);
+        Assert.IsType<CheckState.Clean>(editor.Checks.State);
     }
 
     [Fact]

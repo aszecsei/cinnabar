@@ -25,8 +25,6 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
     const float MaxDistance = 20f;
 
     readonly HashSet<int> _selection = [];
-    readonly List<GraphProblem> _problems = [];
-    readonly PreviewCook _cook;
 
     PreviewMesh _mesh = PreviewMesh.Sphere;
 
@@ -34,13 +32,21 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
         : base(shell, previewId, StartYaw, StartPitch, StartDistance, MaxDistance)
     {
         Document = document;
-        _cook = new PreviewCook(() => PreviewId != null && _shell.PreviewCooker.Linked, () => Document.Text, text => _shell.PreviewCooker.CookPreview(Guid, text), OnCooked);
+        // Only a material with a preview cooks: a function, or a material when every preview is in use, does not.
+        Checks = new CookChecks<GraphProblem>(shell, document.Guid, () => Document.Text, () => Document.Path,
+            l => new GraphProblem(l.Line > 0 ? Document.NodeAt(l.Line) : null, l.Text, l.Error, l.Line),
+            ready: () => PreviewId != null && _shell.PreviewCooker.Linked);
+        // From the first graph that cooks, the preview shows what the daemon cooks and not the saved graph.
+        Checks.CookedCleanChanged += SendPreview;
+        Checks.Changed += () => ProblemsChanged?.Invoke();
         Document.Changed += OnDocumentChanged;
     }
 
     public MaterialDocument Document { get; }
 
     IGraphDocument IGraphEditor.Document => Document;
+
+    ICookChecks IGraphEditor.Checks => Checks;
 
     public string Noun => "material";
 
@@ -53,16 +59,14 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
     public override string Waiting => "The preview draws once the material cooks.";
 
     /// <summary>The preview shows the unsaved graph, which the daemon cooked into the cache's preview area.</summary>
-    public bool ShowsUnsaved { get; private set; }
-
-    protected override bool ShowsUnsavedText => ShowsUnsaved;
+    protected override bool ShowsUnsavedText => Checks.CookedClean;
 
     public IReadOnlyCollection<int> Selection => _selection;
 
-    public IReadOnlyList<GraphProblem> Problems => _problems;
+    public IReadOnlyList<GraphProblem> Problems => Checks.Problems;
 
-    /// <summary>The last preview cook failed, so the preview shows the last graph that cooked.</summary>
-    public string? CookError { get; private set; }
+    /// <summary>The preview cooks of the unsaved graph. While they fail, the preview shows the last graph that cooked.</summary>
+    public CookChecks<GraphProblem> Checks { get; }
 
     /// <summary>The graph or its document's state changed.</summary>
     public event Action? Changed;
@@ -87,7 +91,7 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
         _shell.Commands.InvalidateAll();
         if (!Document.InTransaction)
         {
-            _cook.Schedule();
+            Checks.Schedule();
         }
     }
 
@@ -368,36 +372,11 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
     }
 
     /// <summary>Cooks the graph for the preview now, and shows the result's problems on their nodes.</summary>
-    public Task CookNow() => _cook.CookNow();
-
-    void OnCooked(string text, PreviewResult result)
-    {
-        // From the first graph that cooks, the preview shows what the daemon cooks and not the saved graph.
-        if (result.Error == "" && !ShowsUnsaved)
-        {
-            ShowsUnsaved = true;
-            SendPreview();
-        }
-        ShowProblems(result);
-    }
-
-    void ShowProblems(PreviewResult result)
-    {
-        _problems.Clear();
-        foreach (var p in result.Problems)
-        {
-            var mine = string.Equals(Path.GetFullPath(p.File == "" ? "." : p.File), Document.Path, StringComparison.OrdinalIgnoreCase);
-            var node = mine && p.Line > 0 ? Document.NodeAt((int)p.Line) : null;
-            var where = mine || p.File == "" ? "" : $"{Path.GetFileName(p.File)}:{p.Line}: ";
-            _problems.Add(new GraphProblem(node, where + p.Text, p.Error));
-        }
-        CookError = result.Error == "" ? null : result.Error;
-        ProblemsChanged?.Invoke();
-    }
+    public Task CookNow() => Checks.CookNow();
 
     public override void Dispose()
     {
-        _cook.Dispose();
+        Checks.Dispose();
         Document.Changed -= OnDocumentChanged;
         base.Dispose();
     }

@@ -151,7 +151,8 @@ public sealed class WorldEditorTests : IDisposable
         var editor = shell.OpenWorld(world)!;
         // The text's lines: the base scene is line 3, the first tile's is line 5 and the third tile's is line 15.
         var path = editor.Document.Path;
-        editor.ShowProblems(editor.Document.Text, new PreviewResult("bad",
+        Assert.Same(CheckState.Pending, editor.Checks.State);
+        editor.Checks.Show(editor.Document.Text, new PreviewResult("bad",
         [
             new Problem(path, 6, 0, true, "min is at most max on each axis, and x is not"),
             new Problem(path, 15, 0, true, "no asset has the GUID"),
@@ -161,9 +162,10 @@ public sealed class WorldEditorTests : IDisposable
         Assert.Equal(["no asset has the GUID"], editor.ProblemsOf(editor.Scenes[3]).Select(p => p.Text));
         Assert.Empty(editor.ProblemsOf(editor.Scenes[0]));
         Assert.Equal(3, editor.Problems.Count);
+        Assert.Equal(new CheckState.Failed("bad"), editor.Checks.State);
         // An answer about a text that has changed since is dropped.
         editor.SetDistances(WorldFixture.Tiles[0], 30, 40);
-        editor.ShowProblems(WorldFixture.WorldText, new PreviewResult("", [], []));
+        editor.Checks.Show(WorldFixture.WorldText, new PreviewResult("", [], []));
         Assert.Equal(3, editor.Problems.Count);
     }
 }

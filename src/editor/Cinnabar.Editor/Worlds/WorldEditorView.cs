@@ -71,9 +71,9 @@ public sealed class WorldEditorView : DockPanel
 
     void Refresh()
     {
-        var errors = _editor.Problems.Count(p => p.Error);
-        var status = !_shell.Cook.Linked ? "waiting for the cook daemon" : errors == 0 ? "cooks" : errors == 1 ? "1 error" : $"{errors} errors";
-        _status.Text = _editor.Document.IsDirty ? $"{status}  ·  not saved" : status;
+        var state = _editor.Checks.State;
+        CookStatus.Show(_status, state, CookStatus.Describe(state, _editor.Problems.Count(p => p.Error), _shell.Cook.Linked),
+            _editor.Document.IsDirty ? "not saved" : null);
         RefreshPreview();
         var scenes = _editor.Scenes;
         var shown = string.Join("|", scenes.Select(s => $"{s.Guid} {s.Persistent} {WorldFile.Format(s.Min ?? [])} {WorldFile.Format(s.Max ?? [])} {s.LoadDistance} {s.UnloadDistance} {_editor.PlayState(s)}"))

@@ -88,7 +88,7 @@ public sealed class CutscenePreviewTests : IDisposable
         using var _ = shell;
         var first = Opened(shell);
 
-        editor.ShowProblems(editor.Document.Text, new PreviewResult("", [], []));
+        editor.Checks.Show(editor.Document.Text, new PreviewResult("", [], []));
 
         Assert.Equal(first, Assert.Single(_sent.OfType<CutscenePreviewClose>()).Ticket);
         var open = Assert.Single(_sent.OfType<CutscenePreviewOpen>());
@@ -96,8 +96,24 @@ public sealed class CutscenePreviewTests : IDisposable
         Assert.True(open.Ticket > first);
         // A second clean cook changes nothing.
         _sent.Clear();
-        editor.ShowProblems(editor.Document.Text, new PreviewResult("", [], []));
+        editor.Checks.Show(editor.Document.Text, new PreviewResult("", [], []));
         Assert.Empty(_sent);
+    }
+
+    [Fact]
+    public void ANewCookLinkOpensTheSessionAgainOnTheSavedFile()
+    {
+        var (shell, editor) = NewShell();
+        using var _ = shell;
+        Opened(shell);
+        editor.Checks.Show(editor.Document.Text, new PreviewResult("", [], []));
+        _sent.Clear();
+
+        // The new daemon starts with an empty preview area, so the session follows the saved file until the text cooks.
+        editor.Checks.Restart();
+
+        Assert.False(editor.CookedClean);
+        Assert.False(Assert.Single(_sent.OfType<CutscenePreviewOpen>()).Unsaved);
     }
 
     [Fact]

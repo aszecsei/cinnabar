@@ -103,7 +103,7 @@ public sealed class CutsceneCameraTests : IDisposable
 
         // A new session of the same tab hears the same look, with its ticket.
         _sent.Clear();
-        editor.ShowProblems(editor.Document.Text, new PreviewResult("", [], []));
+        editor.Checks.Show(editor.Document.Text, new PreviewResult("", [], []));
         var reopened = _sent.OfType<CutscenePreviewOpen>().Last();
         var again = Assert.Single(_sent.OfType<ViewportLook>());
         Assert.Equal((reopened.Ticket, ViewportLookSource.Cuts), (again.Ticket, again.Source));

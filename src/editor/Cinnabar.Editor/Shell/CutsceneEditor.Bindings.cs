@@ -67,7 +67,7 @@ public sealed partial class CutsceneEditor
         }
         _standInsVersion++;
         SaveView();
-        _cook.Schedule();
+        Checks.Schedule();
         _entityBindings = BindingsOfEntities(_shell.Selection.Entities);
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();

@@ -386,29 +386,11 @@ public sealed class CutsceneEditorView : DockPanel
         _time.Text = file.Length is { } length
             ? $"{CutsceneTime.Timecode(length, file.Rate)}  ·  {CutsceneTime.Frames(length, file.Rate)} frames at {file.Rate} fps"
             : $"no length  ·  {file.Rate} fps";
-        var parts = new List<string>();
-        var errors = _editor.Problems.Count(p => p.Error);
-        if (!_shell.Cook.Linked)
-        {
-            parts.Add("waiting for the cook daemon");
-        }
-        else if (_editor.CookError != null)
-        {
-            parts.Add(errors == 1 ? "1 error" : $"{errors} errors");
-        }
-        else
-        {
-            parts.Add("cooks");
-        }
-        if (_editor.Document.IsDirty)
-        {
-            parts.Add("not saved");
-        }
+        var state = _editor.Checks.State;
         var described = preview.Describe(_editor);
-        parts.Add(preview.RateIn(_editor) is { } playing && playing != 1 ? $"{described} at {playing:0.##}×" : described);
-        _status.Text = string.Join("  ·  ", parts);
-        _status.Classes.Set("warning", _editor.CookError != null);
-        ToolTip.SetTip(_status, _editor.CookError);
+        CookStatus.Show(_status, state, CookStatus.Describe(state, _editor.Problems.Count(p => p.Error), _shell.Cook.Linked),
+            _editor.Document.IsDirty ? "not saved" : null,
+            preview.RateIn(_editor) is { } playing && playing != 1 ? $"{described} at {playing:0.##}×" : described);
     }
 }
 
