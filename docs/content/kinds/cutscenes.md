@@ -250,6 +250,18 @@ marker 1 180000 "Music swells"
 - **Event tracks:** no channels: they have triggers and ranges.
 - **The other kinds** take any name for now.
 
+A channel's settings come before its keys:
+- **`pre_infinity`** is what the curve does before its first key, and **`post_infinity`** after its last: `constant`, which is the default, `linear`, `cycle`, `cycle_offset` or `oscillate` ([Cinematics: Curves](../../cinematics/tracks.md#curves)).
+- An audio track's `pitch` takes only `constant`, and a channel of assets takes `constant`, `cycle` or `oscillate`.
+
+```
+channel position_y
+	post_infinity = cycle
+	key 0 0 auto
+	key 30000 0.25 auto
+	key 60000 0 auto
+```
+
 `key <time> <value> <interp> [<slope> | <in> <out>] [weights <in> <out>] [teleport]`:
 - **The time** is in ticks from the section's start, from 0 to the section's duration. So a section moves without a change to its keys. Each key comes after the one before it.
 - **The value** is a finite number. A whole number with more than 24 bits, which an `f32` does not hold exactly, is a problem.
@@ -279,7 +291,7 @@ A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, th
 - **`Cutscene_Track`:** its ID, kind, name, binding's index or `CUTSCENE_NONE`, flags (`.Muted`, and `.Follow_Camera` for a presentation track whose bars take the camera's aspect), when-finished, its first section and count, for a property track its component's stable ID and its field's name and `scene_field_hash`, and for a transform track its space (`Cutscene_Space`), its origin as `[3]i64` `World_Position` units, and the index of the binding that it is relative to, or `CUTSCENE_NONE`. An audio track has its gain and its `time_scale` (`Cutscene_Audio_Scale`: `Follow` or `Free`). The other kinds have 0 and `Follow` there. An event track has its first event and count, and no sections. The other kinds have no events.
 - **`Cutscene_Section`:** its ID, start, end, eases, weight, pre-roll and post-roll, asset GUID (zero for a kind that names none), its first channel and count, and its flags (`.Additive`, `.Loop`, `.Blend_On_Skip`, `.Plays_Through_Skip`). A section of a kind that plays its asset's time (`cutscene_track_plays`: animation, audio and sub-sequence) also has its offset into the asset in ticks, its speed, which is 1 for an audio section, and its root motion (`Cutscene_Root_Motion`: `Bake`, `Apply` or `In_Place`). The other kinds have zeros there. A sub-sequence section's offset and speed are its trim's start and its scale, and it has its trim's end, or 0 for the end of the child's range, in `trim_end`. The other kinds have 0 there. A camera cut section has its camera's binding index, and its blends in and out in ticks with their curves (`Cutscene_Blend_Curve`). The other kinds have `CUTSCENE_NONE` and zeros there. An audio section has its bus and its `min_distance` and `max_distance`. The other kinds have zeros there.
 - **`Cutscene_Constraint`:** its kind (`Look_At`, `Follow` or `Focus`), the index of the camera cut section or of the binding that holds it (the other is `CUTSCENE_NONE`), its target binding's index, its offset and its damping in ticks. `cutscene_constraints` gives them, at most `MAX_CUTSCENE_CONSTRAINTS` (8192): the bindings' first, then the sections'.
-- **`Cutscene_Channel`:** its name and the name's hash, its first key and count, and its flags (`.Guids`, when its keys' values are indexes into the GUIDs).
+- **`Cutscene_Channel`:** its name and the name's hash, its first key and count, its flags (`.Guids`, when its keys' values are indexes into the GUIDs), and its `pre_infinity` and `post_infinity`.
 - **`Cutscene_Key`:** its time from the section's start, its value, its interpolation, its flags (`.Broken`, `.Weighted`, `.Teleport`), and its in and out slopes and weights.
 - **`Cutscene_Event`:** a trigger or a range of an event track: its ID, its start and end on the cutscene's time (a trigger's end is its start), its flags (`.Range`, `.Fire_On_Seek`, `.Fire_When_Skipped`), its name, and its first value and count. At most `MAX_CUTSCENE_EVENTS` (8192).
 - **`Cutscene_Binding_Map`:** a sub-sequence section's `bind`: the section's index, the child's binding by its ID in the child, and this cutscene's binding by its index. At most `MAX_CUTSCENE_BINDING_MAPS` (65536), in section order. `cutscene_section_maps` gives one section's. A child's binding is by its ID, so a child that is cooked again, with its bindings in another order, keeps its maps.
@@ -307,6 +319,7 @@ Each track's sections follow those of the track before it. The same is true of e
 - that a sub-sequence track's sections do not overlap and have no channels, that a section's trim ends after its offset or is 0, that only a sub-sequence section has a trim's end, and that each map is on a sub-sequence section, in section order, names a binding of the blob and maps a child's binding at most once for its section;
 - a `skip_color` that is opaque, `.Follow_Camera` only on a presentation track, and the presentation rows: one for each section of a presentation track, in section order and for no other; a fade's color opaque and the other kinds' color zero; strings inside the blob, and only on a subtitle; a subtitle's audio section the index of a section of an audio track; and the channels of each kind (`opacity`; `aspect` and `amount`; none);
 - that every channel has keys;
+- that a channel's infinity modes are known ones, constant on an audio track's `pitch`, and not `linear` or `cycle_offset` on a channel of assets;
 - that only an event track has events, that it has no sections and does not keep, that each event is inside the length, in start order on its track, with a name, a range's end after its start and a trigger's at it, known flags and at most 4 values, and that each value has a known kind, holds only its kind's field, and names a binding or a GUID that the blob has;
 - that each key is inside its section, comes after the key before it, has a known interpolation and flags and has finite numbers, that a key that is not a Bezier key has no tangents, that only a weighted key has weights, from 0 to 1, that only a transform track's keys teleport, and that a key that names an asset is constant and names one of the GUIDs.
 

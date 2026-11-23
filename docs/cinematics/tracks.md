@@ -15,7 +15,25 @@ A channel of a section is a **curve**: keys in rising time, each with a time in 
 | `Bezier` | A curve from the key's out tangent to the next key's in tangent. |
 | `Auto` | A Bezier curve whose tangents the evaluator computes from the neighbouring keys. |
 
-- **Holds.** Before the first key and after the last, the curve holds that key's value. At a key's time, the value is the key's value, exactly. Cycle and linear extrapolation can come later.
+- **At a key.** At a key's time, the value is the key's value, exactly.
+- **Infinity.** Before the first key, the channel's `pre_infinity` decides the value, and after the last key, its `post_infinity` does. Both are `constant` unless the text sets them (`Cutscene_Infinity`, `curve_wrap`):
+
+  | Mode | Outside the keys, the curve |
+  |---|---|
+  | `constant` | holds the end key's value. |
+  | `linear` | goes on along the slope that it has at the end key: 0 from a `Constant` segment, the line's slope from a `Linear` one, and the tangent's from a `Bezier` or `Auto` one. |
+  | `cycle` | repeats its keys, from the first key's time to the last's. |
+  | `cycle_offset` | repeats its keys, and each repeat is moved by the change from the first key's value to the last's, so a ramp goes on as stairs. |
+  | `oscillate` | repeats its keys forward, then backward, in turn. |
+
+  - Each repeat maps the time into the keys with a floored division on whole ticks, so it is exact. A curve whose keys span no time holds.
+  - **Only inside the section.** A section's evaluation clamps the time to the section (see [Evaluation](evaluation.md)), so a mode shows only between the section's edges and its end keys. Pre-roll and post-roll hold the section's start and end values.
+  - **An `Auto` end key is flat,** so `linear` beside it holds. Make the end key `Bezier` to extend along a slope.
+  - **Teleports do not repeat.** A transform track's `teleport` key fires at its own time only, not in the repeats of a cycle.
+  - **A pitch is constant.** An audio track's `pitch` places its sound by its integral, `curve_integral`, which holds outside the keys. So `cutscene_view` refuses any other mode on it.
+  - **Assets** have no slope and no change of value. A channel of `$<guid>` keys takes `constant`, `cycle` or `oscillate`.
+  - A value that a mode takes past a key's range is clamped as any value is: a gain at 0, and a fade's opacity from 0 to 1.
+  - `curve_step` takes the same modes, and `linear` holds.
 - **Tangents.** Only a `Bezier` key has tangents of its own. A tangent is a **slope**, in value per second, and a **weight**.
   - The key's out tangent shapes the segment after it, and its in tangent the segment before it.
   - A key that is not a `Bezier` key, next to a Bezier segment, gives that segment its automatic tangent.
@@ -35,8 +53,10 @@ A channel of a section is a **curve**: keys in rising time, each with a time in 
 - It finds the segment by halves. The `hint` from the last call finds it at once in playback, and never changes the value.
 - Its arithmetic is `f64` `+ - * /` in a fixed order. A weighted segment's solve takes a fixed number of halvings (`CURVE_SOLVE_STEPS`, 48), not a tolerance.
 - `lib/engine/cutscene/testdata/curve.txt` holds a shared test curve and its value at every 250 ticks, as `f32` bits. The runtime's test reads it, and so does the test of the editor's evaluator, `CutsceneCurve`, which gives the same bits (see [Editor: Cutscene editor](../editor/cutscene-editor.md#the-evaluator)). Run the cutscene tests with `CINNABAR_WRITE_CURVE_GOLDEN=1` to write it again after a deliberate change.
+  - Its `infinity <pre> <post> <from> <to>` blocks hold the values of the curve's keys from `<from>` to before `<to>` with those modes, from -60000 to 180000 ticks. They end with the ticks beside the keys' ends and their repeats, where a floored division goes wrong first, and two far ticks.
+  - Each mode is on each side once, beside another mode, so a side read as the other fails.
 
-The text of a key is in [Content: Cutscenes](../content/kinds/cutscenes.md#channels-and-keys). The cooker checks that keys are in order, that numbers are finite, and that weights are from 0 to 1.
+The text of a key and of a channel's infinity is in [Content: Cutscenes](../content/kinds/cutscenes.md#channels-and-keys). The cooker checks that keys are in order, that numbers are finite, that weights are from 0 to 1, and that a channel's infinity is one that it takes.
 
 ## Property tracks
 

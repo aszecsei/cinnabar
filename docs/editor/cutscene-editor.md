@@ -4,7 +4,6 @@ The cutscene editor edits a cutscene (see [Content: Cutscenes](../content/kinds/
 
 The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, and the curve editor. These come next:
 - a scene view that looks through the cut camera, and the camera tools ([#555](https://github.com/aszecsei/cinnabar/issues/555));
-- the curve editor's pre- and post-infinity, weighted tangents, typed times and values, and value snapping ([#553](https://github.com/aszecsei/cinnabar/issues/553));
 - the bindings and the viewport's selection ([#554](https://github.com/aszecsei/cinnabar/issues/554)), with the filter that shows the tracks of the entities selected in the viewport;
 - the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)).
 
@@ -221,6 +220,9 @@ Each action is a command, so it is in the command palette, and `keybindings.json
 | Normalized Curves | `cutscene.curvesNormalized` | Alt+N |
 | Auto Tangents, Unify Tangents, Break Tangents | `cutscene.tangentAuto`, `cutscene.tangentUnify`, `cutscene.tangentBreak` | 1, 2, 3 (`D1`, `D2`, `D3`) |
 | Linear, Constant, Flatten Tangents | `cutscene.tangentLinear`, `cutscene.tangentConstant`, `cutscene.tangentFlatten` | 4, 5, 6 (`D4`, `D5`, `D6`) |
+| Weighted Tangents | `cutscene.tangentWeighted` | 7 (`D7`) |
+| Next Pre-Infinity, Next Post-Infinity | `cutscene.preInfinity`, `cutscene.postInfinity` | 8, 9 (`D8`, `D9`) |
+| Value Snap | `cutscene.curveValueSnap` | Alt+V |
 
 ### Cost
 
@@ -430,6 +432,7 @@ The curve editor shows the curves of the selected tracks over time, below the ti
 ### The pane
 
 - **Curve Editor** (Ctrl+E), or the toolbar's **Curves** button, opens it below the timeline, with a split between them. It is the tab's, and not saved.
+- **Its toolbar** (`CutsceneCurveBar`) is above its curves: Normalized, Value snap, Before and After for the [infinity](#infinity), and the [Time and Value boxes](#typed-times-and-values).
 - **The curves are the selection's.** A selected track shows each of its channels. A selected section, channel or key shows its channel. A selection of keys only keeps the curves that showed and adds its own, so a click on a key does not hide the other curves. With nothing selected, the curves stay.
 - **The list** on the left is as wide as the timeline's headers. Each row is one channel of one section, with its color. A click on the color hides or shows the curve. A click on the name selects the curve's keys.
 - **Colors:** the part of a channel's name after its last `_`, or the whole name, sets its color: `x` or `r` is red, `y` or `g` green, `z` or `b` blue, and `w` or `a` grey. So `position_x` is red. Other channels take colors from a palette in the order that they show.
@@ -444,7 +447,7 @@ The curve editor shows the curves of the selected tracks over time, below the ti
   - The middle button pans both axes.
   - Alt and a right drag zoom each axis about the press: right and left zoom the time, and up and down the values.
 - **F** (Frame Selection, with the curve editor's keyboard) fits the selected keys in time and value, or every curve when no key of the curves is selected.
-- **Normalized Curves** (Alt+N, or the toolbar's **Normalized** button) shows each curve from its least value at -1 to its most at 1, so curves of different sizes can be compared. It changes no value: a drag moves a key by the curve's own amount. A flat curve shows at 0.
+- **Normalized Curves** (Alt+N, or the curve toolbar's **Normalized** button) shows each curve from its least value at -1 to its most at 1, so curves of different sizes can be compared. It changes no value: a drag moves a key by the curve's own amount. A flat curve shows at 0.
 - **The grid** has a line for each round value, with 0 brighter, and a line for each frame or group of frames, as the timeline has.
 
 ### Keys
@@ -453,6 +456,7 @@ The curve editor shows the curves of the selected tracks over time, below the ti
 - **The selection is the timeline's.** A key selected in the curve editor is selected on the timeline too. Undo and Esc put it back as the timeline's drags do.
 - **A drag** of a selected key moves every selected key in time and value, as one undo entry (`Move Keys`). Esc cancels it.
   - Time snaps as the timeline's drags do: to the edges of the sections, the triggers, the other keys, the markers and the playhead within 6 pixels, or else to frames. Ctrl turns snapping off for the drag, and Snap (N) for all of them.
+  - **Value Snap** (Alt+V, or the curve toolbar's **Value snap** button) puts the grabbed key's value on the grid's lines, and moves the other keys by as much. It is off at first, and the tab's. Ctrl turns it off for the drag too. In the normalized view, it snaps the shown value.
   - Shift moves only along the axis that has moved more.
   - A key stays inside its section, and keys that pass each other change places, as on the timeline.
 - **A double-click** on a curve adds a key there, with the value that the curve has there, and selects it (`Add Key`). After a `linear` or a `constant` key, the new key takes that interpolation, so a straight line or a step stays as it was. Otherwise the new key is `auto`, which can change the curve's shape around it.
@@ -474,8 +478,33 @@ A key's interpolation decides the segment from it to the next key, as [Tracks: C
 
 - Auto, Linear and Constant drop the slopes and the weights. Unify, Break and Flatten keep a Bezier key's weights.
 - For a key that is not a Bezier key, Unify and Break start from the slopes that the evaluator gives it. So an `auto` key keeps its curve's shape. A `linear` or a `constant` key's segment to the next key becomes a curve.
-- **Handles.** A selected `bezier` or `auto` key shows a handle on each side that has a key. A handle is 40 pixels long and shows the slope's direction on screen. Its length is not a weight.
+- **Handles.** A selected `bezier` or `auto` key shows a handle on each side that has a key. A key without weights has handles 40 pixels long, which show the slope's direction on screen. A weighted key's handles are its [weights](#weights).
 - **A drag of a handle** sets the slope from the key to the pointer, as one undo entry (`Drag Tangent`) that Esc cancels. An `auto` key becomes a Bezier key. A key that is not broken takes the slope on both sides, and a broken key on the handle's side only.
+
+### Weights
+
+A weight is how far a handle reaches into its segment, from 0 to 1 of the segment's duration ([Tracks: Curves](../cinematics/tracks.md#curves)).
+- **Weighted Tangents** (7) weights the selected `bezier` and `auto` keys, or when all of them are weighted, takes their weights away, as one undo entry. Linear and constant keys have no handles, and it leaves them.
+  - A key that it weights becomes `bezier` with the slopes that it had, an `auto` key's computed ones too, and `weights 0.33333334 0.33333334`. That is the reach of a key without weights, so the curve keeps its shape.
+  - A key whose weights it takes away keeps its slopes.
+- **A weighted handle** is at its control point: the weight's part of the segment's duration across, and the slope over that time up. A handle shorter than 12 pixels shows at 12 pixels along its slope, so it is not under its key.
+- **A drag of a weighted handle** sets the slope, as for any handle, and that side's weight from how far across the pointer is, from 0 to 1. Each side has its own weight, so an unbroken key's other side keeps its weight. The tooltip shows both.
+
+### Infinity
+
+A curve's infinity is what it does before its first key and after its last, inside its section: constant, linear, cycle, cycle with offset or oscillate ([Tracks: Curves](../cinematics/tracks.md#curves)). It is a channel's `pre_infinity` and `post_infinity`, and constant writes neither.
+- **Before** and **After** on the curve toolbar show and set it for the curves of the selected keys, or with no key selected, for every curve that shows. A blank box means that the curves differ. **Next Pre-Infinity** (8) and **Next Post-Infinity** (9) step to the next mode. Each is one undo entry.
+- A curve that does not take a mode keeps its own: an audio track's `pitch` takes only constant, and a curve of assets has none.
+- **The curve draws dashed** from its section's start to its first key and from its last key to its section's end, as the runtime evaluates it there. Its span in the normalized view, and F with no key selected, take in those parts on a side that is not constant.
+- **A double-click** on a dashed part adds a key with the value that it shows. The new key changes the keys' span, so a cycle's repeats change.
+
+### Typed times and values
+
+The curve toolbar's **Time** and **Value** boxes show the time and the value that every selected key has, or a dash when they differ. The time is on the cutscene's time, as timecode or as frames, as the ruler shows it.
+- **Type an entry and press Enter:** a number sets every selected key, and `+=` or `-=` and a number moves each by it. Esc, or a click away, puts back what the keys have. Each entry is one undo entry (`Set Key Time`, `Set Key Value`).
+- **A time** is timecode or frames at the display rate, as Go to Time takes. A key stays inside its section, and the selection follows the keys as they sort. An entry that would put two selected keys of one curve at one time changes nothing, and the box's tip says why. A key can land on a key that is not selected, as with a drag, and the cooker reports it.
+- **A value** is a number. A stepped curve's key takes a whole number.
+- An entry that does not read changes nothing, and the box's tip says what it takes.
 - **The preview follows a drag when it ends.** The text cooks when the undo entry closes, as for the timeline's drags, so the viewport shows a drag of a key or a handle at its release.
 
 ### Stepped curves
@@ -489,12 +518,11 @@ A property track whose field is an integer, a bool or an enum steps, as the runt
 
 `CutsceneCurve` in `Cinnabar.Editor.Document` is the editor's copy of the runtime's evaluator (`lib/engine/cutscene/curve.odin`), line for line. It does the same `f64` arithmetic in the same order, without fused multiply-adds, with the same 48 halvings for a weighted segment. `CurveKey.Parse` reads a key line as the cooker does: each number as an `f64` that must be finite, then an `f32`.
 - `CutsceneCurveTests` reads `lib/engine/cutscene/testdata/curve.txt`, the curve that the runtime's test writes, and checks that the editor gives the same `f32` bits at each of its ticks.
-- The curve editor samples each curve at whole ticks only, one sample for each pixel, clamped to its section, as the runtime samples it.
+- The curve editor samples each curve at whole ticks only, one sample for each pixel, clamped to its section, as the runtime samples it, with its infinity.
+- It reads a channel's `pre_infinity` and `post_infinity` as the cooker does. `CutsceneCurveTests` checks the golden file's infinity blocks too.
 - Split takes its values from it.
 
 ### Limits
 
-- **No pre- or post-infinity yet.** Before a section's first key and after its last, a curve holds that key's value, as the runtime does. Cycle, linear and oscillate modes need the runtime and the blob, and come with the second part of [#553](https://github.com/aszecsei/cinnabar/issues/553).
-- **Weights show but cannot be set.** A weighted key evaluates and draws exactly, and its weights stay through the tangent commands that keep tangents. A handle's length does not show or set a weight.
-- **No typed times or values,** and no value snapping, yet.
+- **Value snapping is for drags.** A typed value is exact.
 - **A curve per section.** A track with several sections has a curve for each section's channel, named with the section's ID.
