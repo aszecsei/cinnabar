@@ -16,6 +16,13 @@ public sealed partial class EditorShell
     public CutsceneEditor? ActiveCutscene => ActiveGraphEditor as CutsceneEditor;
 
     /// <summary>
+    /// Asks whether to delete a cutscene's binding with tracks, by its name, its cutscene's and how many tracks go with
+    /// it (see docs/editor/cutscene-editor.md#bindings). The window sets it, and tests answer it. Without it, the delete
+    /// goes ahead.
+    /// </summary>
+    public Func<string, string, int, Task<bool>>? AskDeleteBinding { get; set; }
+
+    /// <summary>
     /// What the timeline's last copy or cut holds, which a paste in the tab of the cutscene that it came from puts at its
     /// playhead (see docs/editor/cutscene-editor.md#copy-and-paste). The editor keeps it, not the system's clipboard.
     /// </summary>

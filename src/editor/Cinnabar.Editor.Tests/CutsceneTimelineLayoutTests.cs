@@ -20,6 +20,28 @@ public sealed class CutsceneTimelineLayoutTests
         L.RulerHeight + layout.Rows.First(r => r.Path == path && r.Kind == kind).Top + L.RowHeight / 2;
 
     [Fact]
+    public void ABindingsRowCarriesWhatItBindsAndABindingsFilterHidesTheRest()
+    {
+        var file = Intro();
+        var bindings = file.Bindings.Select(b => b.Id).OfType<int>().ToList();
+        var info = new CutsceneBindingInfo(CutsceneBindingKind.Spawned, "Prop", CutsceneBindingState.Broken, "gone");
+
+        var all = L.Build(file, new HashSet<string>(), null, b => b.Id == bindings[0] ? info : null);
+        var rows = all.Rows.Where(r => r.Kind == CutsceneRowKind.Binding).ToList();
+        Assert.Equal(bindings.Count, rows.Count);
+        Assert.Same(info, rows[0].Binding);
+        Assert.All(rows.Skip(1), r => Assert.Null(r.Binding));
+        Assert.All(all.Rows.Where(r => r.Kind != CutsceneRowKind.Binding), r => Assert.Null(r.Binding));
+
+        // Only the first binding and its tracks; not the tracks that no binding has, nor the other bindings.
+        var only = L.Build(file, new HashSet<string>(), new CutsceneRowFilter("", null, new HashSet<int> { bindings[0] }));
+        Assert.Equal(CutsceneFile.PathOf(file.Bindings.First()), only.Rows[0].Path);
+        Assert.All(only.Rows.Skip(1), r => Assert.Equal(1, r.Depth));
+        Assert.False(new CutsceneRowFilter("", null, new HashSet<int>()).IsNone);
+        Assert.Empty(L.Build(file, new HashSet<string>(), new CutsceneRowFilter("", null, new HashSet<int>())).Rows);
+    }
+
+    [Fact]
     public void TicksArePixelsAtEveryZoom()
     {
         var view = new TimelineView(-1000, 50, TimelineZoom.Ticks);

@@ -76,8 +76,34 @@ public sealed class CutsceneTimelineInput
     /// <summary>The box of a box select, corner to corner, or null.</summary>
     public (Point From, Point To)? Box => _gesture == Gesture.Box ? (_pressAt, _pointer) : null;
 
-    /// <summary>What a drag has done so far, in the ruler's units, which the view shows by the pointer, or null.</summary>
-    public string? Tooltip { get; private set; }
+    /// <summary>
+    /// What the view shows by the pointer, or null: what a drag has done so far, in the ruler's units, or with no
+    /// gesture, why the binding whose header is under the pointer is not bound. The hover's tip is worked out from
+    /// where the pointer is now, so a scroll, a refresh or the pointer's exit cannot leave it stale.
+    /// </summary>
+    public string? Tooltip => _dragTip ?? HoverTip();
+
+    // What a drag has done so far, which only the drag's steps and Reset write.
+    string? _dragTip;
+
+    // Whether the pointer is over the control, which a move sets and Leave clears.
+    bool _inside;
+
+    string? HoverTip() =>
+        _inside && _gesture == Gesture.None
+        && Layout.HitTest(_pointer.X, _pointer.Y, View, ScrollY) is { Kind: CutsceneHitKind.Header, Row.Binding: { State: not CutsceneBindingState.Bound, Reason: { } reason } }
+            ? reason
+            : null;
+
+    /// <summary>The pointer left the control: the hover's tip goes.</summary>
+    public void Leave()
+    {
+        if (_inside)
+        {
+            _inside = false;
+            Invalidated?.Invoke();
+        }
+    }
 
     public Point Pointer => _pointer;
 
@@ -293,7 +319,9 @@ public sealed class CutsceneTimelineInput
     public void Move(double x, double y, KeyModifiers modifiers)
     {
         var last = _pointer;
+        var hovered = HoverTip();
         _pointer = new Point(x, y);
+        _inside = true;
         // Esc or an undo can end the drag's entry under the gesture.
         if (Dragging && !_editor.Document.InTransaction)
         {
@@ -322,10 +350,19 @@ public sealed class CutsceneTimelineInput
             case Gesture.Box:
                 break;
             default:
+                // Over a binding's header that is not bound, the tip says why.
+                if (HoverTip() != hovered)
+                {
+                    Invalidated?.Invoke();
+                }
                 return;
         }
         Invalidated?.Invoke();
     }
+
+    /// <summary>The binding's row under a point, for a drop on it, or null.</summary>
+    public CutsceneTimelineRow? BindingRowAt(double x, double y) =>
+        Layout.HitTest(x, y, View, ScrollY) is { Row: { Kind: CutsceneRowKind.Binding } row } ? row : null;
 
     // The press moved past the slop: the pending drag begins.
     void Start()
@@ -416,7 +453,7 @@ public sealed class CutsceneTimelineInput
                 Guide = guide;
                 var paths = _moving;
                 _editor.StepDrag(f => CutsceneEdits.Move(f, paths, delta, _editor.Locked));
-                Tooltip = Describe(_grabbed.Start + delta, _grabbed.End + delta, delta);
+                _dragTip = Describe(_grabbed.Start + delta, _grabbed.End + delta, delta);
                 break;
             }
             case Gesture.Trim:
@@ -429,7 +466,7 @@ public sealed class CutsceneTimelineInput
                 var ripple = _ripple;
                 _editor.StepDrag(f => CutsceneEdits.Trim(f, path, edge, to - from, ripple, _editor.Locked, _editor.ChildStart));
                 var now = _editor.File.Find(path);
-                Tooltip = Describe(now?.Start ?? _grabbed.Start, now?.End ?? _grabbed.End, (edge == CutsceneEdge.Start ? now?.Start : now?.End) - from ?? 0);
+                _dragTip = Describe(now?.Start ?? _grabbed.Start, now?.End ?? _grabbed.End, (edge == CutsceneEdge.Start ? now?.Start : now?.End) - from ?? 0);
                 break;
             }
             case Gesture.Slip:
@@ -437,7 +474,7 @@ public sealed class CutsceneTimelineInput
                 var delta = snap ? (int)(Math.Round(raw / frame) * frame) : (int)Math.Round(raw);
                 var path = _moving[0];
                 _editor.StepDrag(f => CutsceneEdits.Slip(f, path, delta, _editor.Locked, _editor.ChildStart));
-                Tooltip = $"slip {Units(delta)}";
+                _dragTip = $"slip {Units(delta)}";
                 break;
             }
             case Gesture.Handle:
@@ -468,7 +505,7 @@ public sealed class CutsceneTimelineInput
                     }
                     return [];
                 });
-                Tooltip = kind == CutsceneHitKind.Length ? $"length {Units(_editor.File.Length ?? 0)}" : $"range {Units(CutsceneEdits.RangeOf(_editor.File).Start)} – {Units(CutsceneEdits.RangeOf(_editor.File).End)}";
+                _dragTip = kind == CutsceneHitKind.Length ? $"length {Units(_editor.File.Length ?? 0)}" : $"range {Units(CutsceneEdits.RangeOf(_editor.File).Start)} – {Units(CutsceneEdits.RangeOf(_editor.File).End)}";
                 break;
             }
         }
@@ -562,6 +599,6 @@ public sealed class CutsceneTimelineInput
         _press = null;
         _moving = [];
         Guide = null;
-        Tooltip = null;
+        _dragTip = null;
     }
 }

@@ -82,6 +82,7 @@ public sealed class MainWindow : Window
         shell.Content.DeleteRequested += items => _ = ConfirmDelete(items);
         shell.Content.AskRewriteRequires = AskRewriteRequires;
         shell.Keying.AskPossess = AskPossess;
+        shell.AskDeleteBinding = AskDeleteBinding;
         shell.Content.RequiresRewritten += result => _ = ShowRewrittenRequires(result);
         shell.Content.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
         shell.Content.DraftLeft += () => _ = AskDraft();
@@ -455,6 +456,14 @@ public sealed class MainWindow : Window
         var message = $"No binding of {cutscene} possesses {what}.\n\n" + (names.Count == 1 ? "" : ListOf(names) + "\n\n")
             + "Possess adds a binding for each, which the cutscene takes over while it plays, as one undo entry with the keys.";
         return await Dialogs.Ask(this, "Possess", message, "Possess", "Cancel") == "Possess";
+    }
+
+    // A delete of a cutscene's binding that has tracks (see docs/editor/cutscene-editor.md#bindings).
+    async Task<bool> AskDeleteBinding(string binding, string cutscene, int tracks)
+    {
+        var message = $"\"{binding}\" has {tracks} {(tracks == 1 ? "track" : "tracks")} in {cutscene}, which go with it.\n\n"
+            +"Delete removes the binding and its tracks as one undo entry.";
+        return await Dialogs.Ask(this, "Delete Binding", message, "Delete", "Cancel") == "Delete";
     }
 
     async Task<bool?> AskRewriteRequires(IReadOnlyList<CookAsset> scripts)

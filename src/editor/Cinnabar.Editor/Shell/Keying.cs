@@ -659,15 +659,7 @@ public sealed partial class Keying
 
     // The entity that a binding of the keyed cutscene possesses in an open scene, or null: for a spawned binding, or one
     // whose scene is not open.
-    ulong? HandleOfBinding(int binding)
-    {
-        if (Cutscene?.File.Bindings.FirstOrDefault(b => b.Id == binding) is not { } block || PossessRef.Parse(block.Get("possess")) is not { } entity
-            || _shell.SceneOfGuid(entity.SceneGuid) is not { } scene || _shell.World.FindScene(scene.Number, entity.Id) is not { } node)
-        {
-            return null;
-        }
-        return node.Handle;
-    }
+    ulong? HandleOfBinding(int binding) => Cutscene?.HandleOf(binding);
 
     // The entities that the keyed cutscene's tracks are relative to, which the editor watches so their poses are at hand.
     readonly HashSet<ulong> _watched = [];

@@ -1,3 +1,4 @@
+using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Cutscenes;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
@@ -63,6 +64,11 @@ public sealed class CutsceneEditor : IGraphEditor
         _soloed = [.. view.Soloed ?? []];
         _scrubSound = view.ScrubSound;
         _previewEvents = view.Events;
+        // A binding's row shows its entity or prefab, which the open scenes and the asset index have.
+        _shell.SceneChanged += OnBindingTargetsChanged;
+        _shell.Assets.Changed += OnBindingTargetsChanged;
+        _shell.Selection.Changed += OnEntitiesSelected;
+        _entityBindings = BindingsOfEntities(_shell.Selection.Entities);
     }
 
     public CutsceneDocument Document { get; }
@@ -102,6 +108,8 @@ public sealed class CutsceneEditor : IGraphEditor
         _selection.RemoveAll(p => File.Find(p) is not { } block
             || (!_ownEdit && block.Kind == CutsceneBlockKind.Key && _keyLines.TryGetValue(p, out var line) && line != KeyLine(block)));
         FollowShownCurves();
+        // A binding added or removed changes which bindings the selected entities have.
+        _entityBindings = BindingsOfEntities(_shell.Selection.Entities);
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();
         if (!Document.InTransaction)
@@ -147,6 +155,7 @@ public sealed class CutsceneEditor : IGraphEditor
         Replace(next);
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();
+        SelectBoundEntities();
     }
 
     /// <summary>The problems on a block's own lines.</summary>
@@ -568,10 +577,10 @@ public sealed class CutsceneEditor : IGraphEditor
     KeysFilter? _keysUnder;
 
     /// <summary>Which rows the timeline shows, which every <see cref="CutsceneTimelineLayout.Build"/> of this editor takes.</summary>
-    public CutsceneRowFilter RowFilter => new(FilterText, _keysUnder?.Span);
+    public CutsceneRowFilter RowFilter => new(FilterText, _keysUnder?.Span, SelectedOnly ? BindingsOfEntities(_shell.Selection.Entities) : null);
 
-    /// <summary>The timeline's rows, as the filter and the folds have them.</summary>
-    public CutsceneTimelineLayout Layout() => CutsceneTimelineLayout.Build(File, _folds, RowFilter);
+    /// <summary>The timeline's rows, as the filter and the folds have them, with each binding's state.</summary>
+    public CutsceneTimelineLayout Layout() => CutsceneTimelineLayout.Build(File, _folds, RowFilter, InfoOf);
 
     public void SetFilterText(string text)
     {
@@ -1395,6 +1404,348 @@ public sealed class CutsceneEditor : IGraphEditor
     {
         _cook.Dispose();
         Document.Changed -= OnDocumentChanged;
+        _shell.SceneChanged -= OnBindingTargetsChanged;
+        _shell.Assets.Changed -= OnBindingTargetsChanged;
+        _shell.Selection.Changed -= OnEntitiesSelected;
+    }
+
+    // Bindings (see docs/editor/cutscene-editor.md#bindings).
+
+    void OnBindingTargetsChanged() => Changed?.Invoke();
+
+    /// <summary>
+    /// What a binding binds, and whether it is there, from the open scenes' documents and the asset index, not the game:
+    /// a possessed entity of a scene that is not open is not loaded, and one of an open scene that lacks it, or of no
+    /// scene that the index knows, is broken. A spawned binding is broken when its prefab is missing.
+    /// </summary>
+    public CutsceneBindingInfo InfoOf(CutsceneBlock binding)
+    {
+        var possess = binding.Get("possess");
+        var spawn = binding.Get("spawn");
+        if ((possess == null) == (spawn == null))
+        {
+            return new(CutsceneBindingKind.Unknown, null, CutsceneBindingState.Broken,
+                possess == null ? "It has neither possess nor spawn." : "It has both possess and spawn.");
+        }
+        if (spawn != null)
+        {
+            if (CutsceneBindings.SpawnOf(binding) is { } guid && _shell.Assets.Find(guid) is { Kind: AssetKind.Prefab } prefab)
+            {
+                return new(CutsceneBindingKind.Spawned, PrefabName(prefab), CutsceneBindingState.Bound);
+            }
+            // Before the cook daemon's first snapshot the index knows no asset, so a prefab is not known to be missing.
+            return AssetsKnown
+                ? new(CutsceneBindingKind.Spawned, null, CutsceneBindingState.Broken, $"Its prefab, {spawn.Trim()}, is missing.")
+                : new(CutsceneBindingKind.Spawned, null, CutsceneBindingState.Bound);
+        }
+        if (PossessRef.Parse(possess) is not { } entity)
+        {
+            return new(CutsceneBindingKind.Possessed, null, CutsceneBindingState.Broken, $"Its possess, {possess!.Trim()}, is not a scene link.");
+        }
+        if (_shell.SceneOfGuid(entity.SceneGuid) is { } scene)
+        {
+            return scene.Expanded.Flat.Find(entity.Id) is { } found
+                ? new(CutsceneBindingKind.Possessed, found.Name, CutsceneBindingState.Bound)
+                : new(CutsceneBindingKind.Possessed, null, CutsceneBindingState.Broken, $"{System.IO.Path.GetFileName(scene.Path)} has no entity {entity.Id:x16}.");
+        }
+        if (_shell.Assets.Find(entity.SceneGuid) is { Kind: AssetKind.Scene } asset)
+        {
+            return new(CutsceneBindingKind.Possessed, null, CutsceneBindingState.NotLoaded, $"{System.IO.Path.GetFileName(asset.Path)} is not open.");
+        }
+        return AssetsKnown
+            ? new(CutsceneBindingKind.Possessed, null, CutsceneBindingState.Broken, $"No scene has the GUID {entity.SceneGuid}.")
+            : new(CutsceneBindingKind.Possessed, null, CutsceneBindingState.NotLoaded, "Its scene is not open.");
+    }
+
+    bool AssetsKnown => _shell.Assets.Linked || _shell.Assets.Assets.Count > 0;
+
+    // A binding's name for a prefab: its file's name without the extension, or a subasset's name.
+    static string PrefabName(Link.Cook.Asset asset) => AssetIndex.IsSubasset(asset) ? asset.Subasset : System.IO.Path.GetFileNameWithoutExtension(AssetIndex.Name(asset.Path));
+
+    /// <summary>
+    /// The entity in the game's world that a binding possesses, by handle, or null: for a spawned binding, and for one
+    /// whose scene is not open or lacks it.
+    /// </summary>
+    public ulong? HandleOf(int binding)
+    {
+        if (File.Bindings.FirstOrDefault(b => b.Id == binding) is not { } block || PossessRef.Parse(block.Get("possess")) is not { } entity
+            || _shell.SceneOfGuid(entity.SceneGuid) is not { } scene || _shell.World.FindScene(scene.Number, entity.Id) is not { } node)
+        {
+            return null;
+        }
+        return node.Handle;
+    }
+
+    // The IDs of the bindings that possess any of the entities.
+    HashSet<int> BindingsOfEntities(IEnumerable<ulong> handles) =>
+        [.. handles.Select(_shell.Keying.PossessOf).OfType<PossessRef>().Select(e => CutsceneKeying.BindingOf(File, e)).OfType<int>()];
+
+    // The entities that a possess would add a binding for: each one that a scene names and that no binding possesses
+    // yet, once, with its name.
+    List<(PossessRef Entity, string Name)> Possessable(IEnumerable<ulong> handles)
+    {
+        var found = new List<(PossessRef Entity, string Name)>();
+        foreach (var handle in handles)
+        {
+            if (_shell.Keying.PossessOf(handle) is { } entity && CutsceneKeying.BindingOf(File, entity) == null && found.All(f => f.Entity != entity))
+            {
+                found.Add((entity, _shell.World.Find(handle)?.Name is { Length: > 0 } name ? name : $"Entity {entity.Id:x16}"));
+            }
+        }
+        return found;
+    }
+
+    /// <summary>Why the selected entities cannot be possessed, or null when a binding can be added for one of them.</summary>
+    public string? PossessRefusal() => PossessRefusal(_shell.Selection.Entities);
+
+    string? PossessRefusal(IReadOnlyCollection<ulong> handles)
+    {
+        if (Document.InTransaction)
+        {
+            return "A drag is under way in the cutscene.";
+        }
+        if (handles.Count == 0)
+        {
+            return "No entity is selected.";
+        }
+        return Possessable(handles).Count > 0 ? null : "Each entity is bound already, or is not one that a scene names.";
+    }
+
+    /// <summary>
+    /// Adds a binding that possesses each entity that no binding possesses yet, as one undo entry, and selects their
+    /// rows. Entities that the game spawned, and those of a scene with no GUID yet, are left out.
+    /// </summary>
+    public void Possess(IEnumerable<ulong> handles)
+    {
+        var list = handles.ToList();
+        if (PossessRefusal(list) != null)
+        {
+            return;
+        }
+        var entities = Possessable(list);
+        List<int> ids = [];
+        Key(entities.Count == 1 ? "Add Binding" : "Add Bindings", f => ids = [.. entities.Select(e => CutsceneKeying.AddBinding(f, e.Entity, e.Name))]);
+        SelectBindings(ids);
+    }
+
+    /// <summary>
+    /// An entity dropped on the timeline, as from the Outliner: it possesses the entity, or the whole selection when the
+    /// entity is in it. With rebind, on a binding's row, it points that binding at the entity instead.
+    /// </summary>
+    public void DropEntity(ulong handle, string? bindingRow, bool rebind)
+    {
+        // A rebind names its binding by the row it was dropped on, and leaves both selections as they are.
+        if (rebind && bindingRow != null)
+        {
+            Rebind(File.Find(bindingRow) is { Kind: CutsceneBlockKind.Binding } b ? b.Id : null, handle);
+            return;
+        }
+        Possess(_shell.Selection.Contains(handle) ? _shell.Selection.Entities : [handle]);
+    }
+
+    /// <summary>The prefabs that assets dropped from the content browser place, by GUID: a prefab, or a file that makes one.</summary>
+    public List<string> PrefabsOf(IEnumerable<string> assets) => [.. assets.Select(_shell.PrefabToPlace).OfType<string>().Distinct()];
+
+    /// <summary>Adds a binding that spawns each prefab, by GUID, as one undo entry, and selects their rows.</summary>
+    public void Spawn(IEnumerable<string> prefabs)
+    {
+        var named = prefabs.Distinct().Select(g => (Guid: g, Name: _shell.Assets.Find(g) is { } a ? PrefabName(a) : "Prefab")).ToList();
+        if (named.Count == 0 || Document.InTransaction)
+        {
+            return;
+        }
+        List<int> ids = [];
+        Key(named.Count == 1 ? "Add Binding" : "Add Bindings", f => ids = [.. named.Select(p => CutsceneBindings.AddSpawn(f, p.Guid, p.Name))]);
+        SelectBindings(ids);
+    }
+
+    void SelectBindings(IEnumerable<int> ids)
+    {
+        var paths = ids.Select(id => File.Bindings.FirstOrDefault(b => b.Id == id)).OfType<CutsceneBlock>().Select(CutsceneFile.PathOf).ToList();
+        if (paths.Count > 0)
+        {
+            Select(paths, SelectMode.Replace);
+            RevealRequested?.Invoke(paths[^1]);
+        }
+    }
+
+    /// <summary>The selected binding's block, when the primary selection is a binding's row, or null.</summary>
+    public CutsceneBlock? SelectedBinding => Selected is { Kind: CutsceneBlockKind.Binding, Id: not null } b ? b : null;
+
+    /// <summary>Why the selected binding cannot be pointed at an entity, or null when it can.</summary>
+    public string? RebindRefusal(ulong handle) => RebindRefusal(SelectedBinding?.Id, handle);
+
+    string? RebindRefusal(int? id, ulong handle)
+    {
+        if (Document.InTransaction)
+        {
+            return "A drag is under way in the cutscene.";
+        }
+        if (File.Bindings.FirstOrDefault(b => id != null && b.Id == id) is not { } binding)
+        {
+            return "No binding is selected.";
+        }
+        if (binding.Get("spawn") != null)
+        {
+            return "The binding spawns a prefab. Only a possessed binding can be pointed at an entity.";
+        }
+        if (handle == 0)
+        {
+            return "No entity is selected.";
+        }
+        if (_shell.Keying.PossessOf(handle) is not { } entity)
+        {
+            return "The entity is not one that a scene names: the game spawned it, or its scene has no GUID yet.";
+        }
+        return CutsceneKeying.BindingOf(File, entity) is { } other
+            ? other == binding.Id ? "The binding possesses that entity already." : "Another binding possesses that entity."
+            : null;
+    }
+
+    /// <summary>Points the selected binding at an entity, keeping its tracks, as one undo entry.</summary>
+    public void Rebind(ulong handle) => Rebind(SelectedBinding?.Id, handle);
+
+    void Rebind(int? binding, ulong handle)
+    {
+        if (RebindRefusal(binding, handle) != null || binding is not { } id || _shell.Keying.PossessOf(handle) is not { } entity)
+        {
+            return;
+        }
+        Key("Rebind", f => CutsceneBindings.Rebind(f, id, entity));
+    }
+
+    /// <summary>
+    /// Why the selected binding cannot be deleted, or null when it can, or when no binding's row is selected: blocks
+    /// that name it by ID would be left naming nothing.
+    /// </summary>
+    public string? DeleteBindingRefusal()
+    {
+        if (SelectedBinding?.Id is not { } id)
+        {
+            return null;
+        }
+        if (Document.InTransaction)
+        {
+            return "A drag is under way in the cutscene.";
+        }
+        if (CutsceneBindings.TracksOf(File, id).Any(t => CutsceneEdits.IsLocked(t, _locked)))
+        {
+            return "A track of the binding is locked.";
+        }
+        var references = CutsceneBindings.ReferencesTo(File, id);
+        if (references.Count == 0)
+        {
+            return null;
+        }
+        var names = references.Take(3).Select(b => b.Name ?? $"{b.Kind.ToString().ToLowerInvariant()} {b.Id}");
+        return $"Other blocks name it: {string.Join(", ", names)}{(references.Count > 3 ? $" and {references.Count - 3} more" : "")}.";
+    }
+
+    /// <summary>Whether the primary selection is a binding's row that a delete removes.</summary>
+    /// <remarks>A row that the filter hides is not deleted, so Delete never acts on what is not in view.</remarks>
+    public bool CanDeleteBinding => SelectedBinding != null && DeleteBindingRefusal() == null && Layout().Rows.Any(r => r.Path == Selection);
+
+    /// <summary>
+    /// Deletes the selected binding and its tracks as one undo entry. A binding with tracks asks first, and one that
+    /// other blocks name is not deleted.
+    /// </summary>
+    public async Task DeleteBinding()
+    {
+        if (!CanDeleteBinding || SelectedBinding is not { Id: { } id } binding)
+        {
+            return;
+        }
+        var text = Document.Text;
+        var tracks = CutsceneBindings.TracksOf(File, id).Count;
+        if (tracks > 0 && _shell.AskDeleteBinding is { } ask && !await ask(binding.Name ?? $"binding {id}", System.IO.Path.GetFileName(Document.Path), tracks))
+        {
+            return;
+        }
+        // The text can change while the question is open.
+        if (Document.Text != text || Document.InTransaction)
+        {
+            return;
+        }
+        Own(() => Document.Edit("Delete Binding", f => CutsceneBindings.Remove(f, id)));
+        Replace([]);
+        Changed?.Invoke();
+        _shell.Commands.InvalidateAll();
+    }
+
+    /// <summary>
+    /// Whether the timeline shows only the bindings of the entities selected in the viewport or the Outliner, and their
+    /// tracks.
+    /// </summary>
+    public bool SelectedOnly { get; private set; }
+
+    public void SetSelectedOnly(bool on)
+    {
+        if (on != SelectedOnly)
+        {
+            SelectedOnly = on;
+            FilterChanged();
+        }
+    }
+
+    // While one side of the selection sync writes the other, the other does not write back.
+    bool _syncing;
+
+    // The bindings of the entities selected last. A resync gives the same entities new handles, so what is new is told
+    // by binding, not by handle: the same bindings again select no row.
+    HashSet<int> _entityBindings = [];
+
+    // The timeline's selection of binding rows selects their entities: only when one of them is in the world, so a
+    // click on a broken row keeps the entity that a rebind would use.
+    void SelectBoundEntities()
+    {
+        if (_syncing)
+        {
+            return;
+        }
+        var handles = _selection.Select(File.Find).OfType<CutsceneBlock>()
+            .Where(b => b.Kind == CutsceneBlockKind.Binding && b.Id != null)
+            .Select(b => HandleOf(b.Id!.Value)).OfType<ulong>().ToList();
+        if (handles.Count == 0)
+        {
+            return;
+        }
+        _syncing = true;
+        try
+        {
+            _shell.Selection.Set(handles);
+        }
+        finally
+        {
+            _syncing = false;
+        }
+    }
+
+    // An entity selected in the viewport or the Outliner selects its binding's row. Selecting an entity that no binding
+    // possesses, or none, keeps the timeline's selection, so keys stay selected while the designer picks an entity.
+    void OnEntitiesSelected(IReadOnlyList<ulong> old, IReadOnlyList<ulong> next)
+    {
+        if (SelectedOnly)
+        {
+            FilterChanged();
+        }
+        var now = BindingsOfEntities(next);
+        var ids = now.Except(_entityBindings).ToHashSet();
+        _entityBindings = now;
+        if (_syncing || ids.Count == 0)
+        {
+            return;
+        }
+        var paths = File.Bindings.Where(b => b.Id is { } id && ids.Contains(id)).Select(CutsceneFile.PathOf).ToList();
+        _syncing = true;
+        try
+        {
+            Select(paths, SelectMode.Replace);
+        }
+        finally
+        {
+            _syncing = false;
+        }
+        RevealRequested?.Invoke(paths[0]);
     }
 }
 
