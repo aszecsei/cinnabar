@@ -11,16 +11,21 @@ public sealed class PoseEdit
 {
     readonly List<(SceneEntity Entity, Pose Start, Pose? Parent)> _entities = [];
 
-    public PoseEdit(Scene scene, IEnumerable<ulong> ids)
+    /// <summary>
+    /// An edit of entities from their world poses: the document's, or with <paramref name="worldPose"/>, another's, as the
+    /// world shows an entity that a cutscene holds.
+    /// </summary>
+    public PoseEdit(Scene scene, IEnumerable<ulong> ids, Func<SceneEntity, Pose?>? worldPose = null)
     {
+        worldPose ??= e => SceneEdits.WorldPose(scene, e);
         var chosen = ids.ToHashSet();
         foreach (var id in chosen)
         {
-            if (scene.Find(id) is not { } entity || HasChosenAncestor(scene, entity, chosen) || SceneEdits.WorldPose(scene, entity) is not { } start)
+            if (scene.Find(id) is not { } entity || HasChosenAncestor(scene, entity, chosen) || worldPose(entity) is not { } start)
             {
                 continue;
             }
-            var parent = IsChild(entity) && scene.Find(entity.Parent) is { } p ? SceneEdits.WorldPose(scene, p) ?? Pose.Identity : null;
+            var parent = IsChild(entity) && scene.Find(entity.Parent) is { } p ? worldPose(p) ?? Pose.Identity : null;
             _entities.Add((entity, start, parent));
         }
     }

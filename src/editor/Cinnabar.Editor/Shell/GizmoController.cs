@@ -18,13 +18,14 @@ interface IGizmoTarget
 }
 
 /// <summary>
-/// A gizmo drag from press to release (see docs/editor/viewport.md#viewport): the drag's math and its target, the undo entry it
-/// previews its steps in, and the commit or cancel at its end. The drag lasts as long as its edit: one that another ends
-/// ends the drag too.
+/// A gizmo drag from press to release (see docs/editor/viewport.md#viewport): the drag's math and its target, the edit it
+/// previews its steps in, and the commit or cancel at its end. The edit is the scene's undo entry, or for an entity that
+/// a cutscene holds, values over its preview or keys (see docs/editor/cutscene-editor.md#gizmo-keys). The drag lasts as
+/// long as its edit: one that another ends ends the drag too.
 /// </summary>
 sealed class GizmoController(Func<string, SceneEdit?> begin, Action sent)
 {
-    sealed record Active(GizmoDrag Drag, IGizmoTarget Target, SceneEdit Edit);
+    sealed record Active(GizmoDrag Drag, IGizmoTarget Target, IFieldEdit Edit);
 
     Active? _active;
 
@@ -35,8 +36,8 @@ sealed class GizmoController(Func<string, SceneEdit?> begin, Action sent)
     /// <summary>Starts a drag in a new undo entry. False when another edit is open.</summary>
     public bool Start(GizmoDrag drag, IGizmoTarget target, string label) => begin(label) is { } edit && Start(drag, target, edit);
 
-    /// <summary>Starts a drag in an entry that is open already, as a pending distance's. False for a stale one.</summary>
-    public bool Start(GizmoDrag drag, IGizmoTarget target, SceneEdit edit)
+    /// <summary>Starts a drag in an edit that is open already, as a pending distance's or a cutscene's. False for a stale one.</summary>
+    public bool Start(GizmoDrag drag, IGizmoTarget target, IFieldEdit edit)
     {
         if (!edit.IsOpen || _active != null)
         {
@@ -66,7 +67,7 @@ sealed class GizmoController(Func<string, SceneEdit?> begin, Action sent)
     /// <summary>Ends the drag and puts what it edited back.</summary>
     public void Cancel() => _active?.Edit.Cancel();
 
-    void OnEnded(SceneEdit edit, bool committed)
+    void OnEnded(IFieldEdit edit, bool committed)
     {
         if (_active is not { } active || active.Edit != edit)
         {

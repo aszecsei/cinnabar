@@ -95,6 +95,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Overrides = new WorldOverrides(this);
         CutscenePreview = new CutscenePreview(this);
         PreviewValues = new PreviewValues(this);
+        // A gizmo drag that goes to the cutscene moves with the values over the preview.
+        PreviewValues.Changed += SendGizmo;
         Keying = new Keying(this);
         WireKeying();
         Watches = new EntityWatches(Selection, Host);

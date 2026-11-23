@@ -42,6 +42,9 @@ public abstract record FieldRoute
 /// </summary>
 public interface IFieldEdit
 {
+    /// <summary>Whether the edit is still open.</summary>
+    bool IsOpen { get; }
+
     /// <summary>Applies the operations, from where the edit began. False when it has ended or they do not fit.</summary>
     bool Preview(IReadOnlyList<Operation> ops);
 
@@ -166,9 +169,31 @@ public sealed partial class Keying
     /// Where an edit of a field of entities goes. They must agree: a field that some send to the scene and others to
     /// the cutscene is refused.
     /// </summary>
-    public FieldRoute Route(IReadOnlyList<ulong> handles, ulong component, FieldInfo field)
+    public FieldRoute Route(IReadOnlyList<ulong> handles, ulong component, FieldInfo field) =>
+        Merge([.. handles.Select(h => RouteOf(h, component, field))]);
+
+    /// <summary>
+    /// Where a gizmo drag of entities goes: their Transform's, or a child's Local_Transform's, position as a field
+    /// of each goes. They must agree, as for <see cref="Route"/>.
+    /// </summary>
+    public FieldRoute PoseRoute(IReadOnlyList<ulong> handles)
     {
-        var routes = handles.Select(h => RouteOf(h, component, field)).Distinct().ToList();
+        var routes = new List<FieldRoute>();
+        foreach (var handle in handles)
+        {
+            var child = _shell.World.Find(handle) is { Parent: not 0 };
+            var component = child ? SceneEdits.LocalTransformId : SceneEdits.TransformId;
+            if (_shell.World.Type(component)?.Fields.FirstOrDefault(f => f.Name == (child ? "offset" : "position")) is { } field)
+            {
+                routes.Add(RouteOf(handle, component, field));
+            }
+        }
+        return Merge(routes);
+    }
+
+    static FieldRoute Merge(List<FieldRoute> all)
+    {
+        var routes = all.Distinct().ToList();
         return routes switch
         {
             [] => FieldRoute.Scene.Instance,
@@ -176,6 +201,43 @@ public sealed partial class Keying
             _ when routes.OfType<FieldRoute.Refused>().FirstOrDefault() is { } refused => refused,
             _ => new FieldRoute.Refused("The selected entities' fields go to different places: the scene, values over the preview or keys. Edit them apart."),
         };
+    }
+
+    /// <summary>
+    /// An entity's pose as the world shows it while a cutscene holds the preview, with values over the preview: where a
+    /// gizmo drag that goes to the cutscene starts. Null for one that nothing holds, whose pose is the document's.
+    /// </summary>
+    public Pose? ShownWorldPose(ulong handle)
+    {
+        if (Cutscene == null || _shell.World.Type(SceneEdits.TransformId) is not { } type || _shell.World.Find(handle) is not { } node)
+        {
+            return null;
+        }
+        var bytes = (node.Parent == 0 ? _shell.PreviewValues.ComponentOf(handle, SceneEdits.TransformId) : null)
+            ?? (ComponentHeld(handle, SceneEdits.TransformId, type) || _shell.PreviewValues.ComponentOf(handle, SceneEdits.LocalTransformId) != null
+                ? _shell.World.ShownOf(handle, SceneEdits.TransformId)
+                : null);
+        FieldInfo? Field(string name) => type.Fields.FirstOrDefault(f => f.Name == name);
+        if (bytes == null || Field("position") is not { } p || KeyValues.Units(p, bytes) is not { } units
+            || Field("rotation") is not { } r || KeyValues.Numbers(r, bytes) is not [var x, var y, var z, var w]
+            || Field("scale") is not { } sc || KeyValues.Numbers(sc, bytes) is not { Length: 3 } scale)
+        {
+            return null;
+        }
+        return new Pose(units, new Maths.Quat(x, y, z, w), scale);
+    }
+
+    /// <summary>
+    /// Opens a gizmo drag of entities, by their scene IDs and handles, that goes to the cutscene: of values over the
+    /// preview, or with <paramref name="keys"/>, of keys. Null when it cannot open.
+    /// </summary>
+    internal IFieldEdit? BeginPoseDrag(string label, IReadOnlyDictionary<ulong, ulong> handles, bool keys)
+    {
+        List<(ValueKey Key, SceneValue Value)> Values(IReadOnlyList<Operation> ops) =>
+            [.. ops.OfType<SetField>()
+                .Where(op => op.Component is SceneEdits.TransformId or SceneEdits.LocalTransformId && op.Value != null && handles.ContainsKey(op.Id))
+                .Select(op => (new ValueKey(handles[op.Id], op.Component, op.Field), op.Value!))];
+        return keys ? BeginKeyDrag(label, Values) : BeginValueDrag(Values);
     }
 
     FieldRoute RouteOf(ulong handle, ulong component, FieldInfo field)
@@ -326,6 +388,8 @@ public sealed partial class Keying
         : IFieldEdit
     {
         bool _open = true;
+
+        public bool IsOpen => _open;
 
         public event Action<bool>? Ended;
 

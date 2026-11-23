@@ -549,4 +549,52 @@ public sealed class KeyingTests : IDisposable
         Assert.IsType<FieldRoute.Scene>(shell.Keying.Route([Door], SceneEdits.TransformId, Transform.Fields[2]));
         Assert.NotNull(other);
     }
+
+    [Fact]
+    public void WithAutoKeyAGizmoDragIsOneKeyAndEscTakesItBack()
+    {
+        var (shell, editor, _) = NewShell();
+        using var _ = shell;
+        shell.Keying.AutoKey = true;
+        shell.Keying.AutoKeyAddTracks = true;
+        shell.Selection.Select(Door);
+        shell.Viewports[0].Session.Show(new Avalonia.PixelSize(1600, 900));
+        shell.Camera.Place([0, 0, -(5L << 24)], 0, 0);
+        Assert.IsType<FieldRoute.Key>(shell.Keying.PoseRoute([Door]));
+        var (width, height) = shell.FrameSize;
+        var (pivot, _) = shell.GizmoPose()!.Value;
+        var center = shell.Camera.RelativeTo(pivot);
+        var size = Tools.Gizmo.Size(shell.Camera, center, height);
+        Vec2 Along(double meters) => shell.Camera.Project(center + Vec3.UnitX * meters, width, height)!.Value;
+
+        Assert.True(shell.PressGizmo(Along(0.5 * size)));
+        shell.DragGizmo(Along(0.5 * size + 0.3), invertSnap: false);
+        shell.DragGizmo(Along(0.5 * size + 0.6), invertSnap: false);
+        // The drag shows over the preview as it goes, and the gizmo goes with it.
+        Assert.Single(_sent.OfType<CutscenePreviewValues>().Last().Transforms);
+        Assert.InRange(shell.GizmoPose()!.Value.Pivot[0], (long)(0.59 * (1 << 24)), (long)(0.61 * (1 << 24)));
+        shell.ReleaseGizmo();
+
+        Assert.Equal(["Move Door"], editor.Document.History);
+        var x = CutsceneKeying.KeysAt(editor.File, new KeyTarget.Pose(1, PosePart.Position), 0)[0]!.Value;
+        Assert.InRange(x, 0.59, 0.61);
+        Assert.Empty(shell.Scene!.History);
+        Assert.False(shell.Scene.IsDirty);
+        Assert.Equal(new UndoTarget.Cutscene(editor), shell.LastEdited);
+
+        // Esc during a drag leaves no entry, and the values as they were.
+        var before = shell.PreviewValues.State;
+        var text = editor.Document.Text;
+        Assert.True(shell.PressGizmo(Along(0.5 * size + 0.6)));
+        shell.DragGizmo(Along(0.5 * size + 1.2), invertSnap: false);
+        shell.CancelGizmo();
+        Assert.Equal(text, editor.Document.Text);
+        Assert.Single(editor.Document.History);
+        Assert.False(shell.IsDraggingGizmo);
+        Assert.Equal(before.GetType(), shell.PreviewValues.State.GetType());
+        Assert.Equal(KeyValuesOf(shell.PreviewValues.ComponentOf(Door, SceneEdits.TransformId)), KeyValuesOf((before as PreviewValuesState.Live)?.Components[(Door, SceneEdits.TransformId)]));
+        Assert.Empty(shell.Scene.History);
+    }
+
+    static long[]? KeyValuesOf(byte[]? transform) => transform == null ? null : KeyValues.Units(Transform.Fields[0], transform);
 }

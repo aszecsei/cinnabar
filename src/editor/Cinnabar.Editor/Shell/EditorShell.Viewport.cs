@@ -173,7 +173,7 @@ public sealed partial class EditorShell
             return Mesh.MeshGizmoPose();
         }
         if (Mesh.ActiveGizmoKind == GizmoKind.None || Scene == null || SelectedSceneEntity is not { } primary
-            || SceneEdits.WorldPose(Scene.Expanded.Flat, primary) is not { } pose)
+            || (CutscenePose(Selection.Entity) ?? SceneEdits.WorldPose(Scene.Expanded.Flat, primary)) is not { } pose)
         {
             return null;
         }
@@ -224,8 +224,19 @@ public sealed partial class EditorShell
         {
             return Mesh.PressMeshGizmo(pixel, extrude);
         }
-        var ids = Selection.Entities.Select(h => ActiveSceneIdOf(h)).Where(id => id != 0);
-        var poseEdit = new PoseEdit(Scene.Expanded.Flat, ids);
+        var handles = Selection.Entities.Select(h => (Handle: h, Id: ActiveSceneIdOf(h))).Where(e => e.Id != 0).ToDictionary(e => e.Id, e => e.Handle);
+        var flat = Scene.Expanded.Flat;
+        // A drag of entities that a cutscene holds goes to it, from the poses that the world shows (see
+        // docs/editor/cutscene-editor.md#gizmo-keys).
+        var route = Keying.PoseRoute([.. handles.Values]);
+        if (route is FieldRoute.Refused refused)
+        {
+            Keying.Refuse("move the selection", refused.Why);
+            return false;
+        }
+        var poseEdit = route is FieldRoute.Scene
+            ? new PoseEdit(flat, handles.Keys)
+            : new PoseEdit(flat, handles.Keys, e => (handles.TryGetValue(e.Id, out var h) ? Keying.ShownWorldPose(h) : null) ?? SceneEdits.WorldPose(flat, e));
         if (poseEdit.IsEmpty)
         {
             return false;
@@ -233,10 +244,19 @@ public sealed partial class EditorShell
         var (width, height) = FrameSize;
         var count = poseEdit.Moved.Count();
         var verb = Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Move" };
-        return _gizmo.Start(new GizmoDrag(Gizmo.KindOf(Tool), HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height),
-            new PoseTarget(this, poseEdit, pivot, axes),
-            count == 1 ? $"{verb} {Label(Scene.Expanded.Flat.Find(poseEdit.Moved.First())!)}" : $"{verb} {count} Entities");
+        var drag = new GizmoDrag(Gizmo.KindOf(Tool), HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height);
+        var target = new PoseTarget(this, poseEdit, pivot, axes);
+        var label = count == 1 ? $"{verb} {Label(flat.Find(poseEdit.Moved.First())!)}" : $"{verb} {count} Entities";
+        if (route is FieldRoute.Scene)
+        {
+            return _gizmo.Start(drag, target, label);
+        }
+        return Keying.BeginPoseDrag(label, handles, route is FieldRoute.Key) is { } edit && _gizmo.Start(drag, target, edit);
     }
+
+    // The primary entity's pose as the world shows it, when a gizmo drag of it goes to the cutscene.
+    Pose? CutscenePose(ulong handle) =>
+        Keying.Cutscene != null && Keying.PoseRoute([handle]) is not FieldRoute.Scene ? Keying.ShownWorldPose(handle) : null;
 
     /// <summary>Moves the drag to a pixel. <paramref name="invertSnap"/> is Ctrl, which snaps when snapping is off and the other way round.</summary>
     public void DragGizmo(Vec2 pixel, bool invertSnap) => _gizmo.Drag(pixel, Snap != invertSnap);
