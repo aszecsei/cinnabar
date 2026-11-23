@@ -363,7 +363,7 @@ public sealed partial class Keying
         }
         var before = cutscene.Document.Text;
         Edit(label, file => SetValueKeys(file, values));
-        _shell.PreviewValues.Keyed();
+        _shell.PreviewValues.Keyed(values.Select(v => v.Key), [], []);
         return cutscene.Document.Text != before;
     }
 
@@ -393,6 +393,13 @@ public sealed partial class Keying
                 return why;
             }
         }
+        foreach (var key in holding.BindingFields.Keys)
+        {
+            if (CutsceneKeying.Refusal(holding.Editor.File, BindingFieldTarget(key), holding.Editor.Locked) is { } why)
+            {
+                return why;
+            }
+        }
         if (holding.Values.IsEmpty)
         {
             return null;
@@ -416,10 +423,20 @@ public sealed partial class Keying
                 {
                     PilotKeys.Set(file, binding, pose.Position, pose.Rotation, holding.Tick, holding.Editor.Locked);
                 }
+                foreach (var (key, value) in holding.BindingFields)
+                {
+                    if (value is { Kind: SceneValueKind.Number, Numbers: [var number] })
+                    {
+                        CutsceneKeying.SetKeys(file, BindingFieldTarget(key), holding.Tick, [number.Float], FieldValues.Humanize(key.Field), holding.Editor.Locked);
+                    }
+                }
             });
             _shell.PreviewValues.Keyed();
         }
     }
+
+    // What keys a binding's field that values over the preview set: a property track of one number, as a lens field's.
+    static KeyTarget BindingFieldTarget(BindingFieldKey key) => new KeyTarget.Property(key.Binding, key.Component, key.Field, PropertyShape.Number);
 
     /// <summary>Opens a drag of values over the preview. A cancel puts the values back as they were.</summary>
     internal IFieldEdit BeginValueDrag(Func<IReadOnlyList<Operation>, List<(ValueKey Key, SceneValue Value)>> values) =>
@@ -461,6 +478,9 @@ public sealed partial class Keying
             }
         }
 
+        // The fields that the drag set, which its keys key.
+        readonly HashSet<ValueKey> _set = [];
+
         public bool IsOpen => _open && (_keys == null || _keys.IsOpen);
 
         public event Action<bool>? Ended;
@@ -476,6 +496,7 @@ public sealed partial class Keying
             {
                 return false;
             }
+            _set.UnionWith(set.Select(v => v.Key));
             _keys?.Step(file =>
             {
                 _keying.SetValueKeys(file, set);
@@ -534,7 +555,7 @@ public sealed partial class Keying
             }
             if (committed && _keys != null)
             {
-                _keying._shell.PreviewValues.Keyed();
+                _keying._shell.PreviewValues.Keyed(_set, [], []);
             }
             else if (!committed && _keying._shell.PreviewValues.State is PreviewValuesState.Live now
                 && (_before is not PreviewValuesState.Live was || (was.Ticket == now.Ticket && was.Tick == now.Tick)))

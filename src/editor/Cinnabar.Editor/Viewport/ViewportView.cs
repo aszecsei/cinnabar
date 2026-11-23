@@ -817,9 +817,10 @@ public sealed class ViewportView : Grid
                 _shell.Landscape.EndStroke();
                 break;
             case Gesture.Click when Looking:
+                // Ctrl, or an armed pick, picks the camera's focus there (see docs/editor/cutscene-editor.md#focus).
                 if (_control.FramePoint(position) is { } picked)
                 {
-                    _shell.PickAt(picked, mode);
+                    _shell.ClickInLook(_viewport.Index, picked, mode, e.KeyModifiers.HasFlag(KeyModifiers.Control));
                 }
                 break;
             case Gesture.Click:
@@ -983,7 +984,13 @@ public sealed class ViewportView : Grid
         {
             return;
         }
-        // Esc in a view that looks through a camera takes back a pilot's gesture, a flight too, or else ends the look.
+        // Esc in a view that looks through a camera disarms a pick of its focus, takes back a pilot's gesture, a flight
+        // too, or else ends the look.
+        if (e.Key == Key.Escape && Looking && _gesture == Gesture.None && _shell.CancelFocusPick(_viewport.Index))
+        {
+            e.Handled = true;
+            return;
+        }
         if (e.Key == Key.Escape && Looking && _shell.Looks.Escape(_viewport.Index))
         {
             if (_gesture is Gesture.Fly or Gesture.Dolly or Gesture.Pan or Gesture.Orbit)

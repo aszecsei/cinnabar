@@ -676,6 +676,32 @@ public sealed class CutsceneTimelineLayout
     }
 
     /// <summary>
+    /// The names that a camera cut track's row shows over its cuts (see docs/editor/cutscene-editor.md#the-cut-strip):
+    /// each cut's camera, from the cut's start, or the view's left edge, up to the next cut's start, or the view's right
+    /// edge, so a name shows past a short cut's end when the track has a gap after it. A name with less than 16 pixels of
+    /// room is left out. <paramref name="width"/> is the time area's width.
+    /// </summary>
+    public static IReadOnlyList<(double X, double Room, string Label)> CutNames(IReadOnlyList<CutsceneVisibleBar> bars, double width)
+    {
+        var names = new List<(double, double, string)>();
+        for (var i = 0; i < bars.Count; i++)
+        {
+            if (bars[i].Item.Label is not { Length: > 0 } label)
+            {
+                continue;
+            }
+            var x = Math.Max(bars[i].X0, 0);
+            var end = Math.Min(i + 1 < bars.Count ? bars[i + 1].X0 : width, width);
+            var room = end - x - 6;
+            if (room >= 16)
+            {
+                names.Add((x, room, label));
+            }
+        }
+        return names;
+    }
+
+    /// <summary>
     /// The shot at a time, as the Game view's frame counter names it: the camera of the cutscene's own camera cut section
     /// over the time, from its start up to its end, or null when none is. A cut track that the asset mutes, or whose ID
     /// is in <paramref name="silent"/>, names none, as the game shows none.

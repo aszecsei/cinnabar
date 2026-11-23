@@ -97,21 +97,26 @@ sealed class FieldGrid(EditorShell shell)
         foreach (var (button, key, showItems) in _keys.Values)
         {
             showItems();
-            var state = key.State();
-            button.IsVisible = state != null;
-            if (state == null)
-            {
-                continue;
-            }
-            var name = KeyClasses[(int)state.State];
-            foreach (var c in KeyClasses)
-            {
-                button.Classes.Set(c, c == name);
-            }
-            button.Content = state.State is Document.KeyState.Keyed or Document.KeyState.Differs ? "\u25C6" : "\u25C7";
-            button.IsEnabled = state.Refusal == null;
-            ToolTip.SetTip(button, state.Tip);
+            ShowKey(button, key.State());
         }
+    }
+
+    /// <summary>Shows a key button's state: hidden with none, its look, its tooltip, and whether it keys now.</summary>
+    internal static void ShowKey(Button button, KeyButton? state)
+    {
+        button.IsVisible = state != null;
+        if (state == null)
+        {
+            return;
+        }
+        var name = KeyClasses[(int)state.State];
+        foreach (var c in KeyClasses)
+        {
+            button.Classes.Set(c, c == name);
+        }
+        button.Content = state.State is Document.KeyState.Keyed or Document.KeyState.Differs ? "\u25C6" : "\u25C7";
+        button.IsEnabled = state.Refusal == null;
+        ToolTip.SetTip(button, state.Tip);
     }
 
     /// <summary>Shows again what the document sets: each reset button, and each name that an instance overrides.</summary>
@@ -206,7 +211,7 @@ sealed class FieldGrid(EditorShell shell)
     }
 
     // A key's items at the end of a field's menu, each enabled as the field's state at the playhead lets it.
-    static Action AddKeyItems(ContextMenu menu, FieldKey key)
+    internal static Action AddKeyItems(ContextMenu menu, FieldKey key)
     {
         var addTrack = new MenuItem { Header = "Add Track", Command = new RelayCommand(key.AddTrack) };
         var keyItem = new MenuItem { Header = "Key", Command = new RelayCommand(key.Key) };

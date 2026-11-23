@@ -171,6 +171,28 @@ public static class CutsceneKeying
         track.Children.LastOrDefault(s => s.Kind == CutsceneBlockKind.Section && !Additive(s) && s.Start <= tick && tick <= s.End);
 
     /// <summary>
+    /// The values of a target's curves at a time, one for each channel in <see cref="ChannelsOf"/>'s order, null where a
+    /// channel has no curve, in the section that keys there, as the runtime samples them. Where sections overlap and blend,
+    /// these are the top section's. Empty when no such section is over the time.
+    /// </summary>
+    public static IReadOnlyList<double?> ValuesAt(CutsceneFile file, KeyTarget target, int tick)
+    {
+        if (TrackOf(file, target) is not { } track || SectionAt(track, tick) is not { Start: { } start } section)
+        {
+            return [];
+        }
+        return [.. ChannelsOf(target, section).Select(name =>
+        {
+            if (Channel(section, name) is not { } channel || CutsceneCurveEdits.CurveOf(channel) is not { Count: > 0 } curve)
+            {
+                return (double?)null;
+            }
+            var (pre, post) = CutsceneCurveEdits.InfinityOf(channel);
+            return CutsceneCurve.Value(curve, tick - start, pre, post);
+        })];
+    }
+
+    /// <summary>
     /// The keys of a target at a time, one for each of its channels in <see cref="ChannelsOf"/>'s order, null where a
     /// channel has none, in the section that keys there. Empty when no such section is over the time.
     /// </summary>

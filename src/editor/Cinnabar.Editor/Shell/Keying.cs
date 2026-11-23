@@ -128,11 +128,7 @@ public sealed partial class Keying
         {
             Edit($"Key {FieldValues.Humanize(field.Name)}", file => SetKeys(file, handle, target, TrackName(target, field)));
             // Values over the preview of this field alone are keyed now, and stay until the preview shows the key.
-            if (_shell.PreviewValues.State is PreviewValuesState.Holding holding
-                && holding.Values.Keys.All(k => k.Handle == handle && k.Component == component && k.Field == field.Name))
-            {
-                _shell.PreviewValues.Keyed();
-            }
+            _shell.PreviewValues.Keyed([new ValueKey(handle, component, field.Name)], [], []);
         }
     }
 

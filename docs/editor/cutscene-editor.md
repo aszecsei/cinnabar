@@ -2,9 +2,7 @@
 
 The cutscene editor edits a cutscene (see [Content: Cutscenes](../content/kinds/cutscenes.md)), which the game plays as [Cinematics](../cinematics/README.md) describes. Each open one is a tab, `CutsceneEditorDocument`, over a `CutsceneEditor` in the shell, which holds its state. Docking can rebuild the view, and tests drive the editor without a window.
 
-The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, the bindings, and the cameras. These come next:
-- the lens controls, focus picking, the cut strip and the frustums' colours ([#555](https://github.com/aszecsei/cinnabar/issues/555));
-- the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)).
+The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, the bindings, and the cameras with their lenses and focus. The clips' display comes next ([#556](https://github.com/aszecsei/cinnabar/issues/556)).
 
 **In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Preview](#preview) · [Keying](#keying) · [Bindings](#bindings) · [Curves](#curves) · [Cameras](#cameras)
 
@@ -704,6 +702,39 @@ Each viewport, the Game view too, has a **Guides** menu on its toolbar (see [Vie
 
 The guides are each user's, for each viewport, in `viewport.json`. `FrameGuides` in `Cinnabar.Editor.Tools` gives their rectangles in the frame's pixels, which `FrameGuidesTests` checks for each aspect.
 
+### Lens
+
+A camera binding's details show its **Lens** under its binding rows (`CutsceneLensRows`, and `CutsceneEditor.Lens.cs` in the shell). The lens is the camera's `Cinematic_Camera` ([Rendering: Components](../rendering/assets.md#components)):
+- **Focal length** in millimeters, with the vertical field of view that it gives on the sensor (`Lens.VerticalFov`, the runtime's formula).
+- **Sensor**: a preset, Full frame, Super 35, Super 16 or IMAX 70 mm, which sets the width and the height together.
+- **Focus** in meters, **Aperture** as an f-number (0 is no depth of field), and **Focus offset** in meters (see [Focus](#focus)).
+
+Each number has a key button, as the inspector's fields have (see [The key button](#the-key-button)), with the same menu: Add Track, Key, Remove Key and Go to Track. A key goes on a property track of component 160.
+- **A typed value** keys at the playhead, as one undo entry, with [auto-key](#auto-key) on. Otherwise it is a [preview value](#preview-values) until Enter or the key button keys it.
+- **A drag on a field's name** scrubs it: 0.1 mm a pixel for the focal length, 1 cm for the focus and the offset, and 0.1 for the aperture, ten times as far with Shift and a tenth with Ctrl. The view shows each step at once. With auto-key, the drag is one key and one undo entry, and Esc in the timeline cancels it.
+- **The shown value** is the value over the preview, else the track's curve at the playhead (`CutsceneKeying.ValuesAt`, with the runtime's evaluator), else the spawned prefab's root's value, else 0, which is the default. Where sections of the track overlap and blend, it is the top section's.
+- **A spawned camera** has no entity in the editor. Its values go over the preview by its binding's ID (`Override_Target_Kind.Binding` on an `Override_Field`), and the game finds the binding's entity at each lay, as it does for a [pilot's](#pilot) pose. Enter keys them with the other values.
+- **A possessed camera's** lens goes where the inspector's fields go (see [Where an edit goes](#where-an-edit-goes)), through its entity, so the details and the inspector share one value over the preview and one key state. The inspector's Sensor goes there too while a cutscene that possesses the camera holds the preview.
+
+The rows are built once for the selected binding and show new values in place, so a drag keeps its handle while it changes them.
+
+### Focus
+
+The depth of field focuses at the **Focus** distance, or on a binding's entity.
+- **Focus On** sets the binding's own `focus = <binding>` constraint (see [Cinematics: Camera cut tracks](../cinematics/tracks.md#camera-cut-tracks)), as one undo entry. It holds over the whole cutscene, so it is not keyed. A camera cut section's `focus` holds while the section shows. The focus is then the target's distance along the camera's axis plus the **Focus offset**, which a track can key.
+- **Pick Focus** sets the focus distance to the depth of what a view that looks through the camera draws at a pixel. The details' **Pick Focus** button, or the command `cutscene.pickFocus`, arms it, and the next click in that view picks. Esc disarms it. **Ctrl+click** in the view picks at once, in place of a toggle of the selection.
+- **The depth** is `Pick_Result.depth` from a 1-pixel `Pick_Request` to that view. The view draws, and picks, through the camera's projection, so the depth is the distance along the camera's axis, which the focus takes. A host test checks it to within 1 cm.
+- **Where it goes:** the picked depth goes as a typed focus does: a key with auto-key, otherwise a value over the preview.
+- **Refusals:** a pick that hits nothing sets nothing. An answer that comes after the view's look or its session changed sets nothing. While a Focus On constraint sets the focus, a pick is refused, as the runtime does not take the distance then.
+
+### The cut strip
+
+The camera cut track's row names each cut's camera from the cut's start up to the next cut's start (`CutsceneTimelineLayout.CutNames`), so a name shows past a short cut's end when a gap follows it. A name with less than 16 pixels of room is left out. Hovering a cut shows its camera, its start and end and its length, as timecode.
+
+### Frustums
+
+While a cutscene's preview is open, the helpers draw each camera's frustum in a colour for what it is at the playhead (`helpers.odin`): white when it is selected, the camera cut track's orange when it is the shot on screen, and grey otherwise. A camera that a scene view looks through has no frustum.
+
 ### Limits
 
 - **Pilot moves only a spawned camera with no parent binding.** A possessed camera moves with the gizmo, and its keys go as [Gizmo keys](#gizmo-keys) says. A camera whose track is relative to another binding is not piloted.
@@ -711,4 +742,6 @@ The guides are each user's, for each viewport, in `viewport.json`. `FrameGuides`
 - **A cut's constraints win.** A camera cut section's `look_at` and `follow` write the camera's rotation and position after its track. While a pilot's pose is held over the preview, the view shows the pose. Once the keys settle, the constraint aims or moves the camera again, so a pilot's keys show only where no constraint writes the same part.
 - **The wheel changes the flying speed.** It does not dolly, because a pilot's move ends with a mouse release. Alt and the right button dolly.
 - **The editing tools are off in a view that looks through a camera.** The gizmo, a box select, mesh mode, the landscape brush and drops act in the editor camera's view. A click still selects.
-- **Lens controls, focus picking, the cut strip and the frustums' colours are next** ([#555](https://github.com/aszecsei/cinnabar/issues/555)).
+- **The frustums are the same in every view.** The helpers' lines are shared by the scene views, so a camera that any view looks through has no frustum in the others either.
+- **No cut thumbnails yet.** A cut's hover shows its camera and its times, not a picture of its first frame. That waits for render out ([#559](https://github.com/aszecsei/cinnabar/issues/559)), which makes the preview's renders.
+- **A preview value keys at the preview's time.** Past the range's end, the preview stands at the end, so Enter keys a held lens value there.

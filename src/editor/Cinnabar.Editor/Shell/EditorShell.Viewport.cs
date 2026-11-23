@@ -122,15 +122,21 @@ public sealed partial class EditorShell
     /// Finds what is drawn at a pixel of the frame without selecting it, and calls back with the answer a few frames
     /// later. Returns false without a linked host, which never answers.
     /// </summary>
-    public bool PickPixel(Vec2 pixel, Action<PickResult> then) => Pick((int)Math.Floor(pixel.X), (int)Math.Floor(pixel.Y), 1, 1, then);
+    public bool PickPixel(Vec2 pixel, Action<PickResult> then) => PickPixelIn(ActiveViewport.Index, pixel, then);
 
-    bool Pick(int x, int y, int width, int height, Action<PickResult> then)
+    /// <summary>As <see cref="PickPixel"/>, in a viewport that may not be the active one.</summary>
+    public bool PickPixelIn(int viewport, Vec2 pixel, Action<PickResult> then) =>
+        Pick(viewport, (int)Math.Floor(pixel.X), (int)Math.Floor(pixel.Y), 1, 1, then);
+
+    bool Pick(int x, int y, int width, int height, Action<PickResult> then) => Pick(ActiveViewport.Index, x, y, width, height, then);
+
+    bool Pick(int viewport, int x, int y, int width, int height, Action<PickResult> then)
     {
         if (!Host.Linked)
         {
             return false;
         }
-        Host.Send(new PickRequest(_picks.Add(then), (uint)ActiveViewport.Index, x, y, width, height));
+        Host.Send(new PickRequest(_picks.Add(then), (uint)viewport, x, y, width, height));
         return true;
     }
 

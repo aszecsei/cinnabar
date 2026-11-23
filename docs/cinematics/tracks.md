@@ -286,7 +286,7 @@ track 5 camera_cut "Cuts"
 
 **The cinematic camera.** A camera binding is an entity with a `Camera` ([Rendering: Components](../rendering/assets.md#components)). A `Cinematic_Camera` beside it gives it a lens in a camera's terms: a focal length, a sensor's width and height, a focus distance and an aperture.
 - **The field of view** is `2 × atan(sensor_height / (2 × focal_length))`. While a `Cinematic_Camera` is there, the `cinematic lens` system is the one writer of `Camera.vertical_fov`. It runs in the `Late` stage, after the cutscene's systems and the scripts, so a property track or a script that sets the lens sets the frame's field of view. The views read the lens directly too, so the editor's Edit mode, which runs no systems, shows the same field of view.
-- **The depth of field** takes the aperture and the focus ([Post-processing: Depth of field](../rendering/post-processing.md#depth-of-field)). A focus entity sets the focus to its distance along the camera's axis, each frame.
+- **The depth of field** takes the aperture and the focus ([Post-processing: Depth of field](../rendering/post-processing.md#depth-of-field)). A focus entity sets the focus to its distance along the camera's axis, plus `focus_offset` in meters, each frame.
 - **Each field** animates with a property track on component 160, as the sample's rack focus does.
 - **The sensor's aspect** is the shot's aspect. The editor draws the camera's frustum with it. The presentation track's bars letterbox a frame of another aspect, and can take the aspect of the shot's camera ([Presentation tracks](#presentation-tracks)).
 

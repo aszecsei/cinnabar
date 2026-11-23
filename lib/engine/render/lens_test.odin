@@ -155,6 +155,16 @@ a_focus_entity_sets_the_focus_by_its_distance_along_the_axis :: proc(t: ^testing
 	// The camera looks down +z: 4 m ahead, whatever the target's x.
 	testing.expect_value(t, view.lens.focus_distance, 4)
 
+	// The offset moves the focus along the axis from the entity's distance, and does nothing without the entity.
+	ecs.get(w, e, Cinematic_Camera).focus_offset = -1.5
+	view, _ = camera_view(w, e)
+	testing.expect_value(t, view.lens.focus_distance, 2.5)
+	ecs.get(w, e, Cinematic_Camera).focus = 0
+	view, _ = camera_view(w, e)
+	testing.expect_value(t, view.lens.focus_distance, 7)
+	ecs.get(w, e, Cinematic_Camera).focus = target
+	ecs.get(w, e, Cinematic_Camera).focus_offset = 0
+
 	// A target behind the camera gives a distance that is not ahead; the circle of confusion clamps it (see
 	// circle_of_confusion). A dead target gives focus_distance back.
 	ecs.get(w, target, ecs.Transform).position = ecs.position_offset({}, {0, 0, -2})
