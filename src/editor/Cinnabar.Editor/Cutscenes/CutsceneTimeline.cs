@@ -590,6 +590,12 @@ sealed class CutsceneTimeline : Control
         e.Pointer.Capture(null);
     }
 
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+        Input.Leave();
+    }
+
     protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
     {
         base.OnPointerCaptureLost(e);

@@ -1,3 +1,5 @@
+using Avalonia.Input;
+using Cinnabar.Editor.Cutscenes;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Cook;
@@ -157,6 +159,30 @@ public sealed class CutsceneBindingsTests : IDisposable
         Assert.Equal(CutsceneBindingState.Broken, Row(editor, 4).Binding!.State);
         Assert.Equal(CutsceneBindingKind.Spawned, Row(editor, 4).Binding!.Kind);
         Assert.Equal(new CutsceneBindingInfo(CutsceneBindingKind.Unknown, null, CutsceneBindingState.Broken, "It has neither possess nor spawn."), Row(editor, 5).Binding);
+    }
+
+    [Fact]
+    public void TheTipOverABrokenRowGoesWhenThePointerLeavesOrTheRowIsFixed()
+    {
+        var (shell, editor) = NewShell(Cutscene.Replace("0000000000000001\n", "0000000000000009\n"));
+        using var _ = shell;
+        var input = new CutsceneTimelineInput(editor);
+        input.Resize(CutsceneTimelineLayout.Gutter + 1000, 800);
+        var y = CutsceneTimelineLayout.RulerHeight + Row(editor, 1).Top + CutsceneTimelineLayout.RowHeight / 2;
+
+        input.Move(20, y, KeyModifiers.None);
+        Assert.Equal("door.scene has no entity 0000000000000009.", input.Tooltip);
+        input.Leave();
+        Assert.Null(input.Tooltip);
+
+        input.Move(20, y, KeyModifiers.None);
+        Assert.NotNull(input.Tooltip);
+        // The binding points at the door again: the tip goes without a move.
+        editor.Select(editor.File.Bindings.ElementAt(0));
+        shell.Selection.Select(Door);
+        editor.Rebind(Door);
+        input.Refresh();
+        Assert.Null(input.Tooltip);
     }
 
     [Fact]
