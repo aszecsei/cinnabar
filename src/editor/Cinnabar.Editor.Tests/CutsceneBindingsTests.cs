@@ -338,4 +338,80 @@ public sealed class CutsceneBindingsTests : IDisposable
         editor.SetSelectedOnly(false);
         Assert.Equal(["Music", "Door", "Door Move", "Lamp"], editor.Layout().Rows.Select(r => r.Label));
     }
+
+    [Fact]
+    public void AResyncThatGivesTheSameEntitiesNewHandlesKeepsTheTimelinesSelection()
+    {
+        var (shell, editor) = NewShell();
+        using var _ = shell;
+        shell.Selection.Select(Door);
+        var track = CutsceneFile.PathOf(editor.File.Tracks.Single());
+        editor.Select([track], SelectMode.Replace);
+        string? revealed = null;
+        editor.RevealRequested += p => revealed = p;
+
+        // A soft restart: the same door and lamp, with new handles, and the shell selects the door again by its scene ID.
+        const ulong NewDoor = 7UL << 32;
+        shell.OnGameMessage(new EntitySnapshot(
+        [
+            new EntityInfo(NewDoor, "Door", 1, 1, 0, true, []),
+            new EntityInfo(8UL << 32, "Lamp", 2, 1, 0, true, []),
+        ]));
+
+        Assert.Equal([NewDoor], shell.Selection.Entities);
+        Assert.Equal([track], editor.SelectedPaths);
+        Assert.Null(revealed);
+    }
+
+    [Fact]
+    public async Task DeleteWithTheTimelinesKeyboardRemovesASelectedBindingUnlessATrackIsLockedOrItsRowIsHidden()
+    {
+        var (shell, editor) = NewShell();
+        using var _ = shell;
+        shell.AskDeleteBinding = (_, _, _) => Task.FromResult(true);
+        var delete = shell.Commands.Get(EditorCommands.DeleteEntity);
+        editor.SetKeyboardPane(CutscenePane.Timeline);
+        editor.Select(editor.File.Bindings.ElementAt(0));
+
+        // A locked track keeps its binding.
+        editor.SetLocked(1, true);
+        Assert.Equal("A track of the binding is locked.", editor.DeleteBindingRefusal());
+        Assert.False(delete.CanExecute);
+        editor.SetLocked(1, false);
+
+        // A filter that hides the row keeps it.
+        editor.SetFilterText("nothing like it");
+        editor.Select(editor.File.Bindings.ElementAt(0));
+        Assert.False(editor.CanDeleteBinding);
+        editor.SetFilterText("");
+
+        editor.Select(editor.File.Bindings.ElementAt(0));
+        Assert.True(delete.CanExecute);
+        delete.Execute();
+        await Task.Yield();
+        Assert.Empty(editor.File.Bindings);
+        Assert.Empty(editor.File.Tracks);
+        Assert.Equal(["Delete Binding"], editor.Document.History);
+    }
+
+    [Fact]
+    public void AnEntityDroppedWithAltOnABindingsRowRebindsThatRowAndLeavesBothSelections()
+    {
+        var (shell, editor) = NewShell(Cutscene + "binding 2 \"Spare\"\n\tpossess = @00000000000000000000000000000bad/0000000000000001\n");
+        using var _ = shell;
+        var track = CutsceneFile.PathOf(editor.File.Tracks.Single());
+        editor.Select([track], SelectMode.Replace);
+        shell.Selection.Select(Lamp);
+
+        editor.DropEntity(Lamp, PathOf(editor, 2), rebind: true);
+
+        Assert.Contains($"binding 2 \"Spare\"\n\tpossess = @{SceneGuid}/0000000000000002\n", editor.Document.Text);
+        Assert.Equal(["Rebind"], editor.Document.History);
+        Assert.Equal([track], editor.SelectedPaths);
+        Assert.Equal([Lamp], shell.Selection.Entities);
+
+        // The door is the first binding's, so a rebind of the second to it is refused.
+        editor.DropEntity(Door, PathOf(editor, 2), rebind: true);
+        Assert.Single(editor.Document.History);
+    }
 }

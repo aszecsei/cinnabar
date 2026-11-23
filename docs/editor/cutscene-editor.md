@@ -445,7 +445,7 @@ The header shows these items:
 | Not loaded | The entity's scene is not open in the editor | An amber mark |
 | Broken | One of these: the open scene does not have the entity; no scene has the GUID; the index has no such prefab; the binding has neither `possess` nor `spawn`, or has both | A red mark |
 
-Put the pointer on a marked header to see the reason. The state comes from the scene documents and the asset index, not from the game. Thus it shows when the game is not connected. The rows change when a scene opens, closes or changes, and at each asset snapshot. Before the cook daemon sends its first snapshot, these rules apply:
+The pointer on a marked header shows the reason. The state comes from the scene documents and the asset index, not from the game. Thus it shows when the game is not connected. The rows change when a scene opens, closes or changes, and at each asset snapshot. Before the cook daemon sends its first snapshot, these rules apply:
 - a binding whose scene is not open shows as not loaded;
 - a spawned binding shows as bound, with no name.
 
@@ -463,31 +463,34 @@ These commands act on the active cutscene, or on the cutscene that holds the pre
   - entities that the game spawned;
   - entities of a scene that has no GUID yet.
 
-  To possess an entity, you can also drag it from the Outliner onto the timeline. If the entity is in the selection, the whole selection is possessed.
-- **Spawn.** Drag a prefab from the content browser onto the timeline. The editor adds a binding that spawns the prefab, with the prefab's name. Some files make a prefab, for example a USD stage. A drop of such a file spawns its prefab, as a drop in the viewport places it.
+  An entity dragged from the Outliner onto the timeline is possessed too. If the entity is in the selection, the whole selection is possessed.
+- **Spawn.** A prefab dragged from the content browser onto the timeline adds a binding that spawns the prefab, with the prefab's name. Some files make a prefab, for example a USD stage. A drop of such a file spawns its prefab, as a drop in the viewport places it.
 - Each add is one undo entry for all its bindings, and selects their rows. Undo follows the add while no other editor's tab is active (see [Undo](#undo)).
 
 ### Rebind and delete
 
 - **Rebind.** There are two ways to rebind:
   - the Rebind to Selection command;
-  - a drop of an entity on a binding's row while you hold Alt.
+  - a drop of an entity on a binding's row with Alt held. It rebinds that row's binding, and both selections stay as they are.
 
   A rebind changes only the binding's `possess`. The tracks name the binding by its ID, so they do not change. The editor refuses a rebind in these conditions:
   - the binding spawns a prefab: this change is a convert, which comes in the second part;
   - another binding possesses the entity.
-- **Delete.** Select a binding's row and press Delete. The editor removes the binding and its tracks as one undo entry.
+- **Delete.** Delete, while the timeline has the keyboard and a binding's row is selected, removes the binding and its tracks as one undo entry. A row that the filter hides is not deleted.
   - If the binding has tracks, the editor asks first (`EditorShell.AskDeleteBinding`). The main window answers with a dialog.
+  - If a track of the binding is locked, the editor does not delete it.
   - If other blocks name the binding by its ID, the editor does not delete it. These blocks can name a binding: another binding's `parent` or constraints; a camera cut's `camera` or constraints; a transform track's `space = relative <id>`; an event's `value = entity <id>`; a sub-sequence's `bind`. The refusal names those blocks (`CutsceneEditor.DeleteBindingRefusal`).
-- **Rename.** Use the name box in the details strip, as for a track. A rename changes only the name.
+- **Rename.** The name box in the details strip renames a binding, as it renames a track. A rename changes only the name.
+- **The details strip** of a binding shows what it possesses or spawns, why it is not loaded or broken, and why Delete refuses it.
 
 ### Selection sync
 
-- **A binding's row selects its entity.** When you select binding rows on the timeline, the editor selects the entities that they possess in the viewport and the Outliner.
+- **A binding's row selects its entity.** Binding rows selected on the timeline select the entities that they possess in the viewport and the Outliner.
   - Some rows have no entity in the world: a broken, not loaded or spawned binding's row. Such a row does not change the world's selection. Thus the entity that a rebind would use stays selected.
-- **An entity selects its row.** When you select an entity that a binding possesses, the editor selects that binding's row and scrolls to it.
-  - If you select an entity that no binding possesses, or you clear the selection, the timeline's selection does not change. Thus keys stay selected while the designer picks an entity to key.
+- **An entity selects its row.** An entity selected in the viewport or the Outliner that a binding possesses selects that binding's row, and the timeline scrolls to it.
+  - An entity that no binding possesses, or a cleared selection, does not change the timeline's selection. Thus keys stay selected while the designer picks an entity to key.
 - One side does not write back to the other while it writes (`CutsceneEditor._syncing`).
+- A new row is selected only for a binding that the selected entities did not have before. A resync, which gives the same entities new handles, does not change the timeline's selection.
 - **Selected entities** is the toggle beside the search box. When it is on, the timeline shows only these rows:
   - the bindings of the entities selected in the viewport or the Outliner;
   - their tracks.

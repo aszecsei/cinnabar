@@ -68,6 +68,7 @@ public sealed class CutsceneEditor : IGraphEditor
         _shell.SceneChanged += OnBindingTargetsChanged;
         _shell.Assets.Changed += OnBindingTargetsChanged;
         _shell.Selection.Changed += OnEntitiesSelected;
+        _entityBindings = BindingsOfEntities(_shell.Selection.Entities);
     }
 
     public CutsceneDocument Document { get; }
@@ -107,6 +108,8 @@ public sealed class CutsceneEditor : IGraphEditor
         _selection.RemoveAll(p => File.Find(p) is not { } block
             || (!_ownEdit && block.Kind == CutsceneBlockKind.Key && _keyLines.TryGetValue(p, out var line) && line != KeyLine(block)));
         FollowShownCurves();
+        // A binding added or removed changes which bindings the selected entities have.
+        _entityBindings = BindingsOfEntities(_shell.Selection.Entities);
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();
         if (!Document.InTransaction)
@@ -1531,10 +1534,10 @@ public sealed class CutsceneEditor : IGraphEditor
     /// </summary>
     public void DropEntity(ulong handle, string? bindingRow, bool rebind)
     {
+        // A rebind names its binding by the row it was dropped on, and leaves both selections as they are.
         if (rebind && bindingRow != null)
         {
-            Select([bindingRow], SelectMode.Replace);
-            Rebind(handle);
+            Rebind(File.Find(bindingRow) is { Kind: CutsceneBlockKind.Binding } b ? b.Id : null, handle);
             return;
         }
         Possess(_shell.Selection.Contains(handle) ? _shell.Selection.Entities : [handle]);
@@ -1570,13 +1573,15 @@ public sealed class CutsceneEditor : IGraphEditor
     public CutsceneBlock? SelectedBinding => Selected is { Kind: CutsceneBlockKind.Binding, Id: not null } b ? b : null;
 
     /// <summary>Why the selected binding cannot be pointed at an entity, or null when it can.</summary>
-    public string? RebindRefusal(ulong handle)
+    public string? RebindRefusal(ulong handle) => RebindRefusal(SelectedBinding?.Id, handle);
+
+    string? RebindRefusal(int? id, ulong handle)
     {
         if (Document.InTransaction)
         {
             return "A drag is under way in the cutscene.";
         }
-        if (SelectedBinding is not { } binding)
+        if (File.Bindings.FirstOrDefault(b => id != null && b.Id == id) is not { } binding)
         {
             return "No binding is selected.";
         }
@@ -1598,9 +1603,11 @@ public sealed class CutsceneEditor : IGraphEditor
     }
 
     /// <summary>Points the selected binding at an entity, keeping its tracks, as one undo entry.</summary>
-    public void Rebind(ulong handle)
+    public void Rebind(ulong handle) => Rebind(SelectedBinding?.Id, handle);
+
+    void Rebind(int? binding, ulong handle)
     {
-        if (RebindRefusal(handle) != null || SelectedBinding?.Id is not { } id || _shell.Keying.PossessOf(handle) is not { } entity)
+        if (RebindRefusal(binding, handle) != null || binding is not { } id || _shell.Keying.PossessOf(handle) is not { } entity)
         {
             return;
         }
@@ -1621,6 +1628,10 @@ public sealed class CutsceneEditor : IGraphEditor
         {
             return "A drag is under way in the cutscene.";
         }
+        if (CutsceneBindings.TracksOf(File, id).Any(t => CutsceneEdits.IsLocked(t, _locked)))
+        {
+            return "A track of the binding is locked.";
+        }
         var references = CutsceneBindings.ReferencesTo(File, id);
         if (references.Count == 0)
         {
@@ -1631,7 +1642,8 @@ public sealed class CutsceneEditor : IGraphEditor
     }
 
     /// <summary>Whether the primary selection is a binding's row that a delete removes.</summary>
-    public bool CanDeleteBinding => SelectedBinding != null && DeleteBindingRefusal() == null;
+    /// <remarks>A row that the filter hides is not deleted, so Delete never acts on what is not in view.</remarks>
+    public bool CanDeleteBinding => SelectedBinding != null && DeleteBindingRefusal() == null && Layout().Rows.Any(r => r.Path == Selection);
 
     /// <summary>
     /// Deletes the selected binding and its tracks as one undo entry. A binding with tracks asks first, and one that
@@ -1678,6 +1690,10 @@ public sealed class CutsceneEditor : IGraphEditor
     // While one side of the selection sync writes the other, the other does not write back.
     bool _syncing;
 
+    // The bindings of the entities selected last. A resync gives the same entities new handles, so what is new is told
+    // by binding, not by handle: the same bindings again select no row.
+    HashSet<int> _entityBindings = [];
+
     // The timeline's selection of binding rows selects their entities: only when one of them is in the world, so a
     // click on a broken row keeps the entity that a rebind would use.
     void SelectBoundEntities()
@@ -1712,12 +1728,10 @@ public sealed class CutsceneEditor : IGraphEditor
         {
             FilterChanged();
         }
-        if (_syncing)
-        {
-            return;
-        }
-        var ids = BindingsOfEntities(next.Except(old));
-        if (ids.Count == 0)
+        var now = BindingsOfEntities(next);
+        var ids = now.Except(_entityBindings).ToHashSet();
+        _entityBindings = now;
+        if (_syncing || ids.Count == 0)
         {
             return;
         }
