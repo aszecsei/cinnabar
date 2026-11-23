@@ -57,6 +57,27 @@ every_message_round_trips :: proc(t: ^testing.T) {
 			events = true,
 			silent = {4, 1_000_001},
 		},
+		Cutscene_Preview_Values {
+			ticket = 3,
+			tick = 12_000,
+			serial = 2,
+			fields = {
+				{
+					target = {kind = .Scene_Entity, scene = 1, entity = 42},
+					component = 9,
+					field = 77,
+					value = {kind = .Number, count = 1, floats = {0 = 0.5}},
+				},
+			},
+			transforms = {
+				{
+					target = {kind = .Scene_Entity, scene = 1, entity = 43},
+					position = {1, -2, 3},
+					rotation = {0, 0, 0, 1},
+					scale = {1, 1, 1},
+				},
+			},
+		},
 		Cutscene_Preview_Opened{ticket = 3, tick = 12_000, range_start = 0, range_end = 600_000},
 		Cutscene_Preview_Ended{ticket = 4, reason = .Code_Reloaded},
 		Cutscene_Preview_Tick{ticket = 3, tick = 1001, playing = true},
@@ -111,7 +132,12 @@ every_message_round_trips :: proc(t: ^testing.T) {
 			},
 			held = {{component = 1, field = 7}},
 			shown = {{id = 1, data = {4, 5, 6}}},
-			shown_preview = {ticket = 3, tick = 1200, blob = 1_700_000_000_000_000_000},
+			shown_preview = {
+				ticket = 3,
+				tick = 1200,
+				blob = 1_700_000_000_000_000_000,
+				values = 5,
+			},
 		},
 		Profile_Summary {
 			first_frame = 10,

@@ -792,3 +792,95 @@ a_blob_whose_binding_does_not_resolve_ends_the_preview_and_gives_the_document_ba
 	testing.expect_value(t, ended, link.Cutscene_Preview_Ended{1, .Failed})
 	testing.expect_value(t, x_of(f, f.hero), METER)
 }
+
+// The editor's values lay over the preview while it stands at their tick: they win over a track, a field that no track
+// writes shows them too, and the lift gives the document back. What the world shows names their serial. A Time drops
+// them, and values for another tick or ticket do not show.
+@(test)
+preview_values_show_over_the_preview_until_a_time_drops_them :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	step(f, open(1, SECOND / 2))
+	hero := link.Override_Target {
+		kind   = .Scene_Entity,
+		scene  = 0,
+		entity = HERO,
+	}
+	values := link.Cutscene_Preview_Values {
+		ticket     = 1,
+		tick       = SECOND / 2,
+		serial     = 3,
+		fields     = {
+			{
+				target = hero,
+				component = f.bulb,
+				field = format.scene_field_hash("brightness"),
+				value = number(7),
+			},
+		},
+		transforms = {
+			{
+				target = hero,
+				position = {3 * METER, 0, 0},
+				rotation = {0, 0, 0, 1},
+				scale = {1, 1, 1},
+			},
+		},
+	}
+	step(f, values)
+	testing.expect_value(t, x_of(f, f.hero), 3 * METER)
+	testing.expect_value(t, bulb_of(f), 7)
+
+	// The preview's own evaluation in the frame leaves them on top.
+	frame(f, 0)
+	testing.expect_value(t, x_of(f, f.hero), 3 * METER)
+	testing.expect_value(t, bulb_of(f), 7)
+
+	// The editor reads the document under them, and what the world shows with their serial.
+	step(f, link.Watch_Entity{entity = u64(f.hero)})
+	shown, sent := find_message(step(f), link.Entity_Values)
+	for i := 0; i < 3 && !(sent && len(shown.shown) > 0); i += 1 {
+		shown, sent = find_message(step(f), link.Entity_Values)
+	}
+	testing.expect(t, sent)
+	testing.expect_value(t, shown.shown_preview.values, 3)
+	for c in shown.components {
+		if c.id == u64(ecs.TRANSFORM_ID) {
+			testing.expect_value(t, (^ecs.Transform)(raw_data(c.data)).position.raw.x, METER)
+		}
+	}
+	shown_x: i64
+	for c in shown.shown {
+		if c.id == u64(ecs.TRANSFORM_ID) {
+			shown_x = (^ecs.Transform)(raw_data(c.data)).position.raw.x
+		}
+	}
+	testing.expect_value(t, shown_x, 3 * METER)
+
+	// A Time drops them, even at the same tick, and the preview shows its curve again.
+	step(f, link.Cutscene_Preview_Time{ticket = 1, tick = SECOND / 2})
+	testing.expect(t, abs(x_of(f, f.hero) - 5 * METER) <= 1)
+	testing.expect(t, abs(bulb_of(f) - 2) < 1e-4)
+
+	// Values for another tick wait, and values for another ticket are dropped.
+	values.serial = 4
+	values.tick = SECOND
+	step(f, values)
+	testing.expect(t, abs(x_of(f, f.hero) - 5 * METER) <= 1)
+	values.ticket = 2
+	values.tick = SECOND / 2
+	values.serial = 5
+	step(f, values)
+	testing.expect(t, abs(x_of(f, f.hero) - 5 * METER) <= 1)
+
+	// Empty values clear them; Close gives the document back.
+	values.ticket = 1
+	step(f, values)
+	testing.expect_value(t, x_of(f, f.hero), 3 * METER)
+	step(f, link.Cutscene_Preview_Values{ticket = 1, tick = SECOND / 2, serial = 6})
+	testing.expect(t, abs(x_of(f, f.hero) - 5 * METER) <= 1)
+	step(f, values)
+	step(f, link.Cutscene_Preview_Close{ticket = 1})
+	testing.expect_value(t, x_of(f, f.hero), METER)
+	testing.expect_value(t, bulb_of(f), 1)
+}

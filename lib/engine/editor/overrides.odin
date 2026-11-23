@@ -153,8 +153,23 @@ write_override :: proc(
 	assert(e.session.overrides.layer == .Lifted)
 	o := find_override(e, frame.override) or_return
 	despawned = spawn_keys(e, w, scripts, o, frame.spawns)
+	write_fields_and_poses(e, w, o, frame.fields, frame.transforms)
+	write_animators(e, w, o, frame.animators)
+	write_cameras(e, w, o, frame.cameras)
+	return
+}
+
+// write_fields_and_poses resolves a frame's fields and poses to the world's entities, in place of the last ones.
+@(private)
+write_fields_and_poses :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	o: ^Override,
+	fields: []link.Override_Field,
+	transforms: []link.Override_Transform,
+) {
 	clear(&o.fields)
-	for f in frame.fields {
+	for f in fields {
 		entity := override_target(e, w, o, f.target) or_continue
 		name := fmt.aprintf("%016x", f.field, allocator = e.platform.frame_allocator)
 		handles := scene.handles_of(e.scenes, f.target.scene)
@@ -173,7 +188,7 @@ write_override :: proc(
 		}
 	}
 	clear(&o.poses)
-	for t in frame.transforms {
+	for t in transforms {
 		entity := override_target(e, w, o, t.target) or_continue
 		r := t.rotation
 		append(
@@ -186,9 +201,6 @@ write_override :: proc(
 			},
 		)
 	}
-	write_animators(e, w, o, frame.animators)
-	write_cameras(e, w, o, frame.cameras)
-	return
 }
 
 // release_override ends an override that the editor released, and gives whether it despawned.
@@ -249,21 +261,31 @@ lift_overrides :: proc(e: ^Editor, w: ^ecs.World) -> (lifted: bool) {
 	o.layer = .Lifted
 	lifted = lift_cutscene_preview(e, w)
 	#reverse for &override in o.live {
-		#reverse for s in override.saved {
-			data := ecs.get_raw(w, s.entity, s.component)
-			if data == nil {
-				continue
-			}
-			bytes := s.bytes
-			copy(([^]u8)(data)[s.place.offset:][:s.place.size], bytes[:s.place.size])
-			ecs.mark_changed(w, s.entity, s.component)
-			if s.component == ecs.TRANSFORM_ID {
-				ecs.teleport(w, s.entity, ecs.get(w, s.entity, ecs.Transform)^)
-			}
+		if lift_saved(w, &override) {
 			lifted = true
 		}
-		clear(&override.saved)
 	}
+	return
+}
+
+// lift_saved puts back the values that a layer wrote over, the last written first, and forgets them. It gives whether
+// it changed the world.
+@(private)
+lift_saved :: proc(w: ^ecs.World, o: ^Override) -> (lifted: bool) {
+	#reverse for s in o.saved {
+		data := ecs.get_raw(w, s.entity, s.component)
+		if data == nil {
+			continue
+		}
+		bytes := s.bytes
+		copy(([^]u8)(data)[s.place.offset:][:s.place.size], bytes[:s.place.size])
+		ecs.mark_changed(w, s.entity, s.component)
+		if s.component == ecs.TRANSFORM_ID {
+			ecs.teleport(w, s.entity, ecs.get(w, s.entity, ecs.Transform)^)
+		}
+		lifted = true
+	}
+	clear(&o.saved)
 	return
 }
 
@@ -277,15 +299,8 @@ lay_overrides :: proc(e: ^Editor, w: ^ecs.World) -> (laid: bool) {
 	}
 	o.layer = .Laid
 	for &override in o.live {
-		for &f in override.fields {
-			if hold(w, &override, f.entity, f.component, f.hash, f.place, f.bytes[:f.place.size]) {
-				laid = true
-			}
-		}
-		for p in override.poses {
-			if lay_pose(w, &override, p) {
-				laid = true
-			}
+		if lay_fields_and_poses(w, &override) {
+			laid = true
 		}
 		for &a in override.animators {
 			if e.animation == nil || !ecs.is_alive(w, a.entity) {
@@ -304,6 +319,22 @@ lay_overrides :: proc(e: ^Editor, w: ^ecs.World) -> (laid: bool) {
 	}
 	if lay_cutscene_preview(e, w) {
 		laid = true
+	}
+	return
+}
+
+// lay_fields_and_poses writes a layer's fields and poses over the world, and gives whether it changed the world.
+@(private)
+lay_fields_and_poses :: proc(w: ^ecs.World, o: ^Override) -> (laid: bool) {
+	for &f in o.fields {
+		if hold(w, o, f.entity, f.component, f.hash, f.place, f.bytes[:f.place.size]) {
+			laid = true
+		}
+	}
+	for p in o.poses {
+		if lay_pose(w, o, p) {
+			laid = true
+		}
 	}
 	return
 }
@@ -624,34 +655,45 @@ held_fields :: proc(
 	allocator := context.allocator,
 ) -> []link.Held_Field {
 	held := make([dynamic]link.Held_Field, allocator)
+	for &o in e.session.overrides.live {
+		add_held_fields(w, &o, entity, &held)
+	}
+	preview_held_fields(e, w, entity, &held)
+	return held[:]
+}
+
+// add_held_fields adds the fields of an entity that a layer's fields and poses hold.
+@(private)
+add_held_fields :: proc(
+	w: ^ecs.World,
+	o: ^Override,
+	entity: ecs.Entity,
+	held: ^[dynamic]link.Held_Field,
+) {
 	add :: proc(held: ^[dynamic]link.Held_Field, field: link.Held_Field) {
 		if !slice.contains(held[:], field) {
 			append(held, field)
 		}
 	}
-	for &o in e.session.overrides.live {
-		for f in o.fields {
-			if f.entity == entity {
-				add(&held, {u64(f.component), f.hash})
-			}
+	for f in o.fields {
+		if f.entity == entity {
+			add(held, {u64(f.component), f.hash})
 		}
-		for p in o.poses {
-			if p.entity != entity {
-				continue
+	}
+	for p in o.poses {
+		if p.entity != entity {
+			continue
+		}
+		if is_child(w, entity) {
+			for name in ([]string{"offset", "rotation", "scale"}) {
+				add(held, {u64(ecs.LOCAL_TRANSFORM_ID), format.scene_field_hash(name)})
 			}
-			if is_child(w, entity) {
-				for name in ([]string{"offset", "rotation", "scale"}) {
-					add(&held, {u64(ecs.LOCAL_TRANSFORM_ID), format.scene_field_hash(name)})
-				}
-			} else {
-				for name in ([]string{"position", "rotation", "scale"}) {
-					add(&held, {u64(ecs.TRANSFORM_ID), format.scene_field_hash(name)})
-				}
+		} else {
+			for name in ([]string{"position", "rotation", "scale"}) {
+				add(held, {u64(ecs.TRANSFORM_ID), format.scene_field_hash(name)})
 			}
 		}
 	}
-	preview_held_fields(e, w, entity, &held)
-	return held[:]
 }
 
 // Shown is what the world showed of the watched entities that overrides or the cutscene preview hold, before a poll
@@ -681,8 +723,13 @@ capture_shown :: proc(
 	if e.session.overrides.layer != .Laid {
 		return
 	}
-	if p, open := e.session.cutscene_previews.open.?; open {
-		shown.preview = {p.ticket, p.live.evaluation.time, p.modified if p.unsaved else 0}
+	if p, open := &e.session.cutscene_previews.open.?; open {
+		shown.preview = {
+			ticket = p.ticket,
+			tick   = p.live.evaluation.time,
+			blob   = p.modified if p.unsaved else 0,
+			values = preview_values_serial(p),
+		}
 	}
 	entities := make([dynamic]Shown_Entity, allocator)
 	for watched in e.session.watched {
