@@ -384,7 +384,12 @@ blend_pose :: proc(
 		rotated := false
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
 			c := pose_channel(format.blob_string(ctx.data, channel.name)) or_continue
-			v := curve_value(format.cutscene_channel_keys(ctx.data, ctx.blob, channel), at.local)
+			v := curve_value(
+				format.cutscene_channel_keys(ctx.data, ctx.blob, channel),
+				at.local,
+				channel.pre_infinity,
+				channel.post_infinity,
+			)
 			i := int(c) % 3
 			touched[part_of(c)] = true
 			switch part_of(c) {

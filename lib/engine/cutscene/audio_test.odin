@@ -857,7 +857,7 @@ a_curves_integral_is_the_sum_of_its_values :: proc(t: ^testing.T) {
 		STEPS :: 200000
 		for i in 0 ..< STEPS {
 			at := (f64(i) + 0.5) * end / STEPS
-			sum += f64(curve_value(keys, i32(at))) * end / STEPS / SECOND
+			sum += f64(curve_value(keys, i32(at), .Constant, .Constant)) * end / STEPS / SECOND
 		}
 		got := curve_integral(keys, end)
 		testing.expectf(t, abs(got - sum) < 2e-4, "to %v: %v, and the sum %v", end, got, sum)

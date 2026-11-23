@@ -207,7 +207,12 @@ blend_continuous :: proc(
 		covered = true
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
 			c, _ := channel_component(target.kind, format.blob_string(ctx.data, channel.name))
-			v := curve_value(format.cutscene_channel_keys(ctx.data, ctx.blob, channel), at.local)
+			v := curve_value(
+				format.cutscene_channel_keys(ctx.data, ctx.blob, channel),
+				at.local,
+				channel.pre_infinity,
+				channel.post_infinity,
+			)
 			if .Additive in section.flags {
 				added[c] += v * at.weight
 			} else {
@@ -241,7 +246,12 @@ blend_stepped :: proc(
 		at := sample_section(ctx, section, ctx.time) or_continue
 		covered = true
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
-			v := curve_step(format.cutscene_channel_keys(ctx.data, ctx.blob, channel), at.local)
+			v := curve_step(
+				format.cutscene_channel_keys(ctx.data, ctx.blob, channel),
+				at.local,
+				channel.pre_infinity,
+				channel.post_infinity,
+			)
 			if .Additive in section.flags {
 				added += math.round(f64(v) * f64(at.weight))
 			} else if at.weight > 0 {

@@ -162,7 +162,22 @@ Cutscene_Channel_Flag :: enum u32 {
 	// The keys' values are indexes into the blob's GUIDs, for a property track that keys an asset field.
 	Guids,
 }
-Cutscene_Channel_Flags :: bit_set[Cutscene_Channel_Flag;u32]
+Cutscene_Channel_Flags :: bit_set[Cutscene_Channel_Flag;u16]
+
+// Cutscene_Infinity is what a channel's curve does before its first key or after its last, inside its section (see
+// docs/cinematics/tracks.md#curves).
+Cutscene_Infinity :: enum u8 {
+	// It holds the end key's value.
+	Constant,
+	// It goes on along the slope that the curve has at its end key.
+	Linear,
+	// It repeats the keys, from the first's time to the last's.
+	Cycle,
+	// It repeats the keys, each repeat moved by the change from the first key's value to the last's.
+	Cycle_Offset,
+	// It repeats the keys forward, then backward, in turn.
+	Oscillate,
+}
 
 Cutscene_Event_Flag :: enum u32 {
 	// The event spans [start, end): it sends on_<name>_begin at its start and on_<name>_end at its end. Without it, the
@@ -475,13 +490,16 @@ Cutscene_Section :: struct {
 }
 #assert(size_of(Cutscene_Section) == 104)
 
-// Cutscene_Channel is a named curve of a section, whose meaning its track's kind gives.
+// Cutscene_Channel is a named curve of a section, whose meaning its track's kind gives. pre_infinity and post_infinity
+// are what the curve does before its first key and after its last.
 Cutscene_Channel :: struct {
-	name:      Slice,
-	name_hash: u32,
-	first_key: u32,
-	key_count: u32,
-	flags:     Cutscene_Channel_Flags,
+	name:          Slice,
+	name_hash:     u32,
+	first_key:     u32,
+	key_count:     u32,
+	flags:         Cutscene_Channel_Flags,
+	pre_infinity:  Cutscene_Infinity,
+	post_infinity: Cutscene_Infinity,
 }
 #assert(size_of(Cutscene_Channel) == 24)
 
@@ -901,12 +919,19 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 				if !inside(data, c.name, 1, 1) ||
 				   c.key_count == 0 ||
 				   c.flags - {.Guids} != {} ||
-				   (.Guids in c.flags && tr.kind != .Property) {
+				   (.Guids in c.flags && tr.kind != .Property) ||
+				   !cutscene_infinity_valid(c.pre_infinity, c.flags) ||
+				   !cutscene_infinity_valid(c.post_infinity, c.flags) {
 					return nil, false
 				}
 				if tr.kind == .Audio {
-					if name := blob_string(data, c.name);
-					   name != CUTSCENE_AUDIO_GAIN && name != CUTSCENE_AUDIO_PITCH {
+					name := blob_string(data, c.name)
+					if name != CUTSCENE_AUDIO_GAIN && name != CUTSCENE_AUDIO_PITCH {
+						return nil, false
+					}
+					// A pitch curve places the sound by its integral, which holds outside the keys.
+					if name == CUTSCENE_AUDIO_PITCH &&
+					   (c.pre_infinity != .Constant || c.post_infinity != .Constant) {
 						return nil, false
 					}
 				}
@@ -986,6 +1011,18 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 		}
 	}
 	return blob, true
+}
+
+// cutscene_infinity_valid is whether a channel can have an infinity mode: a known one, and for a channel of assets, one
+// that needs no slope and no change of value, as a GUID has neither.
+cutscene_infinity_valid :: proc "contextless" (
+	mode: Cutscene_Infinity,
+	flags: Cutscene_Channel_Flags,
+) -> bool {
+	if mode > .Oscillate {
+		return false
+	}
+	return !(.Guids in flags && (mode == .Linear || mode == .Cycle_Offset))
 }
 
 // cutscene_presentation_channel is whether a presentation section of a kind takes a channel of a name.
@@ -1551,9 +1588,11 @@ Cutscene_Event_Contents :: struct {
 }
 
 Cutscene_Channel_Contents :: struct {
-	name:  string,
-	flags: Cutscene_Channel_Flags,
-	keys:  []Cutscene_Key,
+	name:          string,
+	flags:         Cutscene_Channel_Flags,
+	pre_infinity:  Cutscene_Infinity,
+	post_infinity: Cutscene_Infinity,
+	keys:          []Cutscene_Key,
 }
 
 Cutscene_Section_Contents :: struct {
@@ -1921,11 +1960,13 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 			section_index += 1
 			for c in s.channels {
 				channel := Cutscene_Channel {
-					name      = append_bytes(&buffer, transmute([]byte)c.name),
-					name_hash = animation_graph_hash(c.name),
-					first_key = u32(key_index),
-					key_count = u32(len(c.keys)),
-					flags     = c.flags,
+					name          = append_bytes(&buffer, transmute([]byte)c.name),
+					name_hash     = animation_graph_hash(c.name),
+					first_key     = u32(key_index),
+					key_count     = u32(len(c.keys)),
+					flags         = c.flags,
+					pre_infinity  = c.pre_infinity,
+					post_infinity = c.post_infinity,
 				}
 				mem.copy(
 					&buffer[int(channels.offset) + channel_index * size_of(Cutscene_Channel)],

@@ -214,7 +214,14 @@ test_cutscene :: proc() -> []byte {
 						end = 60000,
 						weight = 1,
 						flags = {.Additive},
-						channels = {{name = "value", keys = sway}},
+						channels = {
+							{
+								name = "value",
+								pre_infinity = .Cycle,
+								post_infinity = .Linear,
+								keys = sway,
+							},
+						},
 					},
 					{
 						id = 17,
@@ -396,6 +403,10 @@ cutscene_blobs_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, lamp_sections[1].flags, Cutscene_Section_Flags{})
 	swap := cutscene_section_channels(data, blob, lamp_sections[1])[0]
 	testing.expect_value(t, swap.flags, Cutscene_Channel_Flags{.Guids})
+	sway := cutscene_section_channels(data, blob, lamp_sections[0])[0]
+	testing.expect_value(t, sway.pre_infinity, Cutscene_Infinity.Cycle)
+	testing.expect_value(t, sway.post_infinity, Cutscene_Infinity.Linear)
+	testing.expect_value(t, swap.pre_infinity, Cutscene_Infinity.Constant)
 	guids := cutscene_guids(data, blob)
 	testing.expect_value(t, len(guids), 2)
 	testing.expect_value(t, guids[int(cutscene_channel_keys(data, blob, swap)[0].value)], MATERIAL)
@@ -820,9 +831,26 @@ cutscene_blobs_with_bad_records_are_refused :: proc(t: ^testing.T) {
 	channels[2].key_count = 2
 	channels[2].flags = {.Guids}
 	refused(t, data, "GUID keys on an audio track")
-	channels[2].flags = transmute(Cutscene_Channel_Flags)u32(2)
+	channels[2].flags = transmute(Cutscene_Channel_Flags)u16(2)
 	refused(t, data, "an unknown channel flag")
 	channels[2].flags = {}
+	channels[2].post_infinity = Cutscene_Infinity(5)
+	refused(t, data, "an unknown infinity mode")
+	channels[2].post_infinity = .Oscillate
+	_, ok = cutscene_view(data)
+	testing.expect(t, ok, "a gain that oscillates")
+	channels[2].post_infinity = .Constant
+	channels[3].pre_infinity = .Cycle
+	refused(t, data, "a pitch that cycles, which its integral does not")
+	channels[3].pre_infinity = .Constant
+	channels[5].pre_infinity = .Linear
+	refused(t, data, "assets that go on along a slope")
+	channels[5].pre_infinity = .Cycle_Offset
+	refused(t, data, "assets offset by a change of value")
+	channels[5].pre_infinity = .Oscillate
+	_, ok = cutscene_view(data)
+	testing.expect(t, ok, "assets that oscillate")
+	channels[5].pre_infinity = .Constant
 
 	keys[0].interp = Cutscene_Interp(4)
 	refused(t, data, "an unknown interpolation")

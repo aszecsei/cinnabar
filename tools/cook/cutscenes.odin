@@ -14,7 +14,7 @@ import format "cinnabar:engine/asset/format"
 // in ticks, each with sections of keyed channels, a clip, a sound or a sub-sequence (see
 // docs/content/kinds/cutscenes.md). The cook checks the assets that a cutscene names and its sub-sequences' nesting, which
 // it reads from the other cutscenes' sources, so the order of the passes does not matter.
-CUTSCENE_COOK_VERSION :: "cutscenes 13"
+CUTSCENE_COOK_VERSION :: "cutscenes 14"
 
 // CUTSCENE_TEMPLATE is the text of a new cutscene: 10 seconds at 30 frames a second, with no bindings and an empty
 // camera cut track. testdata/cutscenes/template.cutscene is the same text, which the editor's tests read.
@@ -637,13 +637,26 @@ CUTSCENE_CONSTRAINT_NAMES := [format.Cutscene_Constraint_Kind]string {
 
 @(private = "file")
 Pending_Channel :: struct {
-	name:     string,
-	line:     int,
-	keys:     [dynamic]format.Cutscene_Key,
+	name:           string,
+	line:           int,
+	keys:           [dynamic]format.Cutscene_Key,
 	// How many of its keys name an asset.
-	guids:    int,
+	guids:          int,
 	// The line of its first key that teleports, or 0.
-	teleport: int,
+	teleport:       int,
+	// Its pre_infinity and post_infinity, and the lines that set them, or 0.
+	infinity:       [2]format.Cutscene_Infinity,
+	infinity_lines: [2]int,
+}
+
+// The infinity modes' names, as a channel's pre_infinity and post_infinity take them.
+@(private = "file")
+CUTSCENE_INFINITY_NAMES := [format.Cutscene_Infinity]string {
+	.Constant     = "constant",
+	.Linear       = "linear",
+	.Cycle        = "cycle",
+	.Cycle_Offset = "cycle_offset",
+	.Oscillate    = "oscillate",
 }
 
 @(private = "file")
@@ -1827,6 +1840,36 @@ cutscene_parse :: proc(
 			m.contents.color, m.color_line = color, line
 		case .Channel:
 			switch name {
+			case "pre_infinity", "post_infinity":
+				tr := &tracks[len(tracks) - 1]
+				s := &tr.sections[len(tr.sections) - 1]
+				ch := &s.channels[len(s.channels) - 1]
+				side := 0 if name == "pre_infinity" else 1
+				if len(ch.keys) > 0 {
+					problem(&found, line, "%s comes before the channel's keys", name)
+					continue
+				}
+				if ch.infinity_lines[side] != 0 {
+					problem(&found, line, "%s is set twice", name)
+					continue
+				}
+				ch.infinity_lines[side] = line
+				mode, known := format.Cutscene_Infinity.Constant, false
+				for n, m in CUTSCENE_INFINITY_NAMES {
+					if n == value_text {
+						mode, known = m, true
+					}
+				}
+				if !known {
+					problem(
+						&found,
+						line,
+						"%s is constant, linear, cycle, cycle_offset or oscillate",
+						name,
+					)
+					continue
+				}
+				ch.infinity[side] = mode
 			case "ease_in",
 			     "ease_out",
 			     "weight",
@@ -2294,10 +2337,32 @@ cutscene_parse :: proc(
 				if ch.teleport != 0 && kind != .Transform {
 					problem(&found, ch.teleport, "only a transform track's keys teleport")
 				}
+				flags := format.Cutscene_Channel_Flags{.Guids} if ch.guids > 0 else {}
+				for side in 0 ..< 2 {
+					mode := ch.infinity[side]
+					if !format.cutscene_infinity_valid(mode, flags) {
+						problem(
+							&found,
+							ch.infinity_lines[side],
+							"assets have no slope or change of value, so they are constant, cycle or oscillate",
+						)
+					}
+					if kind == .Audio &&
+					   ch.name == format.CUTSCENE_AUDIO_PITCH &&
+					   mode != .Constant {
+						problem(
+							&found,
+							ch.infinity_lines[side],
+							"a pitch is constant before and after its keys, since the sound's place is its integral",
+						)
+					}
+				}
 				channels[k] = {
-					name  = ch.name,
-					flags = {.Guids} if ch.guids > 0 else {},
-					keys  = ch.keys[:],
+					name          = ch.name,
+					flags         = flags,
+					pre_infinity  = ch.infinity[0],
+					post_infinity = ch.infinity[1],
+					keys          = ch.keys[:],
 				}
 			}
 			c.channels = channels

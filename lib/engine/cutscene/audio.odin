@@ -156,7 +156,8 @@ audio_track :: proc(ctx: ^Track_Context) {
 			}
 			continue
 		}
-		local := i32(at) - section.start
+		// The curves' own time, clamped to the section as section_in clamps it, so an infinity mode ends there.
+		local := clamp(i32(at) - section.start, 0, section.end - section.start)
 		sample, _ := sample_section(ctx, section, i32(at))
 		gain := f64(sample.weight) * f64(ctx.track.gain)
 		pitch := f64(1)
@@ -164,9 +165,13 @@ audio_track :: proc(ctx: ^Track_Context) {
 			keys := format.cutscene_channel_keys(ctx.data, ctx.blob, channel)
 			switch format.blob_string(ctx.data, channel.name) {
 			case format.CUTSCENE_AUDIO_GAIN:
-				gain *= f64(curve_value(keys, local))
+				// A linear infinity can take the gain below 0, where no key is.
+				gain *= max(
+					f64(curve_value(keys, local, channel.pre_infinity, channel.post_infinity)),
+					0,
+				)
 			case format.CUTSCENE_AUDIO_PITCH:
-				pitch = f64(curve_value(keys, local))
+				pitch = f64(curve_value(keys, local, channel.pre_infinity, channel.post_infinity))
 			}
 		}
 		follows := ctx.track.time_scale == .Follow
@@ -282,10 +287,13 @@ scrub_track :: proc(ctx: ^Track_Context, sections: []format.Cutscene_Section) {
 		gain := sample.weight * ctx.track.gain
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
 			if format.blob_string(ctx.data, channel.name) == format.CUTSCENE_AUDIO_GAIN {
-				gain *= curve_value(
+				v := curve_value(
 					format.cutscene_channel_keys(ctx.data, ctx.blob, channel),
-					ctx.time - section.start,
+					clamp(ctx.time - section.start, 0, section.end - section.start),
+					channel.pre_infinity,
+					channel.post_infinity,
 				)
+				gain *= max(v, 0)
 			}
 		}
 		audio.scrub(s.audio, section.asset, place, int(section.bus), gain)

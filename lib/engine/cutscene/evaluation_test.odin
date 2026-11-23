@@ -1167,7 +1167,7 @@ a_property_track_seeks_to_the_exact_values :: proc(t: ^testing.T) {
 		at(f, e, time)
 		testing.expectf(
 			t,
-			lamp(f).brightness == curve_value(brightness_keys, time),
+			lamp(f).brightness == curve_value(brightness_keys, time, .Constant, .Constant),
 			"the brightness at %d: %v",
 			time,
 			lamp(f).brightness,
