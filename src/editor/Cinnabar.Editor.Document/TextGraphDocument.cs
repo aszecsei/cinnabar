@@ -7,16 +7,27 @@ public interface ITextGraphDocument : IGraphDocument
     bool ChangedOnDisk { get; }
 }
 
+/// <summary>A file format that keeps its text as it is, so writing it gives back the text that it read.</summary>
+public interface ITextFile<TSelf> where TSelf : class, ITextFile<TSelf>
+{
+    /// <summary>Reads a file's text. The file is null, with a problem, when the text does not start as the format does.</summary>
+    static abstract (TSelf? File, MaterialProblem? Problem) Parse(string text);
+
+    /// <summary>The file's text, with its edits.</summary>
+    string Text { get; }
+}
+
 /// <summary>
 /// An open text file that an editor keeps as whole lines, and its edits. Its first state is the file's text as it is, so
 /// opening a file changes nothing, and the first save changes only the lines of its edits.
 /// </summary>
-public abstract class TextGraphDocument<TGraph> : GraphDocument<TGraph>, ITextGraphDocument
+public abstract class TextGraphDocument<TFile> : GraphDocument<TFile>, ITextGraphDocument
+    where TFile : class, ITextFile<TFile>
 {
     // The file's text when the document last read or wrote it.
     string _onDisk;
 
-    protected TextGraphDocument(string path, string guid, TGraph graph, string text) : base(path, guid, graph, text) => _onDisk = text;
+    protected TextGraphDocument(string path, string guid, TFile file, string text) : base(path, guid, file, text) => _onDisk = text;
 
     public bool ChangedOnDisk
     {
@@ -24,7 +35,7 @@ public abstract class TextGraphDocument<TGraph> : GraphDocument<TGraph>, ITextGr
         {
             try
             {
-                return AnimationGraphFile.Decode(File.ReadAllBytes(Path)) != _onDisk;
+                return Utf8Text.Decode(File.ReadAllBytes(Path)) != _onDisk;
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
@@ -40,8 +51,17 @@ public abstract class TextGraphDocument<TGraph> : GraphDocument<TGraph>, ITextGr
         _onDisk = text;
     }
 
-    /// <summary>A file's full path and its text, or a problem when it cannot be read or is not UTF-8.</summary>
-    protected static (string Path, string? Text, MaterialProblem? Problem) Read(string path)
+    protected sealed override string WriteGraph() => Graph.Text;
+
+    protected sealed override TFile ReadGraph(string text) => TFile.Parse(text).File!;
+
+    /// <summary>
+    /// Reads a file into a document that <paramref name="make"/> builds from the file's full path, its parsed file and
+    /// its text. The document is null, with a problem, when the file cannot be read, is not UTF-8, or does not start as
+    /// the format does.
+    /// </summary>
+    protected static (TDoc? Document, MaterialProblem? Problem) Open<TDoc>(string path, Func<string, TFile, string, TDoc> make)
+        where TDoc : TextGraphDocument<TFile>
     {
         var full = System.IO.Path.GetFullPath(path);
         byte[] bytes;
@@ -51,8 +71,13 @@ public abstract class TextGraphDocument<TGraph> : GraphDocument<TGraph>, ITextGr
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            return (full, null, new MaterialProblem(0, e.Message));
+            return (null, new MaterialProblem(0, e.Message));
         }
-        return AnimationGraphFile.Decode(bytes) is { } text ? (full, text, null) : (full, null, new MaterialProblem(0, "its text is not UTF-8"));
+        if (Utf8Text.Decode(bytes) is not { } text)
+        {
+            return (null, new MaterialProblem(0, "its text is not UTF-8"));
+        }
+        var (file, problem) = TFile.Parse(text);
+        return (file == null ? null : make(full, file, text), problem);
     }
 }

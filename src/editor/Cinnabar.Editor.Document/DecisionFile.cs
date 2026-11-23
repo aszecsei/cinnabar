@@ -170,7 +170,7 @@ public sealed class DecisionNode(int id, string kind) : DecisionBlock
 /// lines. It reads only the structure, the same for every technique. What a block's lines mean, and whether they are
 /// right, is the cooker's to say, so a decision with problems still opens, with its problems on its nodes.
 /// </summary>
-public sealed class DecisionFile
+public sealed class DecisionFile : ITextFile<DecisionFile>
 {
     public const string Header = "a decision starts with `decision 1`";
 

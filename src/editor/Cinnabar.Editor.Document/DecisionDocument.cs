@@ -11,18 +11,6 @@ public sealed class DecisionDocument : TextGraphDocument<DecisionFile>
     }
 
     /// <summary>Reads a file. The document is null, with a problem, when it cannot be read or does not start as a decision does.</summary>
-    public static (DecisionDocument? Document, MaterialProblem? Problem) Open(string path, string guid)
-    {
-        var (full, text, problem) = Read(path);
-        if (text == null)
-        {
-            return (null, problem);
-        }
-        var (file, refused) = DecisionFile.Parse(text);
-        return (file == null ? null : new DecisionDocument(full, guid, file, text), refused);
-    }
-
-    protected override string WriteGraph() => Graph.Text;
-
-    protected override DecisionFile ReadGraph(string text) => DecisionFile.Parse(text).File!;
+    public static (DecisionDocument? Document, MaterialProblem? Problem) Open(string path, string guid) =>
+        Open(path, (full, file, text) => new DecisionDocument(full, guid, file, text));
 }

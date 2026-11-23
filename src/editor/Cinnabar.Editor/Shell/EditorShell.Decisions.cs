@@ -49,7 +49,7 @@ public sealed partial class EditorShell
         }
         try
         {
-            return Assets.FullPath(asset) is { } path ? AnimationGraphFile.Decode(File.ReadAllBytes(path)) : null;
+            return Assets.FullPath(asset) is { } path ? Utf8Text.Decode(File.ReadAllBytes(path)) : null;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
