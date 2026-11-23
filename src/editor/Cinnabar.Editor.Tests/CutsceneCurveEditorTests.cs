@@ -300,4 +300,28 @@ public sealed class CutsceneCurveEditorTests : IDisposable
         post.Execute();
         Assert.Equal(text, editor.Document.Text);
     }
+
+    [Fact]
+    public void WeightedTangentsWeighTheSelectedKeyAndAHandleDragSetsItsWeight()
+    {
+        var (shell, editor, input, text) = Intro();
+        Click(input, X(200000), Y(1));
+        editor.SetKeyboardPane(CutscenePane.Curves);
+        var weighted = shell.Commands.Get(EditorCommands.CutsceneTangentWeighted);
+        weighted.Execute();
+        var third = text.Replace(Peak + "\n", "\t\t\tkey 200000 1 bezier 0 weights 0.33333334 0.33333334\n");
+        Assert.Equal(third, editor.Document.Text);
+        // The out handle reaches a third of the 200000-tick segment: 66.7 pixels right, flat. Dragged to 100 right and
+        // 50 up: a weight of a half, and 0.5 over 5/3 of a second, 0.3 a second, on both sides, as the key is unbroken.
+        Drag(input, X(200000) + 200.0 / 3, Y(1), X(200000) + 100, Y(1) - 50);
+        var dragged = text.Replace(Peak + "\n", "\t\t\tkey 200000 1 bezier 0.3 weights 0.33333334 0.5\n");
+        Assert.Equal(dragged, editor.Document.Text);
+        Assert.Equal(["Weighted Tangents", "Drag Tangent"], editor.Document.History.TakeLast(2));
+        // Again, with every selected key weighted, it takes the weights away.
+        weighted.Execute();
+        Assert.Equal(text.Replace(Peak + "\n", "\t\t\tkey 200000 1 bezier 0.3\n"), editor.Document.Text);
+        shell.Commands.Get("edit.undo").Execute();
+        shell.Commands.Get("edit.undo").Execute();
+        Assert.Equal(third, editor.Document.Text);
+    }
 }

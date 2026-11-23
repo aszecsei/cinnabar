@@ -58,6 +58,7 @@ static partial class EditorCommands
     public const string CutsceneTangentLinear = "cutscene.tangentLinear";
     public const string CutsceneTangentConstant = "cutscene.tangentConstant";
     public const string CutsceneTangentFlatten = "cutscene.tangentFlatten";
+    public const string CutsceneTangentWeighted = "cutscene.tangentWeighted";
     public const string CutscenePreInfinity = "cutscene.preInfinity";
     public const string CutscenePostInfinity = "cutscene.postInfinity";
 
@@ -71,7 +72,7 @@ static partial class EditorCommands
         CutsceneShuttleBack, CutsceneShuttlePause, CutsceneShuttleForward, CutsceneSetIn, CutsceneSetOut, CutsceneClearInOut, CutsceneLoop,
         CutscenePreviousKey, CutsceneNextKey, CutsceneGoToTime, CutsceneScrubSound, CutscenePreviewEvents,
         CutsceneCurves, CutsceneCurvesNormalized, CutsceneTangentAuto, CutsceneTangentUnify, CutsceneTangentBreak, CutsceneTangentLinear,
-        CutsceneTangentConstant, CutsceneTangentFlatten, CutscenePreInfinity, CutscenePostInfinity,
+        CutsceneTangentConstant, CutsceneTangentFlatten, CutsceneTangentWeighted, CutscenePreInfinity, CutscenePostInfinity,
     ];
 
     /// <summary>
@@ -196,6 +197,8 @@ static partial class EditorCommands
         Tangent(CutsceneTangentLinear, "Linear", "Join the selected keys to the next keys with straight lines.", "D4", TangentMode.Linear);
         Tangent(CutsceneTangentConstant, "Constant", "Hold the selected keys' values until the next keys: a step.", "D5", TangentMode.Constant);
         Tangent(CutsceneTangentFlatten, "Flatten Tangents", "Make the selected keys' slopes flat.", "D6", TangentMode.Flatten);
+        Register(CutsceneTangentWeighted, "Weighted Tangents", "cutscene", "Weight the selected keys' tangents, so that a drag of a handle sets how far it reaches as well as its slope, or when all are weighted, take their weights away.", "D7",
+            e => e.ToggleWeighted(), e => e.KeyboardPane == CutscenePane.Curves && !e.Document.InTransaction && e.WeighableKeys.Count > 0);
         void Infinity(string id, string label, string description, string shortcut, InfinitySide side) =>
             Register(id, label, "cutscene", description, shortcut, e => e.NextInfinity(side),
                 e => e.KeyboardPane == CutscenePane.Curves && !e.Document.InTransaction && e.InfinityCurves.Count > 0);

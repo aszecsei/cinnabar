@@ -816,6 +816,24 @@ public sealed class CutsceneEditor : IGraphEditor
     }
 
     /// <summary>
+    /// Weights the selected keys that a tangent command changes and that have handles, or when every one of them is
+    /// weighted already, takes their weights away, as one undo entry: Weighted Tangents.
+    /// </summary>
+    public void ToggleWeighted()
+    {
+        var keys = WeighableKeys;
+        if (Document.InTransaction || keys.Count == 0)
+        {
+            return;
+        }
+        var weighted = !keys.All(p => File.Find(p) is { } b && CurveKey.Parse(b) is { Weighted: true });
+        Own(() => Document.Edit("Weighted Tangents", f => CutsceneCurveEdits.SetWeighted(f, keys, weighted, _locked)));
+    }
+
+    /// <summary>The selected keys that Weighted Tangents changes: of <see cref="TangentKeys"/>, the Bezier and automatic ones.</summary>
+    public IReadOnlyList<string> WeighableKeys => [.. TangentKeys.Where(p => File.Find(p) is { } b && CurveKey.Parse(b) is { } k && CutsceneCurveEdits.Weighable(k))];
+
+    /// <summary>
     /// The channels whose infinity the Pre-Infinity and Post-Infinity commands and boxes set: the channels of the selected
     /// keys, or with no key selected, every curve that the curve editor shows and does not hide. Each is one that the
     /// runtime reads, on a track that is not locked.

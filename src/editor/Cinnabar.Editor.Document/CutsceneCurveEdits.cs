@@ -174,12 +174,64 @@ public static class CutsceneCurveEdits
     }
 
     /// <summary>
-    /// Sets a key's slope on one side, in value per second, as a drag of its handle does. The key becomes a Bezier key. One
-    /// that is not broken takes the slope on both sides; a broken one on that side only.
+    /// Whether a key can be weighted: a Bezier or an automatic key, whose handles a weight sets the reach of. Linear and
+    /// constant keys have no handles.
     /// </summary>
-    public static void SetSlope(CutsceneFile file, string path, TangentSide side, double slope, IReadOnlySet<int>? locked = null)
+    public static bool Weighable(CurveKey key) => key.Interp is CurveInterp.Bezier or CurveInterp.Auto;
+
+    /// <summary>
+    /// A key weighted or not (see docs/editor/cutscene-editor.md#weights). Weighted, it becomes a Bezier key with the
+    /// slopes it had, an automatic key's computed ones included, and weights of a third on both sides where it had none,
+    /// which is the reach that a key without weights has, so the curve keeps its shape. Not weighted, it keeps its slopes
+    /// and loses its weights. A key that cannot be weighted stays as it is.
+    /// </summary>
+    public static CurveKey WithWeights(IReadOnlyList<CurveKey> curve, int index, bool weighted)
     {
-        if (!double.IsFinite(slope))
+        var key = curve[index];
+        if (!Weighable(key) || key.Weighted == weighted)
+        {
+            return key;
+        }
+        if (!weighted)
+        {
+            return key with { Weighted = false, InWeight = 0, OutWeight = 0 };
+        }
+        var third = (float)CutsceneCurve.TangentWeight;
+        var bezier = key.Interp == CurveInterp.Bezier
+            ? key
+            : new CurveKey(key.Time, key.Value, CurveInterp.Bezier, Teleport: key.Teleport,
+                InSlope: (float)CutsceneCurve.InSlope(curve, index), OutSlope: (float)CutsceneCurve.OutSlope(curve, index));
+        return bezier with { Weighted = true, InWeight = third, OutWeight = third };
+    }
+
+    /// <summary>Weights keys, or takes their weights away, as the Weighted Tangents command does. Returns whether a key changed.</summary>
+    public static bool SetWeighted(CutsceneFile file, IEnumerable<string> paths, bool weighted, IReadOnlySet<int>? locked = null)
+    {
+        var changed = false;
+        foreach (var path in paths.Distinct().ToList())
+        {
+            foreach (var (block, curve, index) in Resolve(file, [path], locked))
+            {
+                var next = WithWeights(curve, index, weighted).Interpolation();
+                if (next != block.KeyInterpolation)
+                {
+                    block.SetKeyInterpolation(next);
+                    changed = true;
+                }
+            }
+        }
+        return changed;
+    }
+
+    /// <summary>
+    /// Sets a key's slope on one side, in value per second, as a drag of its handle does. The key becomes a Bezier key. One
+    /// that is not broken takes the slope on both sides; a broken one on that side only. A weight, from 0 to 1, sets a
+    /// weighted key's weight on that side only, since each side reaches into its own segment; a key without weights
+    /// ignores it.
+    /// </summary>
+    public static void SetSlope(CutsceneFile file, string path, TangentSide side, double slope, IReadOnlySet<int>? locked = null, double? weight = null)
+    {
+        if (!double.IsFinite(slope) || weight is { } w && !double.IsFinite(w))
         {
             return;
         }
@@ -193,6 +245,11 @@ public static class CutsceneCurveEdits
             next = !next.Broken ? next with { InSlope = s, OutSlope = s }
                 : side == TangentSide.In ? next with { InSlope = s }
                 : next with { OutSlope = s };
+            if (weight is { } reach && next.Weighted)
+            {
+                var clamped = (float)Math.Clamp(reach, 0, 1);
+                next = side == TangentSide.In ? next with { InWeight = clamped } : next with { OutWeight = clamped };
+            }
             block.SetKeyInterpolation(next.Interpolation());
         }
     }

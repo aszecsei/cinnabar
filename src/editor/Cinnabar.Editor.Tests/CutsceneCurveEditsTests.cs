@@ -180,4 +180,37 @@ public sealed class CutsceneCurveEditsTests
         Assert.Null(assets.Get("post_infinity"));
         Assert.Equal("linear", file.Find("section:1/channel:gain")!.Get("post_infinity"));
     }
+
+    [Fact]
+    public void WeightingAKeyGivesItItsSlopesAndAThirdOnEachSideAndKeepsTheCurve()
+    {
+        var file = Parse();
+        var before = CutsceneCurveEdits.CurveOf(file.Find("section:1/channel:value")!)!;
+        Assert.True(CutsceneCurveEdits.SetWeighted(file, ["section:1/channel:value/key:1", "section:1/channel:value/key:3"], true));
+        // The auto key takes its computed slope, 2 a second; the linear key has no handles and stays.
+        Assert.Equal("key 60000 3 bezier 2 weights 0.33333334 0.33333334 # the peak", Key(file, 1));
+        Assert.Equal("key 180000 1 linear", Key(file, 3));
+        var after = CutsceneCurveEdits.CurveOf(file.Find("section:1/channel:value")!)!;
+        for (var t = 0; t <= 180000; t += 1000)
+        {
+            Assert.Equal(CutsceneCurve.Value(before, t, CurveInfinity.Constant, CurveInfinity.Constant),
+                CutsceneCurve.Value(after, t, CurveInfinity.Constant, CurveInfinity.Constant), 4);
+        }
+        // Without weights, a key keeps its slopes and its teleport.
+        Assert.True(CutsceneCurveEdits.SetWeighted(file, ["section:1/channel:value/key:2"], false));
+        Assert.Equal("key 120000 4 bezier 2 -1 teleport", Key(file, 2));
+        Assert.False(CutsceneCurveEdits.SetWeighted(file, ["section:1/channel:value/key:2"], false));
+    }
+
+    [Fact]
+    public void AHandlesWeightIsItsSidesOnlyAndAKeyWithoutWeightsIgnoresIt()
+    {
+        var file = Parse();
+        CutsceneCurveEdits.SetSlope(file, "section:1/channel:value/key:2", TangentSide.Out, -1.5, weight: 0.5);
+        Assert.Equal("key 120000 4 bezier 2 -1.5 weights 0.25 0.5 teleport", Key(file, 2));
+        CutsceneCurveEdits.SetSlope(file, "section:1/channel:value/key:2", TangentSide.In, 1, weight: 7);
+        Assert.Equal("key 120000 4 bezier 1 -1.5 weights 1 0.5 teleport", Key(file, 2));
+        CutsceneCurveEdits.SetSlope(file, "section:1/channel:value/key:0", TangentSide.Out, 1, weight: 0.5);
+        Assert.Equal("key 0 0 bezier 1", Key(file, 0));
+    }
 }

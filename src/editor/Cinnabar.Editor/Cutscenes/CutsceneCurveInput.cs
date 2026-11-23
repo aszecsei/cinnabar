@@ -378,19 +378,20 @@ public sealed class CutsceneCurveInput
         Tooltip = $"{Units(grabbed + ticks)}  ·  {CutsceneKeying.Format(value)}";
     }
 
-    // A step of a handle drag: the slope from the key to the pointer.
+    // A step of a handle drag: the slope from the key to the pointer, and a weighted key's weight from how far across it is.
     void StepHandle()
     {
         var row = _press.Row!;
         var slope = CutsceneCurveLayout.SlopeAt(row, _press.Index, _press.Side, View, _pointer.X, _pointer.Y);
+        var weight = CutsceneCurveLayout.WeightAt(row, _press.Index, _press.Side, View, _pointer.X);
         var path = _press.Path!;
         var side = _press.Side;
         _drag?.Step(f =>
         {
-            CutsceneCurveEdits.SetSlope(f, path, side, slope, _editor.Locked);
+            CutsceneCurveEdits.SetSlope(f, path, side, slope, _editor.Locked, weight);
             return [];
         });
-        Tooltip = $"slope {CutsceneKeying.Format(slope)}/s";
+        Tooltip = $"slope {CutsceneKeying.Format(slope)}/s" + (weight is { } w ? $"  ·  weight {CutsceneKeying.Format((float)w)}" : "");
     }
 
     string Units(int ticks) => ticks < 0 ? "-" + Units(-ticks) : _editor.ShowFrames ? $"{CutsceneTime.Frames(ticks, _editor.File.Rate)}f" : CutsceneTime.Timecode(ticks, _editor.File.Rate);

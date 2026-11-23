@@ -139,8 +139,14 @@ public sealed class CutsceneCurveLayout
     /// <summary>How near a curve a double-click adds a key to it, in pixels.</summary>
     public const double CurveGrab = 5;
 
-    /// <summary>A handle's length on screen, in pixels: it shows the slope's direction, not a weight.</summary>
+    /// <summary>
+    /// The length on screen, in pixels, of a handle of a key without weights: it shows the slope's direction, as the
+    /// key's reach is the evaluator's third of the segment. A weighted key's handle is its true control point.
+    /// </summary>
     public const double HandleLength = 40;
+
+    /// <summary>The shortest a weighted handle shows, in pixels, so that a small weight's handle does not sit on its key.</summary>
+    public const double MinHandleLength = 12;
 
     /// <summary>How many samples set a curve's span for the normalized view and framing.</summary>
     const int SpanSamples = 256;
@@ -252,19 +258,68 @@ public sealed class CutsceneCurveLayout
         (CutsceneTimelineLayout.Gutter + view.Time.X(row.TickOf(index)), view.Value.Y(row.Shown(row.Keys[index].Value, view.Normalized)));
 
     /// <summary>
-    /// The end of a key's handle on a side, in the control: <see cref="HandleLength"/> pixels from the key, along the
-    /// slope that the curve has there as it shows on screen.
+    /// The end of a key's handle on a side, in the control. A weighted key's is its control point, as
+    /// <c>curve_bezier</c> builds it: the weight's part of the segment's duration across, and the slope over that time up,
+    /// but at least <see cref="MinHandleLength"/> pixels from the key. Any other key's is <see cref="HandleLength"/>
+    /// pixels from the key, along the slope that the curve has there as it shows on screen.
     /// </summary>
     public static (double X, double Y) HandlePoint(CurveRow row, int index, TangentSide side, CurveView view)
     {
         var slope = side == TangentSide.In ? CutsceneCurve.InSlope(row.Keys, index) : CutsceneCurve.OutSlope(row.Keys, index);
+        if (Weight(row, index, side) is { } weight)
+        {
+            var (kx, ky) = KeyPoint(row, index, view);
+            var sign = side == TangentSide.In ? -1 : 1;
+            var reach = weight * SegmentTicks(row, index, side);
+            var px = sign * reach / view.Time.PerPixel;
+            var py = -sign * slope * (reach / CutsceneCurve.TicksPerSecond) / row.Scale(view.Normalized) / view.Value.PerPixel;
+            var length = Math.Sqrt(px * px + py * py);
+            if (length >= MinHandleLength && double.IsFinite(length))
+            {
+                return (kx + px, ky + py);
+            }
+        }
+        return Direction(row, index, side, view, slope, ShownLength(row, index, side));
+    }
+
+    // The length of a handle that shows only a direction: the fixed length, or a weighted handle's shortest.
+    static double ShownLength(CurveRow row, int index, TangentSide side) => Weight(row, index, side) != null ? MinHandleLength : HandleLength;
+
+    /// <summary>A weighted key's weight on a side, or null for a key without weights.</summary>
+    public static double? Weight(CurveRow row, int index, TangentSide side) => row.Keys[index] is { Interp: CurveInterp.Bezier, Weighted: true } key
+        ? side == TangentSide.In ? key.InWeight : key.OutWeight
+        : null;
+
+    // The ticks of the segment that a key's handle on a side reaches into.
+    static int SegmentTicks(CurveRow row, int index, TangentSide side) => side == TangentSide.In
+        ? row.Keys[index].Time - row.Keys[index - 1].Time
+        : row.Keys[index + 1].Time - row.Keys[index].Time;
+
+    // A point length pixels from a key along a slope as it shows on screen.
+    static (double X, double Y) Direction(CurveRow row, int index, TangentSide side, CurveView view, double slope, double handleLength)
+    {
         // A second across, and the slope's value over a second up, in pixels.
         var dx = CutsceneCurve.TicksPerSecond / view.Time.PerPixel;
         var dy = -slope / row.Scale(view.Normalized) / view.Value.PerPixel;
         var length = Math.Sqrt(dx * dx + dy * dy);
         var sign = side == TangentSide.In ? -1 : 1;
         var (x, y) = KeyPoint(row, index, view);
-        return length > 0 && double.IsFinite(length) ? (x + sign * dx / length * HandleLength, y + sign * dy / length * HandleLength) : (x + sign * HandleLength, y);
+        return length > 0 && double.IsFinite(length) ? (x + sign * dx / length * handleLength, y + sign * dy / length * handleLength) : (x + sign * handleLength, y);
+    }
+
+    /// <summary>
+    /// The weight of a weighted key's handle that a drag puts at a point: how far across the pointer is from the key, as a
+    /// part of the segment's duration, from 0 to 1. Null for a key without weights, whose handle sets only a slope.
+    /// </summary>
+    public static double? WeightAt(CurveRow row, int index, TangentSide side, CurveView view, double x)
+    {
+        if (Weight(row, index, side) == null)
+        {
+            return null;
+        }
+        var (kx, _) = KeyPoint(row, index, view);
+        var across = side == TangentSide.In ? kx - x : x - kx;
+        return Math.Clamp(across * view.Time.PerPixel / SegmentTicks(row, index, side), 0, 1);
     }
 
     /// <summary>

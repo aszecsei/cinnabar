@@ -195,4 +195,39 @@ public sealed class CutsceneCurveLayoutTests
         Assert.NotNull(CutsceneCurveEdits.AddKey(file, Speed, 180000));
         Assert.Equal("key 180000 8 constant", file.Find($"{Speed}/key:2")!.LineTexts.Last().Trim());
     }
+
+    [Fact]
+    public void AWeightedHandleIsItsControlPointAndReadsBackAsItsSlopeAndWeight()
+    {
+        var file = CutsceneFile.Parse("""
+            cutscene 1
+            length = 120000
+            track 1 transform "Walk"
+            	binding = 1
+            	section 1 0 120000
+            		channel position_x
+            			key 0 0 bezier 1 weights 0.5 0.5
+            			key 60000 1 bezier 1 0 weights 0.01 0.25
+            			key 120000 0 linear
+            """.ReplaceLineEndings("\n")).File!;
+        var row = CutsceneCurveLayout.Build(file, [X]).Rows[0];
+        // Half of the minute's first second across, 30 pixels, and the slope of 1 a second over that half second, 50 up.
+        var (hx, hy) = CutsceneCurveLayout.HandlePoint(row, 0, TangentSide.Out, View);
+        Assert.Equal(L.Gutter + 30, hx, 9);
+        Assert.Equal(450, hy, 9);
+        Assert.Equal(1, CutsceneCurveLayout.SlopeAt(row, 0, TangentSide.Out, View, hx, hy), 9);
+        Assert.Equal(0.5, CutsceneCurveLayout.WeightAt(row, 0, TangentSide.Out, View, hx)!.Value, 9);
+        // The second key's out handle is flat, a quarter of its segment across: 15 pixels.
+        var (ox, oy) = CutsceneCurveLayout.HandlePoint(row, 1, TangentSide.Out, View);
+        Assert.Equal(L.Gutter + 75, ox, 9);
+        Assert.Equal(400, oy, 9);
+        // Its in handle's weight, 0.01, is under a pixel: it shows at the shortest length, along its slope.
+        var (ix, iy) = CutsceneCurveLayout.HandlePoint(row, 1, TangentSide.In, View);
+        var (kx, ky) = CutsceneCurveLayout.KeyPoint(row, 1, View);
+        Assert.Equal(CutsceneCurveLayout.MinHandleLength, Math.Sqrt((ix - kx) * (ix - kx) + (iy - ky) * (iy - ky)), 9);
+        Assert.True(ix < kx && iy > ky);
+        // A key without weights reads no weight, and its handle stays the fixed length.
+        Assert.Null(CutsceneCurveLayout.WeightAt(row, 2, TangentSide.In, View, L.Gutter));
+        Assert.Equal(1, CutsceneCurveLayout.WeightAt(row, 1, TangentSide.Out, View, L.Gutter + 500)!.Value, 9);
+    }
 }
