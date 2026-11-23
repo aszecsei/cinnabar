@@ -1,16 +1,9 @@
 using System.Globalization;
-using System.Text;
 
 namespace Cinnabar.Editor.Document;
 
 /// <summary>A line of a world and the comments and blank lines around its scenes.</summary>
-public abstract class WorldBlock
-{
-    internal List<TextLine> Lines { get; } = [];
-
-    /// <summary>The text of the block's lines, without their endings.</summary>
-    public IEnumerable<string> LineTexts => Lines.Select(l => l.Text);
-}
+public abstract class WorldBlock : LineBlock;
 
 /// <summary>Comments, blank lines, the header, and lines that belong to no scene.</summary>
 public sealed class WorldOther : WorldBlock;
@@ -76,7 +69,7 @@ public sealed class WorldScene : WorldBlock
 /// only its own lines. It reads the scenes as the cooker does, and a line that the cooker would refuse is kept as it
 /// is, so a world with problems still opens.
 /// </summary>
-public sealed class WorldFile : ITextFile<WorldFile>
+public sealed class WorldFile : BlockListFile<WorldBlock, WorldOther>, ITextFile<WorldFile>
 {
     public const string Header = "a world starts with `world 1`";
 
@@ -87,35 +80,14 @@ public sealed class WorldFile : ITextFile<WorldFile>
     const double UnitsPerMeter = 16777216;
     const double PositionLimit = (double)((1L << 62) - 1);
 
-    readonly List<WorldBlock> _blocks = [];
-    string _finalEnding = "";
-
     WorldFile()
     {
     }
-
-    public IReadOnlyList<WorldBlock> Blocks => _blocks;
 
     /// <summary>The scenes in the file's order.</summary>
     public IEnumerable<WorldScene> Scenes => _blocks.OfType<WorldScene>();
 
     public WorldScene? Find(string guid) => Scenes.FirstOrDefault(s => s.Guid == guid.ToLowerInvariant());
-
-    /// <summary>The file's text.</summary>
-    public string Text
-    {
-        get
-        {
-            var lines = _blocks.SelectMany(b => b.Lines).ToList();
-            var ending = lines.Find(l => l.Ending != "")?.Ending ?? "\n";
-            var text = new StringBuilder();
-            for (var i = 0; i < lines.Count; i++)
-            {
-                text.Append(lines[i].Text).Append(i == lines.Count - 1 ? _finalEnding : lines[i].Ending != "" ? lines[i].Ending : ending);
-            }
-            return text.ToString();
-        }
-    }
 
     /// <summary>
     /// Reads a file's text. The file is null, with a problem at a line, when its first line that is not a comment is not
@@ -132,7 +104,7 @@ public sealed class WorldFile : ITextFile<WorldFile>
         foreach (var line in TextLine.Split(text))
         {
             number++;
-            file._finalEnding = line.Ending;
+            file.FinalEnding = line.Ending;
             if (!header)
             {
                 if (!line.IsBlank)
@@ -143,13 +115,13 @@ public sealed class WorldFile : ITextFile<WorldFile>
                     }
                     header = true;
                 }
-                file.AddOther(line);
+                file.AppendOther(line);
             }
             else if (line.IsBlank)
             {
                 if (scene == null)
                 {
-                    file.AddOther(line);
+                    file.AppendOther(line);
                 }
                 else
                 {
@@ -158,7 +130,7 @@ public sealed class WorldFile : ITextFile<WorldFile>
             }
             else if (ReadScene(line.Code) is { } guid)
             {
-                file.AddOther(pending);
+                file.AppendOther(pending);
                 pending.Clear();
                 scene = new WorldScene(guid);
                 scene.Lines.Add(line);
@@ -166,7 +138,7 @@ public sealed class WorldFile : ITextFile<WorldFile>
             }
             else if (scene == null)
             {
-                file.AddOther(line);
+                file.AppendOther(line);
             }
             else
             {
@@ -175,26 +147,8 @@ public sealed class WorldFile : ITextFile<WorldFile>
                 scene.Lines.Add(line);
             }
         }
-        file.AddOther(pending);
+        file.AppendOther(pending);
         return header ? (file, null) : (null, new MaterialProblem(1, Header));
-    }
-
-    void AddOther(IEnumerable<TextLine> lines)
-    {
-        foreach (var line in lines)
-        {
-            AddOther(line);
-        }
-    }
-
-    void AddOther(TextLine line)
-    {
-        if (_blocks.LastOrDefault() is not WorldOther other)
-        {
-            other = new WorldOther();
-            _blocks.Add(other);
-        }
-        other.Lines.Add(line);
     }
 
     // The GUID of a scene's line, `scene $<32 hex digits>`, or null for another line.
@@ -238,6 +192,9 @@ public sealed class WorldFile : ITextFile<WorldFile>
     /// <summary>Three numbers of meters as the file writes them, such as <c>[0, 1.5, -2]</c>.</summary>
     public static string Format(double[] vector) => $"[{string.Join(", ", vector.Select(Format))}]";
 
+    // A new setting's indent: a tab, whatever the indent of the scene's other lines.
+    const string NewSettingIndent = "\t";
+
     // Changes a setting's line, keeping its comment, or adds the line at the end of the scene.
     static void Set(WorldScene scene, string name, string value)
     {
@@ -247,7 +204,7 @@ public sealed class WorldFile : ITextFile<WorldFile>
         }
         else
         {
-            scene.Lines.Add(new TextLine($"\t{name} = {value}", ""));
+            scene.Lines.Add(new TextLine($"{NewSettingIndent}{name} = {value}", ""));
         }
     }
 
@@ -309,35 +266,8 @@ public sealed class WorldFile : ITextFile<WorldFile>
     /// <summary>Removes a scene's lines, and not the comments after them.</summary>
     public void Remove(WorldScene scene) => _blocks.Remove(scene);
 
-    /// <summary>The line, from 1, that a block's lines start at.</summary>
-    public int LineOf(WorldBlock block)
-    {
-        var line = 1;
-        foreach (var b in _blocks)
-        {
-            if (b == block)
-            {
-                return line;
-            }
-            line += b.Lines.Count;
-        }
-        throw new ArgumentException("the block is not in this file", nameof(block));
-    }
-
     /// <summary>The scene that has a line, from 1, or null for a line of no scene.</summary>
-    public WorldScene? SceneAt(int line)
-    {
-        var first = 1;
-        foreach (var block in _blocks)
-        {
-            first += block.Lines.Count;
-            if (line >= 1 && line < first)
-            {
-                return block as WorldScene;
-            }
-        }
-        return null;
-    }
+    public WorldScene? SceneAt(int line) => BlockAt(line) as WorldScene;
 }
 
 /// <summary>What the game's streaming policy loads (see docs/world/streaming.md#the-policy), worked out as the game does.</summary>

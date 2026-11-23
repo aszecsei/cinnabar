@@ -128,4 +128,12 @@ public sealed class WorldFileTests
         Assert.Equal(double.PositiveInfinity, WorldStreaming.Distance(persistent, At(0)));
         Assert.False(WorldStreaming.WouldLoad(tile, At(0)));
     }
+
+    [Fact]
+    public void ANewSettingIsIndentedWithATabWhateverTheScenesIndent()
+    {
+        var file = Read("world 1\nscene $" + Base + "\n  min = [0, 0, 0]\n");
+        file.SetPersistent(file.Find(Base)!, true);
+        Assert.Equal("world 1\nscene $" + Base + "\n  min = [0, 0, 0]\n\tpersistent = true\n", file.Text);
+    }
 }

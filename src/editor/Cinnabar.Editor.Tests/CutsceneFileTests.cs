@@ -209,4 +209,23 @@ public sealed class CutsceneFileTests
         Assert.Equal("01:02:12", Cutscenes.CutsceneTime.Timecode(62 * 60000 + 30000, 24));
         Assert.Equal(2500, Cutscenes.CutsceneTime.FrameTicks(24));
     }
+
+    [Fact]
+    public void ANewSettingTakesTheLastSettingsIndentOrALevelUnderItsKeywordLine()
+    {
+        var file = Parse("cutscene 1\nlength = 60000\n\ntrack 1 camera_cut \"A\"\n  a = 1\n      b = 2\n  track 2 camera_cut \"B\"\n");
+
+        // The last setting's indent, and not the first's.
+        file.Find("track:1")!.Set("c", "3");
+        Assert.Contains("\n  a = 1\n      b = 2\n      c = 3\n", file.Text);
+
+        // Without settings, a tab more than the keyword line's indent.
+        file.Find("track:2")!.Set("c", "3");
+        Assert.EndsWith("\n  track 2 camera_cut \"B\"\n  \tc = 3\n", file.Text);
+
+        // The cutscene's settings have none.
+        var bare = Parse("cutscene 1\n");
+        bare.Root.Set("rate", "24");
+        Assert.Equal("cutscene 1\nrate = 24\n", bare.Text);
+    }
 }

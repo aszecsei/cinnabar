@@ -328,4 +328,22 @@ public sealed partial class AnimationGraphFileTests : IDisposable
         // A problem's line finds its node in the text as it is now.
         Assert.Equal(1, document.NodeAt(document.Text.ReplaceLineEndings("\n").Split('\n').ToList().IndexOf("\tname = stand") + 1));
     }
+
+    [Fact]
+    public void ANewSettingGoesUnderTheHeaderAndANewFieldTakesTheLastFieldsIndent()
+    {
+        // Under the header and its comment, above the setting that the file has. A decision's goes after it.
+        var file = Read("animation_graph 1\n# Why.\nentry = a\n\nnode 1 state\n  name = a\n    motion = b\n");
+        file.SetRootMotion("hips");
+        Assert.Equal("animation_graph 1\n# Why.\nroot_motion = \"hips\"\nentry = a\n\nnode 1 state\n  name = a\n    motion = b\n", file.Text);
+
+        // The last field's indent, and not the first's.
+        file.Find(1)!.Set("speed", "2");
+        Assert.EndsWith("\n  name = a\n    motion = b\n    speed = 2\n", file.Text);
+
+        // A node without fields indents its first with a tab.
+        var bare = Read("animation_graph 1\nnode 1 state\n");
+        bare.Find(1)!.Set("name", "a");
+        Assert.Equal("animation_graph 1\nnode 1 state\n\tname = a\n", bare.Text);
+    }
 }

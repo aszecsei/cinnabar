@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 
 namespace Cinnabar.Editor.Document;
 
@@ -23,7 +22,7 @@ public enum CutsceneBlockKind
 /// and its settings, and the blocks under it. Together, a file's blocks hold every line that it has, in order: a block's
 /// own lines, then its children's.
 /// </summary>
-public sealed class CutsceneBlock
+public sealed class CutsceneBlock : LineBlock
 {
     internal CutsceneBlock(CutsceneBlockKind kind, CutsceneBlock? parent)
     {
@@ -43,17 +42,15 @@ public sealed class CutsceneBlock
 
     public CutsceneBlock? Parent { get; private set; }
 
-    internal List<TextLine> Lines { get; } = [];
-
     internal List<CutsceneBlock> ChildList { get; } = [];
 
     public IReadOnlyList<CutsceneBlock> Children => ChildList;
 
-    /// <summary>The text of the block's own lines, without their endings.</summary>
-    public IEnumerable<string> LineTexts => Lines.Select(l => l.Text);
-
     // The keyword line: the first that is not blank or a comment. Only the cutscene's block has none before its header.
     internal TextLine? Head => Lines.FirstOrDefault(l => !l.IsBlank);
+
+    // A block keeps the comments and blank lines above its keyword line, which the file's LineOf gives.
+    internal override int HeadIndex => Head is { } head ? Lines.IndexOf(head) : 0;
 
     // The words of the keyword line after the keyword.
     string[] Words => Head?.Code.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries) is [_, .. var rest] ? rest : [];
@@ -162,12 +159,12 @@ public sealed class CutsceneBlock
         string indent;
         if (last != null)
         {
-            indent = Indent(last);
+            indent = last.Indent;
         }
         else
         {
             // The cutscene's settings are not indented. Every other block's are, a level under its keyword line.
-            indent = Kind == CutsceneBlockKind.Cutscene || Head == null ? "" : Indent(Head) + "\t";
+            indent = Kind == CutsceneBlockKind.Cutscene || Head == null ? "" : Head.Indent + "\t";
         }
         var at = last != null ? Lines.IndexOf(last) + 1 : Head != null ? Lines.IndexOf(Head) + 1 : Lines.Count;
         Lines.Insert(at, new TextLine($"{indent}{key} = {value}", "", hashInWord: true));
@@ -192,11 +189,9 @@ public sealed class CutsceneBlock
     {
         foreach (var line in SettingLines.Where(l => l.Key == key).ToList())
         {
-            line.Text = $"{Indent(line)}# {line.Text.TrimStart()}";
+            line.Text = $"{line.Indent}# {line.Text.TrimStart()}";
         }
     }
-
-    internal static string Indent(TextLine line) => line.Text[..(line.Text.Length - line.Text.TrimStart().Length)];
 
     /// <summary>Renames a binding, a track or a marker, keeping its ID and its kind or time.</summary>
     public void SetName(string name)
@@ -410,7 +405,7 @@ public sealed class CutsceneBlock
             throw new InvalidOperationException($"a {Kind} is not a key");
         }
         var key = new CutsceneBlock(CutsceneBlockKind.Key, null);
-        key.Lines.Add(new TextLine($"{Indent(head)}key {Format(time)} {value} {interpolation}", "", hashInWord: true));
+        key.Lines.Add(new TextLine($"{head.Indent}key {Format(time)} {value} {interpolation}", "", hashInWord: true));
         return key;
     }
 
@@ -480,7 +475,7 @@ public sealed class CutsceneBlock
 /// next keyword line. It reads only the structure. What a block's lines mean, and whether they are right, is the
 /// cooker's to say, so a cutscene with problems still opens, with its problems on its blocks.
 /// </summary>
-public sealed class CutsceneFile : ITextFile<CutsceneFile>
+public sealed class CutsceneFile : LineFile<CutsceneBlock>, ITextFile<CutsceneFile>
 {
     /// <summary>A second's ticks, the unit of every time in the file.</summary>
     public const int TicksPerSecond = 60000;
@@ -488,15 +483,14 @@ public sealed class CutsceneFile : ITextFile<CutsceneFile>
     /// <summary>The display rate of a cutscene that does not set one.</summary>
     public const int DefaultRate = 30;
 
-    // What the file's last line ends with, whichever line that comes to be.
-    string _finalEnding = "";
-
     CutsceneFile(CutsceneBlock root) => Root = root;
 
     /// <summary>The cutscene's block: the header and its settings, with the bindings and the tracks under it.</summary>
     public CutsceneBlock Root { get; }
 
     public IEnumerable<CutsceneBlock> Blocks => Root.Descendants();
+
+    private protected override IEnumerable<CutsceneBlock> InOrder => Root.Descendants();
 
     public IEnumerable<CutsceneBlock> Bindings => Root.Children.Where(b => b.Kind == CutsceneBlockKind.Binding);
 
@@ -513,23 +507,6 @@ public sealed class CutsceneFile : ITextFile<CutsceneFile>
         && rate is 24 or 25 or 30 or 48 or 50 or 60
             ? rate
             : DefaultRate;
-
-    /// <summary>The file's text.</summary>
-    public string Text
-    {
-        get
-        {
-            var lines = Blocks.SelectMany(b => b.Lines).ToList();
-            // A new line ends as the file's lines do.
-            var ending = lines.Find(l => l.Ending != "")?.Ending ?? "\n";
-            var text = new StringBuilder();
-            for (var i = 0; i < lines.Count; i++)
-            {
-                text.Append(lines[i].Text).Append(i == lines.Count - 1 ? _finalEnding : lines[i].Ending != "" ? lines[i].Ending : ending);
-            }
-            return text.ToString();
-        }
-    }
 
     /// <summary>Reads a time or an ID as the cooker does: digits, with <c>_</c> between them, up to 2147483647.</summary>
     public static bool TryParseTicks(string text, out int ticks)
@@ -574,7 +551,7 @@ public sealed class CutsceneFile : ITextFile<CutsceneFile>
         foreach (var line in TextLine.Split(text, hashInWord: true))
         {
             number++;
-            file._finalEnding = line.Ending;
+            file.FinalEnding = line.Ending;
             if (line.IsBlank)
             {
                 pending.Add(line);
@@ -661,36 +638,6 @@ public sealed class CutsceneFile : ITextFile<CutsceneFile>
             "key" => open.Kind == CutsceneBlockKind.Channel ? open : null,
             _ => null,
         };
-    }
-
-    /// <summary>The line, from 1, of a block's keyword line, or of its first line for the cutscene's block.</summary>
-    public int LineOf(CutsceneBlock block)
-    {
-        var line = 1;
-        foreach (var b in Blocks)
-        {
-            if (b == block)
-            {
-                return block.Head is { } head ? line + block.Lines.IndexOf(head) : line;
-            }
-            line += b.Lines.Count;
-        }
-        throw new ArgumentException("the block is not in this file", nameof(block));
-    }
-
-    /// <summary>The block whose own lines hold a line, from 1, or null past the end.</summary>
-    public CutsceneBlock? BlockAt(int line)
-    {
-        var first = 1;
-        foreach (var block in Blocks)
-        {
-            first += block.Lines.Count;
-            if (line >= 1 && line < first)
-            {
-                return block;
-            }
-        }
-        return null;
     }
 
     /// <summary>

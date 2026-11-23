@@ -249,4 +249,22 @@ public sealed partial class DecisionFileTests
             .Replace("float travel_cost = 1", "float travel_cost = 1\nint kills");
         Assert.Equal(expected, board.Text);
     }
+
+    [Fact]
+    public void ANewSettingGoesAfterTheLastSettingAndANewFieldTakesTheFirstLinesIndent()
+    {
+        // After the setting that the file has. An animation graph's goes above it, under the header.
+        var file = Read("decision 1\n# Why.\ntechnique = behavior_tree\n\nnode 1 wait\n  set a = 1\n    seconds = 1\n");
+        file.SetSetting("extra", "1");
+        Assert.Equal("decision 1\n# Why.\ntechnique = behavior_tree\nextra = 1\n\nnode 1 wait\n  set a = 1\n    seconds = 1\n", file.Text);
+
+        // The first line under the node's, a write here, gives the indent, and not the last field.
+        file.Find(1)!.Set("cooldown", "2");
+        Assert.EndsWith("\n  set a = 1\n    seconds = 1\n  cooldown = 2\n", file.Text);
+
+        // A node without fields or writes indents its first with a tab.
+        var bare = Read("decision 1\nnode 1 wait\n");
+        bare.Find(1)!.Set("seconds", "1");
+        Assert.Equal("decision 1\nnode 1 wait\n\tseconds = 1\n", bare.Text);
+    }
 }
