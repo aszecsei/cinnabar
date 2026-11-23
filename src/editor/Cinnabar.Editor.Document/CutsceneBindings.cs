@@ -1,4 +1,5 @@
 using System.Globalization;
+using Cinnabar.Editor.Maths;
 
 namespace Cinnabar.Editor.Document;
 
@@ -67,6 +68,18 @@ public static class CutsceneBindings
         block.Set("position", Meters(position));
         CutsceneKeying.SetKeys(file, new KeyTarget.Pose(id, PosePart.Position), tick, [0, 0, 0], "Transform");
         return id;
+    }
+
+    /// <summary>Sets a spawned binding's <c>rotation</c>, the rotation that it spawns with. False for a binding that is not there.</summary>
+    public static bool SetRotation(CutsceneFile file, int binding, Quat rotation)
+    {
+        if (file.Bindings.FirstOrDefault(b => b.Id == binding) is not { } block)
+        {
+            return false;
+        }
+        var q = rotation.Normalized();
+        block.Set("rotation", Numbers([q.X, q.Y, q.Z, q.W]));
+        return true;
     }
 
     // The settings that only a spawned binding has, which the cooker refuses on another kind.

@@ -1,0 +1,17 @@
+# The engine's cinematic camera (see docs/editor/cutscene-editor.md#new-camera-from-view): a Camera with a 35 mm lens on
+# a full-frame sensor, 36 by 24 mm, and no depth of field. The cutscene editor's New Camera from View spawns it.
+scene 3
+
+entity 1000000000000001
+name = "Cinematic Camera"
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 32 Camera
+component 160 Cinematic_Camera
+	focal_length = 35
+	sensor_width = 36
+	sensor_height = 24
+	focus_distance = 10
+	aperture = 0

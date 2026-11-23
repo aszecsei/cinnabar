@@ -1,4 +1,7 @@
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Maths;
+using Cinnabar.Editor.Tools;
+using AssetKind = Cinnabar.Editor.Link.Cook.AssetKind;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -72,6 +75,87 @@ public sealed partial class CutsceneEditor
 
     /// <summary>Whether the active scene view looks through a binding of this cutscene.</summary>
     public bool LooksThrough(int binding) => _shell.Looks[LookView] is ViewLook.Camera camera && camera.Owner == this && camera.Binding == binding;
+
+    /// <summary>The engine's cinematic camera prefab, in engine content (see docs/editor/cutscene-editor.md#new-camera-from-view).</summary>
+    public const string EngineCameraPrefab = "c1a3e0d5b2f84e7a9d6c4b8e2f1a7c35";
+
+    /// <summary>
+    /// The prefab that New Camera from View spawns: the engine's cinematic camera, or when the asset index does not have it,
+    /// the first prefab, by name, whose root has a Cinematic_Camera. Null when there is none.
+    /// </summary>
+    public string? CameraPrefab() =>
+        _shell.Assets.Find(EngineCameraPrefab) is { Kind: AssetKind.Prefab } ? EngineCameraPrefab
+        : KnownPrefabs().Select(p => p.Guid).FirstOrDefault(g => _shell.PrefabRootHas(g, Panels.CinematicCameraText.CinematicCameraId));
+
+    /// <summary>
+    /// The pose and the vertical field of view of what a scene view shows: the camera that the game drew it through, or
+    /// its editor camera. Null for the Game view and for an orthographic editor camera, which has no lens.
+    /// </summary>
+    public (long[] Position, Quat Rotation, double VerticalFov)? ViewPose(EditorViewport view)
+    {
+        if (!view.HasCamera)
+        {
+            return null;
+        }
+        if (_shell.Looks[view.Index] is ViewLook.Through { Shown: { Camera: true } shown })
+        {
+            var r = shown.Rotation;
+            return ([.. shown.Position], new Quat(r[0], r[1], r[2], r[3]), shown.VerticalFov);
+        }
+        var camera = view.Camera;
+        return camera.IsOrthographic ? null : ([.. camera.Position], camera.Rotation, camera.VerticalFov);
+    }
+
+    /// <summary>Why New Camera from View cannot run in a view, or null when it can.</summary>
+    public string? NewCameraRefusal(EditorViewport view)
+    {
+        if (Document.InTransaction)
+        {
+            return "An edit of the cutscene is under way.";
+        }
+        if (!view.HasCamera)
+        {
+            return "Make a scene view active: the Game view draws from the game's camera.";
+        }
+        if (ViewPose(view) == null)
+        {
+            return "The view is orthographic, so it has no lens to copy.";
+        }
+        return CameraPrefab() == null ? "No prefab with a Cinematic Camera is in the project or the engine." : null;
+    }
+
+    /// <summary>
+    /// Adds a camera where a scene view looks from, as one undo entry (see docs/editor/cutscene-editor.md#new-camera-from-view):
+    /// a binding that spawns <see cref="CameraPrefab"/> with the view's pose, its transform keyed at the playhead, its
+    /// focal length keyed to the view's field of view on the prefab's sensor, and a cut to it at the playhead when no cut
+    /// is there. Selects its row, and gives its ID, or null when it cannot run.
+    /// </summary>
+    public int? NewCameraFromView(EditorViewport view)
+    {
+        if (NewCameraRefusal(view) != null || ViewPose(view) is not { } pose || CameraPrefab() is not { } prefab)
+        {
+            return null;
+        }
+        var sensor = _shell.PrefabRootNumber(prefab, Panels.CinematicCameraText.CinematicCameraId, "sensor_height") ?? Lens.DefaultSensorHeight;
+        var focal = Math.Round(Lens.FocalLength(pose.VerticalFov, sensor), 2);
+        var tick = Playhead;
+        var id = 0;
+        Key("New Camera", f =>
+        {
+            id = CutsceneBindings.AddSpawnAt(f, prefab, "Camera", pose.Position, tick);
+            CutsceneBindings.SetRotation(f, id, pose.Rotation);
+            CutsceneKeying.SetKeys(f, new KeyTarget.Pose(id, PosePart.Rotation), tick, [0, 0, 0], "Transform");
+            CutsceneKeying.SetKeys(f, new KeyTarget.Property(id, Panels.CinematicCameraText.CinematicCameraId, "focal_length", PropertyShape.Number),
+                tick, [focal], "Lens");
+            CutsceneEdits.AddCut(f, tick, id);
+        });
+        if (id == 0)
+        {
+            return null;
+        }
+        SelectBindings([id]);
+        return id;
+    }
 
     void TakePreviewForLook()
     {

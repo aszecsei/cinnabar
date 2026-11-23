@@ -399,7 +399,7 @@ public static class CutsceneKeying
     }
 
     // The indent of a block under this one: as its children's, or a tab more than its keyword line.
-    static string IndentUnder(CutsceneBlock parent)
+    internal static string IndentUnder(CutsceneBlock parent)
     {
         if (parent.Children.FirstOrDefault()?.Head is { } child)
         {

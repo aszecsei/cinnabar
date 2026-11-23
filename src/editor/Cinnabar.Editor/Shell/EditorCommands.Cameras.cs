@@ -8,12 +8,13 @@ static partial class EditorCommands
     public const string CutsceneLookThrough = "cutscene.lookThrough";
     public const string CutsceneLookThroughCuts = "cutscene.lookThroughCuts";
     public const string CutsceneEditorCamera = "cutscene.editorCamera";
+    public const string CutsceneNewCameraFromView = "cutscene.newCameraFromView";
 
     /// <summary>
     /// The camera commands, which act between the active scene view and the active cutscene, or the one that holds the
     /// preview, wherever the keyboard is (see docs/editor/cutscene-editor.md#cameras).
     /// </summary>
-    public static readonly string[] CutsceneCameraCommands = [CutsceneLookThrough, CutsceneLookThroughCuts, CutsceneEditorCamera];
+    public static readonly string[] CutsceneCameraCommands = [CutsceneLookThrough, CutsceneLookThroughCuts, CutsceneEditorCamera, CutsceneNewCameraFromView];
 
     static void RegisterCutsceneCameras(EditorShell shell)
     {
@@ -40,6 +41,13 @@ static partial class EditorCommands
             Icon = "cutscene",
             CanExecuteWhen = () => shell.IsEditing && Cameras() != null,
             IsCheckedWhen = () => shell.Looks[shell.ActiveViewport.Index] is ViewLook.Cuts,
+        });
+        commands.Register(new Command(CutsceneNewCameraFromView, "New Camera from View", () => Cameras()?.NewCameraFromView(shell.ActiveViewport))
+        {
+            Description = "Add a camera to the cutscene where the active scene view looks from, with its lens, keyed at the playhead, and cut to it there when no cut is.",
+            Icon = "cutscene",
+            Shortcut = "Ctrl+Shift+C",
+            CanExecuteWhen = () => Cameras() is { } editor && editor.NewCameraRefusal(shell.ActiveViewport) == null,
         });
         commands.Register(new Command(CutsceneEditorCamera, "Editor Camera", () => shell.Looks.LookThroughEditor(shell.ActiveViewport.Index))
         {
