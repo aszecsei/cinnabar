@@ -55,7 +55,7 @@ public sealed partial class MeshSession
         {
             return ((sum / count).Offset(origin), textureAxes);
         }
-        var local = !Tools.HasPendingDistance && (_shell.Space == Space.Local || _shell.Tool == Tool.Scale);
+        var local = !Tools.HasPendingDistance && Gizmo.LocalAxes(_shell.Tool, _shell.Space);
         return ((sum / count).Offset(origin), local ? primary ?? Quat.Identity : Quat.Identity);
     }
 
@@ -117,14 +117,14 @@ public sealed partial class MeshSession
                 return false;
             }
             return _shell.Gizmos.Start(new GizmoDrag(Gizmo.KindOf(_shell.Tool), _shell.HotPart, _shell.Camera, _shell.Camera.RelativeTo(pivot), axes, pixel, width, height), textureDrag,
-                $"{_shell.Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Shift" }} Texture");
+                $"{Gizmo.VerbOf(_shell.Tool, "Shift")} Texture");
         }
         var drag = new MeshDrag(this, pivot, axes);
         if (drag.IsEmpty)
         {
             return false;
         }
-        var verb = _shell.Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Move" };
+        var verb = Gizmo.VerbOf(_shell.Tool);
         return _shell.Gizmos.Start(new GizmoDrag(Gizmo.KindOf(_shell.Tool), _shell.HotPart, _shell.Camera, _shell.Camera.RelativeTo(pivot), axes, pixel, width, height), drag,
             $"{verb} {ElementsLabel(MeshSelection.Count)}");
     }

@@ -26,8 +26,7 @@ STATUS_NAMES := [Path_Status]cstring {
 // register_scripts defines the Navigation library, which reaches s, and exposes Nav_Path, Nav_Agent and
 // Nav_Agent_State. A game's Register_Proc calls it, so init and every reload define them again.
 register_scripts :: proc(r: ^script.Runtime, s: ^State) {
-	luau.pushlightuserdata(r.L, s)
-	luau.setfield(r.L, luau.REGISTRYINDEX, REGISTRY_KEY)
+	script.set_registry_pointer(r, REGISTRY_KEY, s)
 	script.expose(r, Nav_Path)
 	script.expose(r, Nav_Agent)
 	script.expose(r, Nav_Agent_State)
@@ -170,10 +169,7 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 
 @(private = "file")
 state_of :: proc(L: ^luau.State) -> ^State {
-	luau.getfield(L, luau.REGISTRYINDEX, REGISTRY_KEY)
-	s := (^State)(luau.tolightuserdata(L, -1))
-	luau.pop(L, 1)
-	return s
+	return script.registry_pointer(L, REGISTRY_KEY, State)
 }
 
 // agent_arg is the agent type that a string argument names, or nil when no loaded navmesh has it.

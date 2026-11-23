@@ -680,31 +680,6 @@ meta_with :: proc(
 	return format.meta_text(guid, old_text, settings, subassets, context.temp_allocator)
 }
 
-// subasset_kind_name is the name that a kind of sub-asset has in .meta files, such as "mesh".
-subasset_kind_name :: proc(kind: format.Asset_Kind) -> string {
-	#partial switch kind {
-	case .Mesh:
-		return format.MESH_KIND
-	case .Texture:
-		return format.TEXTURE_KIND
-	case .Material_Instance:
-		return format.MATERIAL_INSTANCE_KIND
-	case .Prefab:
-		return format.PREFAB_KIND
-	case .Instance_Set:
-		return format.INSTANCE_SET_KIND
-	case .Skin:
-		return format.SKIN_KIND
-	case .Animation:
-		return format.ANIMATION_KIND
-	case .Nav_Mesh:
-		return format.NAV_MESH_KIND
-	case .Scene:
-		return format.SUBLEVEL_KIND
-	}
-	return ""
-}
-
 // assign_subassets gives each sub-asset that a file makes its GUID: the one in the .meta file for its kind and name, or
 // a new one, which it writes into the .meta file, and adds them to the asset's sub-assets. A line whose sub-asset is
 // gone stays, with a warning, so one renamed back gets its GUID again, until a re-import drops it.
@@ -763,7 +738,8 @@ assign_subassets :: proc(
 @(private = "file")
 subassets_changed :: proc(meta: format.Meta, wanted: []Subasset, force: bool) -> bool {
 	for w in wanted {
-		if _, found := format.meta_subasset(meta, subasset_kind_name(w.kind), w.name); !found {
+		kind := format.subasset_kind_name(w.kind)
+		if _, found := format.meta_subasset(meta, kind, w.name); !found {
 			return true
 		}
 	}
@@ -772,7 +748,7 @@ subassets_changed :: proc(meta: format.Meta, wanted: []Subasset, force: bool) ->
 	}
 	outer: for s in meta.subassets {
 		for w in wanted {
-			if s.kind == subasset_kind_name(w.kind) && s.name == w.name {
+			if s.kind == format.subasset_kind_name(w.kind) && s.name == w.name {
 				continue outer
 			}
 		}
@@ -797,7 +773,7 @@ subasset_lines :: proc(
 	result := make([dynamic]format.Meta_Subasset, 0, len(wanted), context.temp_allocator)
 	current := make(map[string]bool, len(wanted), context.temp_allocator)
 	for w in wanted {
-		kind := subasset_kind_name(w.kind)
+		kind := format.subasset_kind_name(w.kind)
 		guid, found := format.meta_subasset(a.meta, kind, w.name)
 		if !found {
 			_, guid = new_meta(nil)

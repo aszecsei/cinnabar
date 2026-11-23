@@ -157,27 +157,35 @@ TEXTURE_KIND :: "texture"
 MATERIAL_INSTANCE_KIND :: "material_instance"
 PREFAB_KIND :: "prefab"
 
+// SUBASSET_KIND_NAMES is the name that each kind of sub-asset has in .meta files, such as "mesh". A kind that is never
+// a sub-asset has none. subasset_kind_name and subasset_kind_of both read it, so the two directions cannot disagree.
+@(rodata)
+SUBASSET_KIND_NAMES := #partial [Asset_Kind]string {
+	.Mesh              = MESH_KIND,
+	.Texture           = TEXTURE_KIND,
+	.Material_Instance = MATERIAL_INSTANCE_KIND,
+	.Prefab            = PREFAB_KIND,
+	.Instance_Set      = INSTANCE_SET_KIND,
+	.Skin              = SKIN_KIND,
+	.Animation         = ANIMATION_KIND,
+	.Nav_Mesh          = NAV_MESH_KIND,
+	.Scene             = SUBLEVEL_KIND,
+}
+
+// subasset_kind_name is the name that a kind of sub-asset has in .meta files, or "" for a kind that is never one.
+subasset_kind_name :: proc(kind: Asset_Kind) -> string {
+	return SUBASSET_KIND_NAMES[kind]
+}
+
 // subasset_kind_of is the kind of asset that a sub-asset line's kind names, or .None.
-subasset_kind_of :: proc(kind: string) -> Asset_Kind {
-	switch kind {
-	case MESH_KIND:
-		return .Mesh
-	case TEXTURE_KIND:
-		return .Texture
-	case MATERIAL_INSTANCE_KIND:
-		return .Material_Instance
-	case PREFAB_KIND:
-		return .Prefab
-	case INSTANCE_SET_KIND:
-		return .Instance_Set
-	case SKIN_KIND:
-		return .Skin
-	case ANIMATION_KIND:
-		return .Animation
-	case NAV_MESH_KIND:
-		return .Nav_Mesh
-	case SUBLEVEL_KIND:
-		return .Scene
+subasset_kind_of :: proc(name: string) -> Asset_Kind {
+	if name == "" {
+		return .None
+	}
+	for kind_name, kind in SUBASSET_KIND_NAMES {
+		if kind_name == name {
+			return kind
+		}
 	}
 	return .None
 }

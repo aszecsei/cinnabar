@@ -123,7 +123,7 @@ cutscene_check :: proc(
 		kind := kinds[g]
 		file := fmt.tprintf("%s/%s", a.root, a.path)
 		names[g] =
-			a.parent == "" ? file : fmt.tprintf("%s %s %s", file, subasset_kind_name(kind), a.subasset)
+			a.parent == "" ? file : fmt.tprintf("%s %s %s", file, format.subasset_kind_name(kind), a.subasset)
 		if kind != .Cutscene || a.parent != "" || g == guid {
 			continue
 		}

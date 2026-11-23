@@ -14,10 +14,7 @@ REGISTRY_KEY :: "cinnabar.ui"
 
 @(private = "file")
 state_of :: proc(L: ^luau.State) -> ^State {
-	luau.getfield(L, luau.REGISTRYINDEX, REGISTRY_KEY)
-	s := (^State)(luau.touserdata(L, -1))
-	luau.pop(L, 1)
-	return s
+	return script.registry_pointer(L, REGISTRY_KEY, State)
 }
 
 @(private = "file")
@@ -42,8 +39,7 @@ document_arg :: proc(L: ^luau.State) -> (^State, ^Document) {
 // register_scripts defines the Ui library, which reaches s, and exposes Ui_Document. A game's Register_Proc calls it,
 // so init and every reload define them again.
 register_scripts :: proc(r: ^script.Runtime, s: ^State) {
-	luau.pushlightuserdata(r.L, s)
-	luau.setfield(r.L, luau.REGISTRYINDEX, REGISTRY_KEY)
+	script.set_registry_pointer(r, REGISTRY_KEY, s)
 	script.expose(r, Ui_Document, DEFAULT_UI_DOCUMENT)
 
 	script.define(r, "Ui.set", proc(L: ^luau.State) -> c.int {

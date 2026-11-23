@@ -17,6 +17,21 @@ public sealed class ToolsTests
         Assert.True(Math.Abs(expected - actual) <= tolerance, $"expected {expected}, got {actual}");
 
     [Fact]
+    public void EachToolNamesItsDragAndScaleTakesTheSelectionsAxes()
+    {
+        Assert.Equal("Move", Gizmo.VerbOf(Tool.Move));
+        Assert.Equal("Rotate", Gizmo.VerbOf(Tool.Rotate));
+        Assert.Equal("Scale", Gizmo.VerbOf(Tool.Scale));
+        Assert.Equal("Shift", Gizmo.VerbOf(Tool.Move, "Shift"));
+        Assert.Equal("Rotate", Gizmo.VerbOf(Tool.Rotate, "Shift"));
+
+        Assert.False(Gizmo.LocalAxes(Tool.Move, Space.World));
+        Assert.False(Gizmo.LocalAxes(Tool.Rotate, Space.World));
+        Assert.True(Gizmo.LocalAxes(Tool.Scale, Space.World));
+        Assert.True(Gizmo.LocalAxes(Tool.Move, Space.Local));
+    }
+
+    [Fact]
     public void TheCameraLooksDownItsZAndProjectsWhatItSees()
     {
         var camera = new EditorCamera();
