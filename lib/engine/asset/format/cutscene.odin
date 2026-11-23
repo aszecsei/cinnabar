@@ -69,9 +69,11 @@ Cutscene_Binding_Kind :: enum u32 {
 	Possessed,
 	// An entity that the cutscene spawns from a prefab and despawns when it ends.
 	Spawned,
+	// An entity that a script gives when it plays the cutscene.
+	Provided,
 }
 
-// Cutscene_Policy is what a player does when a possessed binding's entity is missing.
+// Cutscene_Policy is what a player does when a possessed or provided binding's entity is missing.
 Cutscene_Policy :: enum u32 {
 	// The cutscene fails, naming the binding.
 	Required,
@@ -401,7 +403,7 @@ cutscene_rate_valid :: proc "contextless" (rate: u32) -> bool {
 // of its entity, folded from a path for an entity in a prefab instance (scene_path_id_of). A spawned binding has its
 // prefab's GUID in asset, its parent binding's index or CUTSCENE_NONE, and its start transform: position in
 // World_Position units (2^-24 m), from the parent when it has one. suspend is what stops acting on its entities while
-// the cutscene holds it, the cutscene's default already applied.
+// the cutscene holds it, the cutscene's default already applied. A provided binding has no asset, entity or parent.
 Cutscene_Binding :: struct {
 	id:        u32,
 	kind:      Cutscene_Binding_Kind,
@@ -737,12 +739,12 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 		}
 	}
 	for b, i in bindings {
-		if b.kind > .Spawned ||
+		if b.kind > .Provided ||
 		   b.policy > .Optional ||
 		   transmute(u8)b.suspend & ~transmute(u8)CUTSCENE_SUSPEND_ALL != 0 ||
 		   b.flags - {.Keep_Velocity} != {} ||
 		   !inside(data, b.name, 1, 1) ||
-		   b.asset == {} {
+		   (b.kind != .Provided && b.asset == {}) {
 			return nil, false
 		}
 		switch b.kind {
@@ -753,6 +755,10 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 		case .Spawned:
 			if b.parent != CUTSCENE_NONE &&
 			   (b.parent >= u32(i) || bindings[b.parent].kind != .Spawned) {
+				return nil, false
+			}
+		case .Provided:
+			if b.asset != {} || b.entity != 0 || b.parent != CUTSCENE_NONE {
 				return nil, false
 			}
 		}

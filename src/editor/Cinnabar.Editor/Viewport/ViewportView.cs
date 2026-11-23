@@ -90,6 +90,20 @@ public sealed class ViewportView : Grid
     (int X, int Y)? _pickedPixel;
     bool _dragPicking;
     int _dragGeneration;
+    // Where the last pick under a prefab drag put the prefab, which a Ctrl drop spawns a cutscene's binding at.
+    long[]? _dropPoint;
+    // A click's press while a cutscene is open and entities are selected: the pick under it, which a drag that starts on
+    // a selected entity turns into a drag of the entity to the timeline. Null for none. Each press has its number, so an
+    // answer to an earlier press does nothing.
+    PressPick? _pressPick;
+    int _presses;
+
+    abstract record PressPick(int Press)
+    {
+        public sealed record Waiting(int Press, PointerPressedEventArgs Event) : PressPick(Press);
+
+        public sealed record OnSelected(int Press, ulong Handle, PointerPressedEventArgs Event) : PressPick(Press);
+    }
 
     // The game has the keyboard and the mouse of the Game view only.
     bool InputGoesToGame => _viewport.IsGame && _shell.InputGoesToGame;
@@ -402,7 +416,7 @@ public sealed class ViewportView : Grid
         _shell.ActivateViewport(_viewport);
         if (DraggedPrefab(e) is var (prefab, node, at))
         {
-            e.DragEffects = DragDropEffects.Copy;
+            e.DragEffects = SpawnTarget(e, node) != null ? DragDropEffects.Link : DragDropEffects.Copy;
             e.Handled = true;
             _dragPixel = ((int)Math.Floor(at.X), (int)Math.Floor(at.Y));
             PickUnderDrag(prefab, isPrefab: true, node);
@@ -445,7 +459,8 @@ public sealed class ViewportView : Grid
             _dragPicking = false;
             if (isPrefab)
             {
-                _shell.PreviewPrefab(guid, _shell.DropPoint(new Vec2(pixel.X + 0.5, pixel.Y + 0.5), result), node);
+                _dropPoint = _shell.DropPoint(new Vec2(pixel.X + 0.5, pixel.Y + 0.5), result);
+                _shell.PreviewPrefab(guid, _dropPoint, node);
             }
             else
             {
@@ -455,11 +470,25 @@ public sealed class ViewportView : Grid
         });
     }
 
+    // The cutscene that a Ctrl drop of a whole prefab adds a spawned binding to: the one that holds the preview (see
+    // docs/editor/cutscene-editor.md#possess-and-spawn), or null.
+    CutsceneEditor? SpawnTarget(DragEventArgs e, ulong node) =>
+        e.KeyModifiers.HasFlag(KeyModifiers.Control) && node == 0 && _shell.CutscenePreview.Owner is { } owner && !owner.Document.InTransaction ? owner : null;
+
     void OnDrop(DragEventArgs e)
     {
         if (DraggedPrefab(e) is var (prefab, node, at))
         {
             e.Handled = true;
+            // Ctrl spawns the prefab for the cutscene, where the drag showed it, and leaves the scene as it was.
+            if (SpawnTarget(e, node) is { } cutscene)
+            {
+                var point = _dropPoint ?? _shell.DropPoint(at, null);
+                EndPicks();
+                _shell.CancelPrefab();
+                cutscene.SpawnAt(prefab, point);
+                return;
+            }
             EndPicks();
             // The instance stays where the drag last showed it, or where the drop is if no pick has answered. Alt makes plain
             // entities of it.
@@ -510,6 +539,7 @@ public sealed class ViewportView : Grid
         _dragGeneration++;
         _dragPixel = _pickedPixel = null;
         _dragPicking = false;
+        _dropPoint = null;
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
@@ -575,6 +605,7 @@ public sealed class ViewportView : Grid
             else
             {
                 _gesture = Gesture.Click;
+                PickUnderPress(point.Position, e);
             }
         }
         if (_gesture != Gesture.None)
@@ -645,6 +676,16 @@ public sealed class ViewportView : Grid
             case Gesture.Click:
                 if ((position - _start) is var moved && Gestures.MovedPast(moved))
                 {
+                    // A drag that starts on a selected entity takes it to the cutscene's timeline. A pick that has not
+                    // answered yet, or found no selected entity, makes it a box select.
+                    if (_pressPick is PressPick.OnSelected { Handle: var handle, Event: var pressed })
+                    {
+                        EndGesture();
+                        e.Pointer.Capture(null);
+                        _ = DragEntity(pressed, handle);
+                        break;
+                    }
+                    _pressPick = null;
                     _gesture = Gesture.Box;
                     ShowBox(position);
                 }
@@ -719,8 +760,42 @@ public sealed class ViewportView : Grid
         EndGesture();
     }
 
+    // Picks under a click's press while a cutscene's tab is open and entities are selected, so a drag from a selected
+    // entity can take it to the timeline (see docs/editor/cutscene-editor.md#possess-and-spawn).
+    void PickUnderPress(Point position, PointerPressedEventArgs e)
+    {
+        _pressPick = null;
+        if (_shell.Cutscenes.Count == 0 || _shell.Selection.Entities.Count == 0 || _shell.Mesh.InMeshMode || _control.FramePoint(position) is not { } pixel)
+        {
+            return;
+        }
+        var press = ++_presses;
+        var waiting = new PressPick.Waiting(press, e);
+        _pressPick = waiting;
+        if (!_shell.PickSelectedAt(pixel, handle =>
+            {
+                if (_pressPick == waiting)
+                {
+                    _pressPick = handle != 0 ? new PressPick.OnSelected(press, handle, e) : null;
+                }
+            }))
+        {
+            _pressPick = null;
+        }
+    }
+
+    // Drags an entity out of the viewport as the Outliner does, so the cutscene's timeline possesses it, with the rest of
+    // the selection.
+    static async Task DragEntity(PointerPressedEventArgs e, ulong handle)
+    {
+        var data = new DataTransfer();
+        data.Add(DataTransferItem.Create(EntityView.EntityFormat, handle.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        await DragDrop.DoDragDropAsync(e, data, DragDropEffects.Move | DragDropEffects.Link);
+    }
+
     void EndGesture()
     {
+        _pressPick = null;
         _gesture = Gesture.None;
         _box.IsVisible = false;
         _flyTimer.Stop();
@@ -873,6 +948,10 @@ public sealed class ViewportView : Grid
         {
             _shell.Landscape.CancelStroke();
             EndGesture();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape && _shell.CancelBindingPicks())
+        {
             e.Handled = true;
         }
         else if (e.Key == Key.Escape && _shell.Mesh.InMeshMode)

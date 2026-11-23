@@ -200,13 +200,14 @@ Play_Desc :: struct {
 
 // Player_Context is what update needs to load cutscenes and resolve bindings: the world, its scenes, the scripts that
 // a spawned prefab's behaviours attach to (or nil), and the frame's real duration, which a skip's fades run on. With
-// unheld, the bindings suspend nothing on their entities, as for the editor's preview (see Resolve).
+// preview, the bindings suspend nothing on their entities and a provided binding without an override is missing, as
+// for the editor's preview (see Resolve).
 Player_Context :: struct {
 	world:   ^ecs.World,
 	scenes:  ^scene.Scenes,
 	scripts: ^script.Runtime,
 	dt:      time.Duration,
-	unheld:  bool,
+	preview: bool,
 }
 
 // Command_Result is what a command did. Gone is a stale handle, or a player that is Restored or Failed: nothing
@@ -1181,7 +1182,7 @@ resolve_of :: proc(
 		assets = s.assets,
 		data = data,
 		blob = blob,
-		unheld = c.unheld,
+		preview = c.preview,
 	}
 }
 

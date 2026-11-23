@@ -12,7 +12,7 @@ This document describes `lib/engine/cutscene/scripts.odin`. Read [Player](player
 
 | Option | Type | What it does |
 |---|---|---|
-| `bindings` | `{ [string]: Entity }` | Gives an entity to each binding, by the binding's name. It overrides the asset's reference ([Bindings: Overrides](bindings.md#overrides)). One cutscene then works for every companion. A name that the cutscene does not have is logged, and play goes on. |
+| `bindings` | `{ [string]: Entity }` | Gives an entity to each binding, by the binding's name. It overrides the asset's reference ([Bindings: Overrides](bindings.md#overrides)). One cutscene then works for every companion. A [provided binding](bindings.md#provided-bindings) has no reference, so a script fills it in this way: `bindings = { Guest = npc }` gives `npc` to the binding named `Guest`. Without it, the binding is missing. A name that the cutscene does not have is logged, and play goes on. |
 | `priority` | whole number | Sets the player's priority. A higher priority wins a field that two players write ([Player: Conflicts](player.md#conflicts)). The default is 0. |
 | `start` | number | Sets where the player starts, in seconds on the cutscene's time. The player seeks there once it is ready, so only the event keys marked `fire_on_seek` before it fire. A time outside the range is clamped to it. |
 | `wait_ready` | boolean | When true, the player loads and then holds in `"ready"` until `:play()` (the player's `load`). Load a cutscene a little before it plays, so that it starts without a hitch. |

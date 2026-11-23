@@ -22,6 +22,9 @@ public sealed partial class EditorShell
     /// </summary>
     public Func<string, string, int, Task<bool>>? AskDeleteBinding { get; set; }
 
+    /// <summary>Cancels every cutscene's armed pick of a binding's entity, as Esc does. False when none was armed.</summary>
+    public bool CancelBindingPicks() => _cutscenes.Count(c => c.CancelPick()) > 0;
+
     /// <summary>
     /// What the timeline's last copy or cut holds, which a paste in the tab of the cutscene that it came from puts at its
     /// playhead (see docs/editor/cutscene-editor.md#copy-and-paste). The editor keeps it, not the system's clipboard.
@@ -119,14 +122,15 @@ public sealed partial class EditorShell
 
 /// <summary>
 /// How a user's timeline shows a cutscene: frames or timecode on the ruler, the IDs of the locked, the muted and the
-/// soloed tracks, and whether the preview plays grains while scrubbed and sends events while it plays. A file from before
-/// a field has its default.
+/// soloed tracks, whether the preview plays grains while scrubbed and sends events while it plays, and the stand-in of
+/// each script slot by its binding's ID (see <see cref="CutsceneStandIns"/>). A file from before a field has its default.
 /// </summary>
-public sealed record CutsceneTimelineView(bool ShowFrames, int[] Locked, int[]? Muted = null, int[]? Soloed = null, bool ScrubSound = true, bool Events = false)
+public sealed record CutsceneTimelineView(bool ShowFrames, int[] Locked, int[]? Muted = null, int[]? Soloed = null, bool ScrubSound = true, bool Events = false,
+    Dictionary<int, string>? StandIns = null)
 {
     public static readonly CutsceneTimelineView Default = new(false, [], [], []);
 
     /// <summary>Whether the view is the default, which the file leaves out.</summary>
     public bool IsDefault => !ShowFrames && (Locked?.Length ?? 0) == 0 && (Muted?.Length ?? 0) == 0 && (Soloed?.Length ?? 0) == 0
-        && ScrubSound && !Events;
+        && ScrubSound && !Events && (StandIns?.Count ?? 0) == 0;
 }

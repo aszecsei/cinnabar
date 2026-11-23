@@ -46,6 +46,7 @@ public sealed class CutsceneEditorView : DockPanel
     readonly CutsceneTimeline _timeline;
     readonly GridSplitter _curveSplit = new() { ResizeDirection = GridResizeDirection.Rows, IsVisible = false };
     readonly ToggleButton _keysUnder = new() { Content = "Keys under selection", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(8, 0, 0, 0) };
+    readonly Button _spawnPicker;
 
     public CutsceneEditorView(EditorShell shell, CutsceneEditor editor)
     {
@@ -158,6 +159,36 @@ public sealed class CutsceneEditorView : DockPanel
         strip.Children.Add(new Border { Classes = { "value-box", "editable" }, Child = _search });
         strip.Children.Add(_keysUnder);
         strip.Children.Add(_selectedOnly);
+        // Add Binding (see docs/editor/cutscene-editor.md#possess-and-spawn): its menu, and the prefab picker that Spawn
+        // Prefab opens, from the menu or the command.
+        var addMenu = new MenuFlyout();
+        var addItems = new List<(MenuItem Item, Commands.Command Command)>();
+        foreach (var id in (string[])[EditorCommands.CutsceneAddBindingSelected, EditorCommands.CutsceneSpawnPrefab, EditorCommands.CutsceneAddSlot])
+        {
+            var command = shell.Commands.Get(id);
+            var item = new MenuItem { Header = command.Label.Replace("Add Binding: ", "", StringComparison.Ordinal), InputGesture = command.Shortcut is { } s ? KeyGesture.Parse(s) : null };
+            item.Click += (_, _) => command.Execute();
+            addMenu.Items.Add(item);
+            addItems.Add((item, command));
+        }
+        addMenu.Opening += (_, _) =>
+        {
+            foreach (var (item, command) in addItems)
+            {
+                item.IsEnabled = command.CanExecute;
+            }
+        };
+        var add = new Button { Content = "Add Binding ▾", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(8, 0, 0, 0), Flyout = addMenu };
+        strip.Children.Add(add);
+        _spawnPicker = CutsceneDetails.PrefabPicker(editor, guid => editor.Spawn([guid]), []).Button("Spawn Prefab…");
+        _spawnPicker.Classes.Clear();
+        _spawnPicker.Classes.Add("viewport-tool");
+        _spawnPicker.FontSize = 11;
+        _spawnPicker.Focusable = false;
+        _spawnPicker.Margin = new Thickness(4, 0, 0, 0);
+        _spawnPicker.HorizontalAlignment = HorizontalAlignment.Left;
+        ToolTip.SetTip(_spawnPicker, "Pick a prefab for the cutscene to spawn.");
+        strip.Children.Add(_spawnPicker);
         var timelinePane = new DockPanel();
         SetDock(strip, DockSide.Top);
         timelinePane.Children.Add(strip);
@@ -204,6 +235,10 @@ public sealed class CutsceneEditorView : DockPanel
                 _editor.EndField(cancel: true);
                 e.Handled = true;
             }
+            else if (e.Key == Key.Escape && _editor.CancelPick())
+            {
+                e.Handled = true;
+            }
         }, RoutingStrategies.Tunnel);
 
         void Find()
@@ -212,11 +247,13 @@ public sealed class CutsceneEditorView : DockPanel
             _search.SelectAll();
         }
         void AskTracks(IReadOnlyList<string> kinds) => _ = AskPasteTracks(kinds);
+        void SpawnPrefab() => _spawnPicker.Flyout?.ShowAt(_spawnPicker);
         new ViewSubscriptions(this, attached: Show)
             .Add(() => _editor.Changed += Show, () => _editor.Changed -= Show)
             .Add(() => _editor.FindRequested += Find, () => _editor.FindRequested -= Find)
             .Add(() => _editor.GoToTimeRequested += GoToTime, () => _editor.GoToTimeRequested -= GoToTime)
             .Add(() => _editor.PasteTracksRequested += AskTracks, () => _editor.PasteTracksRequested -= AskTracks)
+            .Add(() => _editor.SpawnPrefabRequested += SpawnPrefab, () => _editor.SpawnPrefabRequested -= SpawnPrefab)
             .Add(() => _editor.ProblemsChanged += Show, () => _editor.ProblemsChanged -= Show)
             .Add(() => _shell.Cook.StateChanged += Show, () => _shell.Cook.StateChanged -= Show)
             .Add(() => _shell.CutscenePreview.Changed += Show, () => _shell.CutscenePreview.Changed -= Show)

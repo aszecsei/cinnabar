@@ -49,7 +49,9 @@ public enum CutsceneBindingKind
     Possessed,
     /// <summary>It spawns a prefab for the cutscene, with <c>spawn</c>.</summary>
     Spawned,
-    /// <summary>It has neither <c>possess</c> nor <c>spawn</c>, or both.</summary>
+    /// <summary>A script gives its entity when it plays the cutscene, with <c>provided = true</c>: a script slot.</summary>
+    Provided,
+    /// <summary>It has none of <c>possess</c>, <c>spawn</c> and <c>provided</c>, or more than one.</summary>
     Unknown,
 }
 

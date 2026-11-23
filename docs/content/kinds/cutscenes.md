@@ -82,13 +82,14 @@ Every time in the text and in the blob is a whole number of **ticks**, `i32`, at
 
 ### Bindings
 
-A binding has `possess` or `spawn`, and not both.
+A binding has one of `possess`, `spawn` and `provided`.
 
 | Setting | For | Value | Default |
 |---|---|---|---|
 | `possess` | Possessed | `@<scene guid>/<id>` or `@<scene guid>/<path>`, as a reference to another scene's entity in a scene file (see [World: References across scenes](../../world/scenes.md#references-across-scenes)). A path, `<instance>#<entity>`, names an entity inside a prefab instance. | — |
-| `policy` | Possessed | `required`: the cutscene fails when the entity is missing. `optional`: the binding's tracks do nothing. See [Cinematics: A missing binding](../../cinematics/bindings.md#a-missing-binding). | `required` |
+| `policy` | Possessed, Provided | `required`: the cutscene fails when the entity is missing. `optional`: the binding's tracks do nothing. See [Cinematics: A missing binding](../../cinematics/bindings.md#a-missing-binding). | `required` |
 | `spawn` | Spawned | `$<guid>` of a prefab | — |
+| `provided` | Provided | `true`. A script gives the binding's entity when it plays the cutscene, by the binding's name or ID (see [Cinematics: Provided bindings](../../cinematics/bindings.md#provided-bindings)). Any other value is a problem. | — |
 | `parent` | Spawned | The ID of a spawned binding before this one | None |
 | `position` | Spawned | `[x, y, z]` in meters, from the parent when it has one. The cooker converts it to `World_Position` units (2^-24 m), as a world does. | `[0, 0, 0]` |
 | `rotation` | Spawned | `[x, y, z, w]`, a quaternion of length 1 (within 1e-3), which the cooker normalizes | `[0, 0, 0, 1]` |
@@ -97,7 +98,7 @@ A binding has `possess` or `spawn`, and not both.
 | `keep_velocity` | Both | `true`: a body that physics suspension made kinematic keeps its last velocity at the end. `false`: it is at rest. | `false` |
 | `look_at`, `look_at_offset`, `look_at_damping`, `follow`, `follow_offset`, `follow_damping`, `focus` | Both | The binding's constraints as a camera, as a camera cut section's (see [Sections](#sections)). Only a binding that a camera cut section shows takes them. | None |
 
-A parent must come before its child, so parents cannot form a cycle. [Cinematics: Bindings](../../cinematics/bindings.md) describes how the game resolves both kinds.
+A parent must come before its child, so parents cannot form a cycle. A provided binding has no entity or prefab in the asset, so `parent` and the start transform are a problem for it. [Cinematics: Bindings](../../cinematics/bindings.md) describes how the game resolves the three kinds.
 
 ### Tracks
 

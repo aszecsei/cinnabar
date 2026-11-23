@@ -361,6 +361,23 @@ spawn_binding :: proc(
 	}
 }
 
+@(private = "file")
+provide :: proc(
+	id: u32,
+	name: string,
+	policy := format.Cutscene_Policy.Required,
+) -> format.Cutscene_Binding_Contents {
+	return {
+		id = id,
+		kind = .Provided,
+		name = name,
+		policy = policy,
+		parent = format.CUTSCENE_NONE,
+		rotation = {0, 0, 0, 1},
+		scale = {1, 1, 1},
+	}
+}
+
 // resolve_of writes a cutscene of the bindings, with no tracks, and gives what resolve_bindings takes.
 @(private = "file")
 resolve_of :: proc(
@@ -527,6 +544,69 @@ an_override_wins_over_the_assets_reference :: proc(t: ^testing.T) {
 	testing.expect_value(t, ecs.entity_count(w), before)
 	testing.expect_value(t, release_bindings(&b, w), 0)
 	testing.expect(t, ecs.is_alive(w, stand_in) && ecs.is_alive(w, f.door))
+}
+
+@(test)
+a_provided_binding_takes_its_override_by_name_or_ID :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	first := stand(w)
+	second := stand(w)
+	b: Bindings
+	defer destroy_bindings(&b, &f.world)
+	r := resolve_of(t, f, {provide(1, "Guest"), provide(2, "Host", .Optional)})
+	testing.expect_value(
+		t,
+		resolve_bindings(
+			&b,
+			r,
+			{{binding = "Guest", entity = first}, {binding = Binding_Id(2), entity = second}},
+		),
+		nil,
+	)
+	guest, _ := binding_entity(&b, w, 0)
+	host, _ := binding_entity(&b, w, 1)
+	testing.expect_value(t, guest, first)
+	testing.expect_value(t, host, second)
+	testing.expect_value(t, release_bindings(&b, w), 0)
+	testing.expect(t, ecs.is_alive(w, first) && ecs.is_alive(w, second))
+}
+
+@(test)
+a_provided_binding_without_an_override_is_missing_or_fails_by_its_policy :: proc(t: ^testing.T) {
+	context.logger = testlog.expected_errors()
+	f := setup(t)
+	defer teardown(f)
+	b: Bindings
+	defer destroy_bindings(&b, &f.world)
+	r := resolve_of(t, f, {provide(1, "Guest", .Optional)})
+	testing.expect_value(t, resolve_bindings(&b, r), nil)
+	_, missing := b.states[0].(Binding_Missing)
+	testing.expect(t, missing)
+	_, has := binding_entity(&b, &f.world, 0)
+	testing.expect(t, !has)
+
+	r = resolve_of(t, f, {provide(1, "Door"), provide(2, "Guest")})
+	failure, failed := resolve_bindings(&b, r, {{binding = "Door", entity = f.door}}).?
+	testing.expect(t, failed)
+	testing.expect_value(t, failure, Binding_Failure{index = 1, reason = .Missing})
+}
+
+@(test)
+a_preview_gives_a_provided_binding_without_an_override_as_missing :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	b: Bindings
+	defer destroy_bindings(&b, &f.world)
+	r := resolve_of(t, f, {provide(1, "Guest"), provide(2, "Host")})
+	r.preview = true
+	testing.expect_value(t, resolve_bindings(&b, r, {{binding = "Host", entity = f.door}}), nil)
+	_, missing := b.states[0].(Binding_Missing)
+	testing.expect(t, missing)
+	host, has := binding_entity(&b, &f.world, 1)
+	testing.expect(t, has)
+	testing.expect_value(t, host, f.door)
 }
 
 @(test)

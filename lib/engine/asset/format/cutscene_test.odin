@@ -487,7 +487,7 @@ cutscene_blobs_with_bad_records_are_refused :: proc(t: ^testing.T) {
 	refused(t, data, "skip ranges that are not whole records")
 	blob.skip_ranges.size -= 4
 
-	bindings[0].kind = Cutscene_Binding_Kind(2)
+	bindings[0].kind = Cutscene_Binding_Kind(3)
 	refused(t, data, "an unknown binding kind")
 	bindings[0].kind = .Possessed
 	bindings[0].policy = Cutscene_Policy(2)

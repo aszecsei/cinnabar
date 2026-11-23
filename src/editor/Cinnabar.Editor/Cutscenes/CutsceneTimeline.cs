@@ -440,7 +440,8 @@ sealed class CutsceneTimeline : Control
                     x += 12;
                 }
                 // A binding's row (see docs/editor/cutscene-editor.md#bindings): a dot for a possessed entity, a ring for a
-                // spawned prefab, the name, the entity's or prefab's name after it, and a warning when it is not bound.
+                // spawned prefab, a square for a script slot, the name, the entity's or prefab's name after it (a slot's
+                // stand-in's), and a warning when it is not bound.
                 var warn = r.Binding is { State: not CutsceneBindingState.Bound };
                 if (r.Binding is { } info)
                 {
@@ -449,6 +450,10 @@ sealed class CutsceneTimeline : Control
                     if (info.Kind == CutsceneBindingKind.Spawned)
                     {
                         context.DrawEllipse(null, new Pen(brush, 1.5), center, 3.5, 3.5);
+                    }
+                    else if (info.Kind == CutsceneBindingKind.Provided)
+                    {
+                        context.DrawRectangle(null, new Pen(brush, 1.5), new Rect(center.X - 3.5, center.Y - 3.5, 7, 7));
                     }
                     else
                     {

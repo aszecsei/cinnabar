@@ -2,9 +2,8 @@
 
 The cutscene editor edits a cutscene (see [Content: Cutscenes](../content/kinds/cutscenes.md)), which the game plays as [Cinematics](../cinematics/README.md) describes. Each open one is a tab, `CutsceneEditorDocument`, over a `CutsceneEditor` in the shell, which holds its state. Docking can rebuild the view, and tests drive the editor without a window.
 
-The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, and the first part of the bindings. These come next:
+The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, and the bindings. These come next:
 - a scene view that looks through the cut camera, and the camera tools ([#555](https://github.com/aszecsei/cinnabar/issues/555));
-- the rest of the bindings ([#554](https://github.com/aszecsei/cinnabar/issues/554)): convert between possessed and spawned, pick a broken binding's entity, stand-ins for the bindings that a script gives, and Spawn Prefab without a drag;
 - the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)).
 
 **In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Preview](#preview) · [Keying](#keying) · [Bindings](#bindings) · [Curves](#curves)
@@ -284,7 +283,7 @@ A text without problems goes in the cache's preview area, `<cache>/dev/preview/<
 
 ### The game's side
 
-`lib/engine/editor/cutscene_preview.odin` holds the open preview in the editor's `Session`. It loads the cutscene with `cutscene.open_live`, as a player loads one, but without a player's slot and without its hold on gameplay. It pushes no input context, hides no UI, and suspends no systems on the bindings (`Player_Context.unheld`). It evaluates the cutscene with `seek` and `evaluate`, as a scrub does (see [Evaluation](../cinematics/evaluation.md)).
+`lib/engine/editor/cutscene_preview.odin` holds the open preview in the editor's `Session`. It loads the cutscene with `cutscene.open_live`, as a player loads one, but without a player's slot and without its hold on gameplay. It pushes no input context, hides no UI, and suspends no systems on the bindings (`Player_Context.preview`). It evaluates the cutscene with `seek` and `evaluate`, as a scrub does (see [Evaluation](../cinematics/evaluation.md)).
 
 - **A layer with the overrides.** The preview's writes are one more layer with the [overrides](link.md#overrides). `lift_overrides` puts them back with `cutscene.lift`, which keeps the drives, the camera cut's claim and the voices. `lay_overrides` evaluates the preview again at its time. So poll, the edit-mode behaviours and what the game sends the editor see the document. A scene edit of a field that the preview writes goes to the document, under the preview.
 - **Values over the preview.** `Cutscene_Preview_Values` lays the editor's [preview values](#preview-values) over the preview, after its evaluation in `lay_cutscene_preview` and again in `update_cutscene_preview`. They are an `Override`'s fields and poses, which save what they write over once, so the lift gives back the document, also of a field that no track writes. They show only while the preview is paused at their tick. A `Time`, a `Play`, a `Close`, a new ticket and `end_overrides` drop them, so a lost message from the editor cannot leave them at another time. Their fields are in `Entity_Values.held`, and `shown_preview.values` names their serial while they show.
@@ -428,22 +427,22 @@ A transform track whose space is `relative <id>` keys the world's pose in the ot
 
 ## Bindings
 
-A binding names what the cutscene's tracks act on (see [Cinematics: Bindings](../cinematics/bindings.md)). It is either an entity of a scene that it possesses, `possess = @<guid>/<id>`, or a prefab that it spawns for the cutscene, `spawn = $<guid>`. Each binding is a row of the timeline, with its tracks under it. The edits are in `CutsceneBindings`, in `Cinnabar.Editor.Document`. The editor's side is in `CutsceneEditor`.
+A binding names what the cutscene's tracks act on (see [Cinematics: Bindings](../cinematics/bindings.md)). It is one of three kinds: an entity of a scene that it possesses, `possess = @<guid>/<id>`; a prefab that it spawns for the cutscene, `spawn = $<guid>`; or a script slot, `provided = true`, whose entity a script gives when it plays the cutscene. Each binding is a row of the timeline, with its tracks under it. The edits are in `CutsceneBindings`, in `Cinnabar.Editor.Document`. The editor's side is in `CutsceneEditor`.
 
 ### A binding's row
 
 The header shows these items:
-- a dot for a possessed entity, or a ring for a spawned prefab;
+- a dot for a possessed entity, a ring for a spawned prefab, or a square for a script slot;
 - the binding's name;
-- the name of its entity or prefab, when that name is different.
+- the name of its entity or prefab, or of a slot's stand-in, when that name is different.
 
 `CutsceneEditor.InfoOf` gives each binding's kind, the name of its entity or prefab, and its state. `CutsceneTimelineLayout.Build` puts them on the row.
 
 | State | When | The header |
 |---|---|---|
-| Bound | The open scene has the entity, or the index has the prefab | The name of the entity or prefab |
+| Bound | The open scene has the entity, or the index has the prefab. A slot with no stand-in is bound. | The name of the entity or prefab |
 | Not loaded | The entity's scene is not open in the editor | An amber mark |
-| Broken | One of these: the open scene does not have the entity; no scene has the GUID; the index has no such prefab; the binding has neither `possess` nor `spawn`, or has both | A red mark |
+| Broken | One of these: the open scene does not have the entity; no scene has the GUID; the index has no such prefab; a slot's stand-in is missing; the binding has none of `possess`, `spawn` and `provided`, or more than one | A red mark |
 
 The pointer on a marked header shows the reason. The state comes from the scene documents and the asset index, not from the game. Thus it shows when the game is not connected. The rows change when a scene opens, closes or changes, and at each asset snapshot. Before the cook daemon sends its first snapshot, these rules apply:
 - a binding whose scene is not open shows as not loaded;
@@ -456,6 +455,11 @@ The pointer on a marked header shows the reason. The state comes from the scene 
 | **Add Binding: Selected Entities** (`cutscene.addBindingSelected`) | Ctrl+Shift+B | Adds a binding for each selected entity that no binding possesses yet |
 | **Rebind to Selection** (`cutscene.rebindToSelection`) | | Points the selected binding at the primary selected entity |
 | **Show Selected Entities' Bindings** (`cutscene.filterSelected`) | | Shows only the bindings of the selected entities (see [Selection sync](#selection-sync)) |
+| **Add Binding: Spawn Prefab…** (`cutscene.spawnPrefab`) | | Opens the prefab picker, and adds a binding that spawns the prefab that you pick |
+| **Add Binding: Script Slot** (`cutscene.addSlot`) | | Adds a script slot with the name Slot (see [Script slots](#script-slots)) |
+| **Convert Binding to Possessed**, **to Spawned** and **to Script Slot** (`cutscene.convertToPossessed`, `cutscene.convertToSpawned`, `cutscene.convertToSlot`) | | Converts the selected binding (see [Convert](#convert)) |
+| **Pick Binding's Entity** (`cutscene.pickBinding`) | | Arms a pick, or cancels it (see [Rebind and delete](#rebind-and-delete)) |
+| **Stand In Selection** (`cutscene.standInSelection`) | | Makes the selected entity the stand-in of the selected slot |
 
 These commands act on the active cutscene, or on the cutscene that holds the preview. As the keys do, they work wherever the keyboard is. Thus a designer can select entities in the viewport or the Outliner, and add bindings at once. Ctrl+B is Build Project, so the add command uses Ctrl+Shift+B. The commands are not in the ribbon, as the timeline's commands are not.
 
@@ -463,8 +467,12 @@ These commands act on the active cutscene, or on the cutscene that holds the pre
   - entities that the game spawned;
   - entities of a scene that has no GUID yet.
 
-  An entity dragged from the Outliner onto the timeline is possessed too. If the entity is in the selection, the whole selection is possessed.
+  An entity dragged from the Outliner onto the timeline is possessed too. If the entity is in the selection, the whole selection is possessed. In a scene view, a drag that starts on a selected entity drags it to the timeline in the same way. While a cutscene's tab is open, the view picks under each press. A drag is a box select, as before, in these conditions:
+  - the pick has not answered when the pointer moves;
+  - the pick found no selected entity.
 - **Spawn.** A prefab dragged from the content browser onto the timeline adds a binding that spawns the prefab, with the prefab's name. Some files make a prefab, for example a USD stage. A drop of such a file spawns its prefab, as a drop in the viewport places it.
+  - **Add Binding ▾** is beside the **Selected entities** toggle. Its items are Selected Entities, Spawn Prefab… and Script Slot. The **Spawn Prefab…** button beside it opens a picker of the prefabs that the asset index knows. The picker has a search box.
+  - **A spawn at a place.** Drag a prefab from the content browser into a scene view, and hold **Ctrl** as you drop it. If a cutscene holds the preview, this adds a binding to that cutscene, and does not place the prefab in the scene. The binding's `position` is where the drag showed the prefab, in meters. A new transform track keys no offset at the playhead, so the spawn's first key is at the drop point (`CutsceneBindings.AddSpawnAt`). The spawn uses Ctrl because Alt on a drop already makes plain entities of a placed prefab. A part of a prefab does not spawn in this way.
 - Each add is one undo entry for all its bindings, and selects their rows. Undo follows the add while no other editor's tab is active (see [Undo](#undo)).
 
 ### Rebind and delete
@@ -474,14 +482,38 @@ These commands act on the active cutscene, or on the cutscene that holds the pre
   - a drop of an entity on a binding's row with Alt held. It rebinds that row's binding, and both selections stay as they are.
 
   A rebind changes only the binding's `possess`. The tracks name the binding by its ID, so they do not change. The editor refuses a rebind in these conditions:
-  - the binding spawns a prefab: this change is a convert, which comes in the second part;
-  - another binding possesses the entity.
+  - the binding does not possess: to point it at an entity is a [convert](#convert);
+  - another binding possesses the entity, or it is a slot's stand-in.
+- **Fix a broken binding.** The details strip of a broken possessed binding has these items:
+  - **Pick** arms a pick (`CutsceneEditor.Picking`). The next entity that you select in the viewport or the Outliner becomes the binding's, as one undo entry, and the row stays selected. The Outliner works without the game. Esc, in the viewport or the tab, cancels the pick. Another row cancels it too.
+  - A button for each entity of the open scenes that has the binding's name, up to eight (`CutsceneEditor.CandidatesOf`). A new binding has its entity's name, so these are the entities that have the old name. A button rebinds to its entity.
 - **Delete.** Delete, while the timeline has the keyboard and a binding's row is selected, removes the binding and its tracks as one undo entry. A row that the filter hides is not deleted.
   - If the binding has tracks, the editor asks first (`EditorShell.AskDeleteBinding`). The main window answers with a dialog.
   - If a track of the binding is locked, the editor does not delete it.
   - If other blocks name the binding by its ID, the editor does not delete it. These blocks can name a binding: another binding's `parent` or constraints; a camera cut's `camera` or constraints; a transform track's `space = relative <id>`; an event's `value = entity <id>`; a sub-sequence's `bind`. The refusal names those blocks (`CutsceneEditor.DeleteBindingRefusal`).
 - **Rename.** The name box in the details strip renames a binding, as it renames a track. A rename changes only the name.
-- **The details strip** of a binding shows what it possesses or spawns, why it is not loaded or broken, and why Delete refuses it.
+- **The details strip** of a binding shows these items: what it possesses or spawns, or a slot's stand-in; why it is not loaded or broken; the fixes above; the converts; and why Delete refuses it.
+
+### Convert
+
+**Convert to** in the details strip, or a convert command, makes the selected binding another kind. The binding keeps its ID, its name and its tracks. Each convert is one undo entry (`CutsceneEditor.Convert`, with the edits in `CutsceneBindings`). The cooker refuses some settings on some kinds, so a convert removes them:
+
+| To | What it writes | When the editor refuses it |
+|---|---|---|
+| Spawned | `spawn` is the prefab of the possessed entity, or a slot's prefab stand-in. `position`, `rotation` and `scale` are the entity's world pose in its scene, so relative tracks keep their meaning. `possess`, `provided` and `policy` go. | The entity's scene is not open. The entity is not the root of a prefab's instance. The instance is a part of its prefab. |
+| Possessed | `possess` is the one selected entity, or with nothing selected, a slot's stand-in. `spawn`, `provided`, `parent`, `position`, `rotation` and `scale` go. | Not exactly one entity is selected. Another binding possesses the entity. Another binding spawns under this one (its `parent`), because a parent is a spawned binding. |
+| Script slot | `provided = true`. `possess`, `spawn` and the settings that only a spawn has go. `policy` stays. What the binding bound becomes the slot's stand-in. | Another binding spawns under this one. |
+
+A spawned binding that becomes possessed takes the pose of the entity. Relative tracks then move from that pose, which can differ from the spawn's.
+
+### Script slots
+
+A script slot is a binding whose entity a script gives when it plays the cutscene. The script names it by the binding's name, for example `Cutscene.play(asset, { bindings = { Companion = Quest.companion() } })` (see [Cinematics: Bindings](../cinematics/bindings.md)). A slot is `provided = true` in the text. It can have a `policy`: a required slot that no script fills fails the cutscene.
+
+- **The stand-in.** The editor previews a slot with a stand-in: an entity of a scene, or a prefab. The stand-in belongs to you, not to the asset. It is saved with your view of the timeline (`CutsceneTimelineView.StandIns`, by the binding's ID). The details strip of a slot sets it with **Use Selection** (or **Stand In Selection**), **Prefab…** or **Clear**. A change of stand-in is not an undo entry, and the document does not change.
+- **The preview.** The preview cooks `CutsceneEditor.CookText`, not the document's text. `CutsceneStandIns.PreviewText` puts each stand-in on its slot's `provided` line: `possess = …` or `spawn = …`. A spawn has no `policy`, so for a prefab it makes the `policy` line a comment. Every line stays where it was, so the cooker's problems are on the lines that you edit. In the preview, a slot with no stand-in is missing, whatever its policy, and its tracks do nothing.
+- **The stand-in as the slot's entity.** A slot with an entity stand-in selects that entity, and the entity selects the slot's row. Keys and auto-key act on it as on a possessed binding's entity.
+- A slot keeps its stand-in when it converts to another kind. Thus an undo that makes it a slot again finds the stand-in.
 
 ### Selection sync
 
@@ -499,14 +531,9 @@ These commands act on the active cutscene, or on the cutscene that holds the pre
 
 ### Limits
 
-- A spawned binding's row does not select the entity that the preview spawned, because the game does not send which entity that is.
-- These items come in the second part of [#554](https://github.com/aszecsei/cinnabar/issues/554):
-  - convert a possessed binding to a spawned one, and back;
-  - a Pick button on a broken row, and a list of the entities that have the old name;
-  - stand-ins for the bindings that a script gives;
-  - a Spawn Prefab command, which needs an asset picker;
-  - a drag from the viewport;
-  - a first transform key at a spawn's drop point.
+- A spawned binding's row does not select the entity that the preview spawned, because the game does not send which entity that is. The same is true of a slot with a prefab stand-in.
+- A drag from a scene view needs the game: the pick under the press needs a linked host. Without one, a drag is a box select.
+- The prefab picker lists whole prefabs. A part of a prefab does not spawn.
 
 ## Curves
 

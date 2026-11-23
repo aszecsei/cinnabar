@@ -602,7 +602,8 @@ Pending_Binding :: struct {
 	seen:        [dynamic]string,
 	possess:     int,
 	spawn:       int,
-	// The line of policy, which only a possessed binding takes, and of the first setting that only a spawned one takes.
+	provided:    int,
+	// The line of policy, which only a possessed or provided binding takes, and of the first setting that only a spawned one takes.
 	policy:      int,
 	spawn_only:  int,
 	spawn_name:  string,
@@ -1966,14 +1967,23 @@ cutscene_parse :: proc(
 	result_bindings := make([]format.Cutscene_Binding_Contents, len(bindings))
 	for &b, i in bindings {
 		switch {
-		case b.possess == 0 && b.spawn == 0:
+		case b.possess == 0 && b.spawn == 0 && b.provided == 0:
 			problem(
 				&found,
 				b.line,
-				"a binding possesses an entity with possess, or spawns a prefab with spawn",
+				"a binding possesses an entity with possess, spawns a prefab with spawn, or is provided by a script with provided = true",
 			)
-		case b.possess != 0 && b.spawn != 0:
-			problem(&found, max(b.possess, b.spawn), "a binding possesses or spawns, not both")
+		case (b.possess != 0 ? 1 : 0) + (b.spawn != 0 ? 1 : 0) + (b.provided != 0 ? 1 : 0) > 1:
+			problem(
+				&found,
+				max(b.possess, b.spawn, b.provided),
+				"a binding possesses, spawns or is provided, only one of them",
+			)
+		case b.provided != 0:
+			b.contents.kind = .Provided
+			if b.spawn_only != 0 {
+				problem(&found, b.spawn_only, "%s is for a spawned binding", b.spawn_name)
+			}
 		case b.possess != 0:
 			b.contents.kind = .Possessed
 			if b.spawn_only != 0 {
@@ -1982,7 +1992,7 @@ cutscene_parse :: proc(
 		case:
 			b.contents.kind = .Spawned
 			if b.policy != 0 {
-				problem(&found, b.policy, "policy is for a possessed binding")
+				problem(&found, b.policy, "policy is for a possessed or provided binding")
 			}
 		}
 		if b.suspend == 0 {
@@ -2683,6 +2693,11 @@ cutscene_binding_setting :: proc(
 			append(references, Cutscene_Reference{value.guid, .Prefab, line})
 		}
 		b.spawn = line
+	case "provided":
+		if value_text != "true" {
+			problem(found, line, "provided is true")
+		}
+		b.provided = line
 	case "suspend":
 		b.suspend = line
 		set, ok := cutscene_suspend(value_text)
@@ -2761,7 +2776,7 @@ cutscene_binding_setting :: proc(
 		problem(
 			found,
 			line,
-			"%q is not a setting of a binding: possess, policy, spawn, parent, position, rotation, scale, suspend, keep_velocity, look_at, look_at_offset, look_at_damping, follow, follow_offset, follow_damping or focus",
+			"%q is not a setting of a binding: possess, policy, spawn, provided, parent, position, rotation, scale, suspend, keep_velocity, look_at, look_at_offset, look_at_damping, follow, follow_offset, follow_damping or focus",
 			name,
 		)
 	}
