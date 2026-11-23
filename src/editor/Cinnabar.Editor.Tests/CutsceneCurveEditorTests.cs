@@ -397,4 +397,31 @@ public sealed class CutsceneCurveEditorTests : IDisposable
         Assert.Null(editor.SetCurveKeyTime("+=1"));
         Assert.Equal([2000, 402000], editor.CurveKeys.Select(p => editor.File.Find(p)!.Start!.Value).Order());
     }
+
+    [Fact]
+    public void ValueSnapPutsADraggedKeyOnTheGridAndCtrlDoesNotSnap()
+    {
+        var (shell, editor, input, text) = Intro();
+        // A hundredth of a value a pixel: grid lines every 0.5.
+        Assert.Equal(0.5, input.View.Value.GridStep, 9);
+        Assert.False(editor.ValueSnap);
+        Click(input, X(200000), Y(1));
+        // Off, a drag 30 pixels up moves the key 0.3.
+        Drag(input, X(200000), Y(1), X(200000), Y(1.3));
+        Assert.Equal(text.Replace(Peak + "\n", "\t\t\tkey 200000 1.3 auto\n"), editor.Document.Text);
+        shell.Commands.Get("edit.undo").Execute();
+        editor.SetKeyboardPane(CutscenePane.Curves);
+        shell.Commands.Get(EditorCommands.CutsceneCurveValueSnap).Execute();
+        Assert.True(editor.ValueSnap);
+        // On, it goes to the nearest line, 1.5.
+        Drag(input, X(200000), Y(1), X(200000), Y(1.3));
+        Assert.Equal(text.Replace(Peak + "\n", "\t\t\tkey 200000 1.5 auto\n"), editor.Document.Text);
+        shell.Commands.Get("edit.undo").Execute();
+        // Ctrl during the drag does not snap.
+        Assert.True(input.Press(X(200000), Y(1), MouseButton.Left, KeyModifiers.None));
+        input.Move(X(200000), Y(1.2), KeyModifiers.Control);
+        input.Move(X(200000), Y(1.3), KeyModifiers.Control);
+        input.Release(X(200000), Y(1.3), KeyModifiers.Control);
+        Assert.Equal(text.Replace(Peak + "\n", "\t\t\tkey 200000 1.3 auto\n"), editor.Document.Text);
+    }
 }

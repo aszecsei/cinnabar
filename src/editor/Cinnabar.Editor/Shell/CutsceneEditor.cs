@@ -40,6 +40,7 @@ public sealed class CutsceneEditor : IGraphEditor
     bool _follow = true;
     bool _curvesOpen;
     bool _curvesNormalized;
+    bool _valueSnap;
     readonly HashSet<string> _hiddenCurves = [];
     IReadOnlyList<string> _shownCurves = [];
     float _playRate = 1;
@@ -709,6 +710,24 @@ public sealed class CutsceneEditor : IGraphEditor
                 {
                     SetKeyboardPane(CutscenePane.Timeline);
                 }
+                Changed?.Invoke();
+                _shell.Commands.InvalidateAll();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a value drag in the curve editor puts the grabbed key's value on a grid line: Value Snap, off at first. The
+    /// tab's, and not saved. Ctrl during a drag turns it off for that drag, as it does time snapping.
+    /// </summary>
+    public bool ValueSnap
+    {
+        get => _valueSnap;
+        set
+        {
+            if (_valueSnap != value)
+            {
+                _valueSnap = value;
                 Changed?.Invoke();
                 _shell.Commands.InvalidateAll();
             }

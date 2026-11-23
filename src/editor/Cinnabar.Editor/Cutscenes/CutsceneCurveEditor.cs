@@ -102,14 +102,6 @@ sealed class CutsceneCurveEditor : Control
         return c;
     }
 
-    // A round step for grid lines about pixels apart: 1, 2 or 5 times a power of ten.
-    static double NiceStep(double perPixel, double pixels)
-    {
-        var raw = perPixel * pixels;
-        var power = Math.Pow(10, Math.Floor(Math.Log10(raw)));
-        return raw / power < 2 ? 2 * power : raw / power < 5 ? 5 * power : 10 * power;
-    }
-
     public override void Render(DrawingContext context)
     {
         var size = Bounds.Size;
@@ -124,7 +116,7 @@ sealed class CutsceneCurveEditor : Control
         using (context.PushClip(new Rect(gutter, 0, width, size.Height)))
         {
             // The value grid, with 0 brighter, and the time grid on frames.
-            var step = NiceStep(view.Value.PerPixel, 40);
+            var step = view.Value.GridStep;
             var top = view.Value.At(0);
             for (var v = Math.Floor(view.Value.At(size.Height) / step) * step; v <= top; v += step)
             {

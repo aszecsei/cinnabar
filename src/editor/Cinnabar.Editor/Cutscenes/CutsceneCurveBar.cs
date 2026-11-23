@@ -23,6 +23,7 @@ public sealed class CutsceneCurveBar : StackPanel
 
     readonly CutsceneEditor _editor;
     readonly ToggleButton _normalized = new() { Content = "Normalized", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false };
+    readonly ToggleButton _valueSnap = new() { Content = "Value snap", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false };
     readonly ComboBox _pre = InfinityBox();
     readonly ComboBox _post = InfinityBox();
     readonly TextBox _time = EntryBox(110);
@@ -48,6 +49,15 @@ public sealed class CutsceneCurveBar : StackPanel
             }
         };
         Children.Add(_normalized);
+        ToolTip.SetTip(_valueSnap, "Snap a dragged key's value to the grid's lines. Ctrl during the drag does not snap (Alt+V).");
+        _valueSnap.IsCheckedChanged += (_, _) =>
+        {
+            if (!_showing)
+            {
+                editor.ValueSnap = _valueSnap.IsChecked == true;
+            }
+        };
+        Children.Add(_valueSnap);
         AddInfinity("Before", _pre, InfinitySide.Pre, "What the curves of the selected keys, or the shown curves, do before their first key (8)");
         AddInfinity("After", _post, InfinitySide.Post, "What the curves of the selected keys, or the shown curves, do after their last key (9)");
         AddEntry("Time", _time, "The selected keys' time. Type timecode or frames, or += or -= one, and press Enter.", editor.SetCurveKeyTime);
@@ -133,6 +143,7 @@ public sealed class CutsceneCurveBar : StackPanel
         try
         {
             _normalized.IsChecked = _editor.CurvesNormalized;
+            _valueSnap.IsChecked = _editor.ValueSnap;
             var curves = _editor.InfinityCurves.Count > 0;
             foreach (var (box, side) in (ReadOnlySpan<(ComboBox, InfinitySide)>)[(_pre, InfinitySide.Pre), (_post, InfinitySide.Post)])
             {

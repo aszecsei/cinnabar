@@ -59,6 +59,7 @@ static partial class EditorCommands
     public const string CutsceneTangentConstant = "cutscene.tangentConstant";
     public const string CutsceneTangentFlatten = "cutscene.tangentFlatten";
     public const string CutsceneTangentWeighted = "cutscene.tangentWeighted";
+    public const string CutsceneCurveValueSnap = "cutscene.curveValueSnap";
     public const string CutscenePreInfinity = "cutscene.preInfinity";
     public const string CutscenePostInfinity = "cutscene.postInfinity";
 
@@ -73,6 +74,7 @@ static partial class EditorCommands
         CutscenePreviousKey, CutsceneNextKey, CutsceneGoToTime, CutsceneScrubSound, CutscenePreviewEvents,
         CutsceneCurves, CutsceneCurvesNormalized, CutsceneTangentAuto, CutsceneTangentUnify, CutsceneTangentBreak, CutsceneTangentLinear,
         CutsceneTangentConstant, CutsceneTangentFlatten, CutsceneTangentWeighted, CutscenePreInfinity, CutscenePostInfinity,
+        CutsceneCurveValueSnap,
     ];
 
     /// <summary>
@@ -188,6 +190,8 @@ static partial class EditorCommands
             e => e.CurvesOpen, (e, on) => e.CurvesOpen = on);
         Toggle(CutsceneCurvesNormalized, "Normalized Curves", "Scale each curve to -1 to 1 in the curve editor, to compare curves of different sizes. The keys keep their values.", "Alt+N",
             e => e.CurvesNormalized, (e, on) => e.CurvesNormalized = on);
+        Toggle(CutsceneCurveValueSnap, "Value Snap", "Snap a key that a drag in the curve editor moves to the value grid's lines. Ctrl during the drag does not snap.", "Alt+V",
+            e => e.ValueSnap, (e, on) => e.ValueSnap = on);
         void Tangent(string id, string label, string description, string shortcut, TangentMode mode) =>
             Register(id, label, "cutscene", description, shortcut, e => e.SetTangents(mode),
                 e => e.KeyboardPane == CutscenePane.Curves && !e.Document.InTransaction && e.TangentKeys.Count > 0);

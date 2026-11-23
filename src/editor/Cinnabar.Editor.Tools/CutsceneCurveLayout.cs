@@ -26,6 +26,23 @@ public readonly record struct ValueAxis(double Top, double PerPixel)
         return new ValueAxis(at + y * scale, scale);
     }
 
+    /// <summary>
+    /// The value between the curve editor's grid lines: a round step, 1, 2 or 5 times a power of ten, of at least 40
+    /// pixels. A value drag snaps to it while value snapping is on.
+    /// </summary>
+    public double GridStep => NiceStep(PerPixel, 40);
+
+    /// <summary>A round step for lines about pixels apart: 1, 2 or 5 times a power of ten.</summary>
+    public static double NiceStep(double perPixel, double pixels)
+    {
+        var raw = perPixel * pixels;
+        var power = Math.Pow(10, Math.Floor(Math.Log10(raw)));
+        return raw / power < 2 ? 2 * power : raw / power < 5 ? 5 * power : 10 * power;
+    }
+
+    /// <summary>A value at the nearest multiple of a step.</summary>
+    public static double SnapTo(double value, double step) => step > 0 && double.IsFinite(step) ? Math.Round(value / step) * step : value;
+
     /// <summary>Moves the axis by dy pixels: a drag down shows higher values.</summary>
     public ValueAxis Pan(double dy) => this with { Top = Top + dy * PerPixel };
 
