@@ -237,6 +237,24 @@ public sealed class CutsceneCurveEditorTests : IDisposable
     }
 
     [Fact]
+    public void ACurveDragThatAnotherEndsCommitsNoOtherDrag()
+    {
+        var (_, editor, input, text) = Intro();
+        Assert.True(input.Press(X(200000), Y(1), MouseButton.Left, KeyModifiers.None));
+        input.Move(X(200000), Y(1.1), KeyModifiers.None);
+        Assert.True(input.Dragging);
+        // Another holder ends the drag, as Esc in a field does, and begins its own.
+        editor.EndDrag(cancel: true);
+        Assert.True(editor.BeginDrag("Other"));
+        input.Move(X(200000), Y(1.3), KeyModifiers.None);
+        input.Release(X(200000), Y(1.3), KeyModifiers.None);
+        Assert.False(input.Dragging);
+        Assert.True(editor.Document.InTransaction);
+        Assert.Equal(text, editor.Document.Text);
+        editor.EndDrag(cancel: true);
+    }
+
+    [Fact]
     public void ALockedTracksCurveTakesNoKeysOrTangents()
     {
         var (shell, editor, input, text) = Intro();

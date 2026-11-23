@@ -480,7 +480,7 @@ public sealed class CutscenePreviewTests : IDisposable
         var frame = editor.FrameTicks;
         Assert.False(shell.Commands.Get(EditorCommands.CutscenePlayPause).CanExecute);
         Assert.False(shell.Commands.Get(EditorCommands.CutsceneStepForward).CanExecute);
-        editor.TimelineFocused = true;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
 
         shell.Commands.Get(EditorCommands.CutsceneStepForward).Execute();
         Assert.Equal(frame, editor.Playhead);
@@ -540,7 +540,7 @@ public sealed class CutscenePreviewTests : IDisposable
         using var _ = shell;
         var ticket = Opened(shell);
         var frame = editor.FrameTicks;
-        editor.TimelineFocused = true;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
 
         // L plays forward at 1×, and each press doubles the rate up to 8×.
         for (var i = 0; i < 5; i++)
@@ -568,9 +568,9 @@ public sealed class CutscenePreviewTests : IDisposable
         Assert.Equal(30000 + frame, editor.Playhead);
         Assert.Empty(Rates());
         // The timeline's loss of the keyboard ends the hold, as the key's release does.
-        editor.TimelineFocused = false;
+        editor.LeaveKeyboardPane(CutscenePane.Timeline);
         Assert.False(editor.ShuttleHeld);
-        editor.TimelineFocused = true;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
         Run(shell, EditorCommands.CutsceneShuttleForward);
         Assert.Equal([1f], Rates());
 
@@ -594,7 +594,7 @@ public sealed class CutscenePreviewTests : IDisposable
         var (shell, editor) = NewShell();
         using var _ = shell;
         var ticket = Opened(shell);
-        editor.TimelineFocused = true;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
         Assert.False(shell.Commands.Get(EditorCommands.CutsceneClearInOut).CanExecute);
 
         // The points go in time order, whichever is set first.
@@ -637,7 +637,7 @@ public sealed class CutscenePreviewTests : IDisposable
         var (shell, editor) = NewShell();
         using var _ = shell;
         Opened(shell);
-        editor.TimelineFocused = true;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
         List<int> Walk(string id, int times)
         {
             var at = new List<int>();
@@ -672,7 +672,7 @@ public sealed class CutscenePreviewTests : IDisposable
         var settings = Assert.Single(_sent.OfType<CutscenePreviewSettings>());
         Assert.Equal((true, false, 0), (settings.ScrubSound, settings.Events, settings.Silent.Length));
         var ticket = Opened(shell);
-        editor.TimelineFocused = true;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
         CutscenePreviewSettings Last() => _sent.OfType<CutscenePreviewSettings>().Last();
 
         editor.SetMuted(6, true);
@@ -704,7 +704,7 @@ public sealed class CutscenePreviewTests : IDisposable
         var (shell, editor) = NewShell();
         using var _ = shell;
         var ticket = Opened(shell);
-        editor.TimelineFocused = true;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
         Run(shell, EditorCommands.CutsceneShuttleForward);
         Run(shell, EditorCommands.CutsceneShuttleForward);
         shell.OnGameMessage(new CutscenePreviewTick(ticket, 42000, true));

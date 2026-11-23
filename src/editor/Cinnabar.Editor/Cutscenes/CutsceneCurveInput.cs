@@ -46,6 +46,9 @@ public sealed class CutsceneCurveInput
     MouseButton _button;
     // What a key drag moves, by row, and the times that it snaps to.
     List<(CurveRow Row, List<string> Paths)> _moving = [];
+    // The hold on the cutscene's drag while a key or a handle drag is under way: its steps and its end act only while it
+    // is still the cutscene's open drag, so a drag that another ends commits no other's entry.
+    CutsceneDrag? _drag;
     List<int> _targets = [];
     // The views when a zoom by drag began.
     TimelineView _zoomTime;
@@ -258,8 +261,8 @@ public sealed class CutsceneCurveInput
     {
         var last = _pointer;
         _pointer = new Point(x, y);
-        // Esc or an undo can end the drag's entry under the gesture.
-        if (Dragging && !_editor.Document.InTransaction)
+        // Another holder, such as Esc in the timeline or a field, can end the drag under the gesture.
+        if (Dragging && _drag is not { IsOpen: true })
         {
             Reset();
         }
@@ -306,7 +309,8 @@ public sealed class CutsceneCurveInput
             case Gesture.Box:
                 _gesture = Gesture.Box;
                 return;
-            case Gesture.Handle when !_press.Row!.Locked && _editor.BeginDrag("Drag Tangent"):
+            case Gesture.Handle when !_press.Row!.Locked && _editor.BeginHeldDrag("Drag Tangent") is { } drag:
+                _drag = drag;
                 _gesture = Gesture.Handle;
                 return;
             case Gesture.Keys:
@@ -315,11 +319,12 @@ public sealed class CutsceneCurveInput
                 _moving = [.. Layout.Rows.Where(r => !r.Locked)
                     .Select(r => (r, r.KeyPaths.Where(selected.Contains).ToList()))
                     .Where(m => m.Item2.Count > 0)];
-                if (_moving.Count == 0 || !_editor.BeginDrag("Move Keys"))
+                if (_moving.Count == 0 || _editor.BeginHeldDrag("Move Keys") is not { } drag)
                 {
                     Reset();
                     return;
                 }
+                _drag = drag;
                 _targets = [.. _editor.File.Markers.Select(m => m.Start).OfType<int>()];
                 _gesture = Gesture.Keys;
                 return;
@@ -350,7 +355,7 @@ public sealed class CutsceneCurveInput
         var shown = -dy * view.Value.PerPixel;
         var moving = _moving;
         var normalized = view.Normalized;
-        _editor.StepDrag(f =>
+        _drag?.Step(f =>
         {
             foreach (var (r, paths) in moving)
             {
@@ -371,7 +376,7 @@ public sealed class CutsceneCurveInput
         var slope = CutsceneCurveLayout.SlopeAt(row, _press.Index, _press.Side, View, _pointer.X, _pointer.Y);
         var path = _press.Path!;
         var side = _press.Side;
-        _editor.StepDrag(f =>
+        _drag?.Step(f =>
         {
             CutsceneCurveEdits.SetSlope(f, path, side, slope, _editor.Locked);
             return [];
@@ -405,7 +410,7 @@ public sealed class CutsceneCurveInput
                 _editor.Select(Layout.InBox(_pressAt.X, _pressAt.Y, x, y, View), ModeOf(modifiers));
                 break;
             case Gesture.Keys or Gesture.Handle:
-                _editor.EndDrag(cancel: false);
+                _drag?.End(cancel: false);
                 break;
         }
         Reset();
@@ -429,7 +434,7 @@ public sealed class CutsceneCurveInput
     {
         if (Dragging)
         {
-            _editor.EndDrag(cancel: true);
+            _drag?.End(cancel: true);
             Reset();
             Invalidated?.Invoke();
             return true;
@@ -454,6 +459,7 @@ public sealed class CutsceneCurveInput
         _pending = Gesture.None;
         _press = CurveHit.Nothing;
         _moving = [];
+        _drag = null;
         Guide = null;
         Tooltip = null;
     }

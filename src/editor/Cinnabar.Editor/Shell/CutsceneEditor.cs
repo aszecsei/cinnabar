@@ -632,14 +632,9 @@ public sealed class CutsceneEditor : IGraphEditor
 
     /// <summary>
     /// Whether the timeline or the curve editor has the keyboard: the timeline's commands act only then, as their keys
-    /// are bare letters that the viewport and the other panels use too. Setting it gives the keyboard to the timeline,
-    /// or takes it from either pane.
+    /// are bare letters that the viewport and the other panels use too.
     /// </summary>
-    public bool TimelineFocused
-    {
-        get => _pane != CutscenePane.None;
-        set => SetKeyboardPane(value ? CutscenePane.Timeline : CutscenePane.None);
-    }
+    public bool TimelineFocused => _pane != CutscenePane.None;
 
     /// <summary>Which pane has the keyboard. F, Delete and the tangent commands act on the curve editor while it does.</summary>
     public CutscenePane KeyboardPane => _pane;
