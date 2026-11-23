@@ -26,6 +26,8 @@ public sealed class BlackboardEditor : IGraphEditor
 
     IGraphDocument IGraphEditor.Document => Document;
 
+    ICookChecks IGraphEditor.Checks => Checks;
+
     public string Noun => "blackboard";
 
     public string Guid => Document.Guid;

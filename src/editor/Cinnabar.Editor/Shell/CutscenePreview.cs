@@ -245,10 +245,13 @@ public sealed class CutscenePreview(EditorShell shell)
         }
     }
 
-    /// <summary>A tab's text cooked clean for the first time, so the game follows the preview area and not the saved file.</summary>
-    internal void OnCooked(CutsceneEditor editor)
+    /// <summary>
+    /// A tab's text cooked clean for the first time, so the game follows the preview area and not the saved file, or a new
+    /// cook link emptied the area, so the game follows the saved file again.
+    /// </summary>
+    internal void OnCookedCleanChanged(CutsceneEditor editor)
     {
-        if (State is CutscenePreviewState.Live { Unsaved: false } live && live.Editor == editor)
+        if (State is CutscenePreviewState.Live live && live.Editor == editor && live.Unsaved != editor.CookedClean)
         {
             Start(editor, PlayingOf(live));
         }

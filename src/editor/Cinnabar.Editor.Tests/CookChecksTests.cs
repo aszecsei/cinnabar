@@ -17,6 +17,7 @@ public sealed class CookChecksTests : IDisposable
     readonly string _path;
     readonly List<string> _events = [];
     string _text = "first";
+    bool _linked = true;
 
     public CookChecksTests()
     {
@@ -33,9 +34,9 @@ public sealed class CookChecksTests : IDisposable
     CookChecks<CookLine> Checks(Func<string, Task<PreviewResult>>? cook = null)
     {
         var checks = new CookChecks<CookLine>(_shell, Guid, () => _text, () => _path, l => l,
-            ready: () => true, cook: cook ?? (_ => Task.FromResult(Clean)));
+            ready: () => _linked, cook: cook ?? (_ => Task.FromResult(Clean)));
         checks.Changed += () => _events.Add($"changed {checks.State}");
-        checks.FirstClean += () => _events.Add("first clean");
+        checks.CookedCleanChanged += () => _events.Add($"cooked clean {checks.CookedClean}");
         return checks;
     }
 
@@ -100,11 +101,11 @@ public sealed class CookChecksTests : IDisposable
         checks.Show("first", Clean);
         Assert.Same(CheckState.Pending, checks.State);
         Assert.True(checks.CookedClean);
-        Assert.Equal(["first clean"], _events);
+        Assert.Equal(["cooked clean True"], _events);
     }
 
     [Fact]
-    public void TheLatchStaysAfterAFailureAndFirstCleanFollowsItsChange()
+    public void TheLatchStaysAfterAFailureAndIsSetAfterItsChange()
     {
         using var checks = Checks();
 
@@ -119,10 +120,42 @@ public sealed class CookChecksTests : IDisposable
         Assert.Equal(
         [
             $"changed {new CheckState.Clean("first")}",
-            "first clean",
+            "cooked clean True",
             $"changed {new CheckState.Failed("broken")}",
             $"changed {new CheckState.Clean("third")}",
         ], _events);
+    }
+
+    [Fact]
+    public async Task ANewLinkStartsTheChecksAgainWithNoCleanCook()
+    {
+        var answers = new Queue<PreviewResult>([Clean, Failed(_path, 1, 0, "broken")]);
+        using var checks = Checks(_ => Task.FromResult(answers.Dequeue()));
+        await checks.CookNow();
+        _events.Clear();
+
+        // The new daemon's preview area is empty, so the text has not cooked into it until it answers.
+        await checks.Restart();
+
+        Assert.Equal([$"changed {CheckState.Pending}", "cooked clean False", $"changed {new CheckState.Failed("broken")}"], _events);
+
+        Assert.Equal(new CheckState.Failed("broken"), checks.State);
+        Assert.False(checks.CookedClean);
+    }
+
+    [Fact]
+    public async Task AnAnswerThatComesOnceTheLinkIsGoneIsNotTheTexts()
+    {
+        var answer = new TaskCompletionSource<PreviewResult>();
+        using var checks = Checks(_ => answer.Task);
+        var cooking = checks.CookNow();
+
+        _linked = false;
+        answer.SetResult(new PreviewResult("The cook link closed before the cook daemon answered.", [], []));
+        await cooking;
+
+        Assert.Same(CheckState.Pending, checks.State);
+        Assert.Empty(_events);
     }
 
     [Fact]

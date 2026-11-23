@@ -37,7 +37,7 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor, IGraphCan
         Checks = new CookChecks<GraphProblem>(shell, document.Guid, () => Document.Text, () => Document.Path,
             l => new GraphProblem(l.Line > 0 ? File.NodeAt(l.Line) : null, l.Text, l.Error, l.Line));
         // From the first text that cooks, the preview plays what the daemon cooks and not the saved one.
-        Checks.FirstClean += SendPreview;
+        Checks.CookedCleanChanged += SendPreview;
         Checks.Changed += GatherProblems;
         Document.Changed += OnDocumentChanged;
         _shell.Assets.Changed += GatherProblems;
@@ -50,6 +50,8 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor, IGraphCan
     public AnimationGraphDocument Document { get; }
 
     IGraphDocument IGraphEditor.Document => Document;
+
+    ICookChecks IGraphEditor.Checks => Checks;
 
     public string Noun => "animation graph";
 

@@ -15,4 +15,7 @@ public interface IGraphEditor : IDisposable
 
     /// <summary>Sends the unsaved text to the cook daemon now, and shows the answer's problems.</summary>
     Task CookNow();
+
+    /// <summary>The checks of the unsaved text.</summary>
+    ICookChecks Checks { get; }
 }

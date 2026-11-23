@@ -31,6 +31,8 @@ public sealed class WorldEditor : IGraphEditor
 
     IGraphDocument IGraphEditor.Document => Document;
 
+    ICookChecks IGraphEditor.Checks => Checks;
+
     public string Noun => "world";
 
     public string Guid => Document.Guid;

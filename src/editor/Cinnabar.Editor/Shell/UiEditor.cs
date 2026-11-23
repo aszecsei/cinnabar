@@ -57,7 +57,7 @@ public sealed class UiEditor : PreviewOwner, IGraphEditor
         Document = document;
         Checks = new CookChecks<UiProblem>(shell, document.Guid, () => Document.Text, () => Document.Path, Place);
         // From the first text that cooks, the preview draws what the daemon cooks and not the saved one.
-        Checks.FirstClean += SendPreview;
+        Checks.CookedCleanChanged += SendPreview;
         Checks.Changed += () => ProblemsChanged?.Invoke();
         Document.Changed += OnDocumentChanged;
         ScaleFactor = ProjectScale(shell.ProjectPath);
@@ -66,6 +66,8 @@ public sealed class UiEditor : PreviewOwner, IGraphEditor
     public UiDocument Document { get; }
 
     IGraphDocument IGraphEditor.Document => Document;
+
+    ICookChecks IGraphEditor.Checks => Checks;
 
     public string Noun => "UI document";
 

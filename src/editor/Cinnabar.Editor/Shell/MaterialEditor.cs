@@ -37,7 +37,7 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
             l => new GraphProblem(l.Line > 0 ? Document.NodeAt(l.Line) : null, l.Text, l.Error, l.Line),
             ready: () => PreviewId != null && _shell.PreviewCooker.Linked);
         // From the first graph that cooks, the preview shows what the daemon cooks and not the saved graph.
-        Checks.FirstClean += SendPreview;
+        Checks.CookedCleanChanged += SendPreview;
         Checks.Changed += () => ProblemsChanged?.Invoke();
         Document.Changed += OnDocumentChanged;
     }
@@ -45,6 +45,8 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
     public MaterialDocument Document { get; }
 
     IGraphDocument IGraphEditor.Document => Document;
+
+    ICookChecks IGraphEditor.Checks => Checks;
 
     public string Noun => "material";
 

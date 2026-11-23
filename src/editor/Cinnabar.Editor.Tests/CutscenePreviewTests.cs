@@ -101,6 +101,22 @@ public sealed class CutscenePreviewTests : IDisposable
     }
 
     [Fact]
+    public void ANewCookLinkOpensTheSessionAgainOnTheSavedFile()
+    {
+        var (shell, editor) = NewShell();
+        using var _ = shell;
+        Opened(shell);
+        editor.Checks.Show(editor.Document.Text, new PreviewResult("", [], []));
+        _sent.Clear();
+
+        // The new daemon starts with an empty preview area, so the session follows the saved file until the text cooks.
+        editor.Checks.Restart();
+
+        Assert.False(editor.CookedClean);
+        Assert.False(Assert.Single(_sent.OfType<CutscenePreviewOpen>()).Unsaved);
+    }
+
+    [Fact]
     public void ManyScrubsSendOneTimeWithTheLatestTickAtTheFrame()
     {
         var (shell, editor) = NewShell();

@@ -56,7 +56,7 @@ public sealed partial class CutsceneEditor : IGraphEditor
         Checks = new CookChecks<GraphProblem>(shell, document.Guid, () => CookText, () => Document.Path,
             l => new GraphProblem(null, l.Text, l.Error, l.Line));
         Checks.Changed += OnChecked;
-        Checks.FirstClean += () => _shell.CutscenePreview.OnCooked(this);
+        Checks.CookedCleanChanged += () => _shell.CutscenePreview.OnCookedCleanChanged(this);
         Document.Changed += OnDocumentChanged;
         var view = shell.CutsceneTimelineSettingsOf(Guid);
         _showFrames = view.ShowFrames;
@@ -76,6 +76,8 @@ public sealed partial class CutsceneEditor : IGraphEditor
     public CutsceneDocument Document { get; }
 
     IGraphDocument IGraphEditor.Document => Document;
+
+    ICookChecks IGraphEditor.Checks => Checks;
 
     public string Noun => "cutscene";
 

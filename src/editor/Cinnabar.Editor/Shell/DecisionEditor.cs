@@ -102,6 +102,8 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
 
     IGraphDocument IGraphEditor.Document => Document;
 
+    ICookChecks IGraphEditor.Checks => Checks;
+
     public string Noun => "decision";
 
     public string Guid => Document.Guid;
