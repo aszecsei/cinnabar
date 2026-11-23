@@ -210,8 +210,8 @@ frame_viewports :: proc(e: ^Editor, w: ^ecs.World) -> []Frame_Viewport {
 		}
 		camera: Maybe(render.View)
 		cut := false
+		drawn: ecs.Entity
 		if open.kind == .Scene {
-			drawn: ecs.Entity
 			if entity, _, looks := look_camera(e, w, &v); looks {
 				if view, ok := render.camera_view(w, entity); ok {
 					camera, drawn = view, entity
@@ -225,11 +225,13 @@ frame_viewports :: proc(e: ^Editor, w: ^ecs.World) -> []Frame_Viewport {
 				camera = camera_view(c)
 			}
 			cut = drawn != open.drawn
-			open.drawn = drawn
 		}
 		shared, ok := e.platform.gpu_viewport_target(i, open.size)
 		if !ok {
 			continue
+		}
+		if open.kind == .Scene {
+			open.drawn = drawn
 		}
 		known: Maybe(u32)
 		switch a in open.announce {

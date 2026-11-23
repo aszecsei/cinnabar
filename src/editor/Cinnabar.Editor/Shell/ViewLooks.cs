@@ -154,51 +154,59 @@ public sealed class ViewLooks
         return null;
     }
 
-    // The one writer of the looks. A look with a new source gets a new serial, and the game hears it at once when the
-    // preview is live for its owner, or at the next session that is.
-    internal void Become(int viewport, ViewLook next)
+    // The one writer of the looks. A look that the game has not heard for the preview's session is told it at once, with
+    // a new serial, so a serial names one look in one session; a look of another tab waits for that tab's next session.
+    // A pilot's gesture under way that the new look drops is taken back, so its drag in the cutscene cannot stay open,
+    // unless the gesture is done, as at a release.
+    internal void Become(int viewport, ViewLook next, bool gestureDone = false)
     {
         var previous = _looks[viewport];
-        if (previous == next)
-        {
-            return;
-        }
         if (SourceOf(previous) != SourceOf(next) || OwnerOf(previous) != OwnerOf(next))
         {
             next = next switch
             {
-                ViewLook.Cuts cuts => cuts with { Serial = ++_serial, Ticket = 0, Shown = null },
-                ViewLook.Camera camera => camera with { Serial = ++_serial, Ticket = 0, Shown = null },
+                ViewLook.Cuts cuts => cuts with { Ticket = 0, Shown = null },
+                ViewLook.Camera camera => camera with { Ticket = 0, Shown = null },
                 _ => next,
             };
-            if (next is ViewLook.Editor && previous is ViewLook.Through { Ticket: not 0 } && _shell.Host.Linked)
-            {
-                _shell.Host.Send(new ViewportLook((uint)viewport, ++_serial, 0, ViewportLookSource.EditorCamera, 0));
-            }
+        }
+        next = Told(viewport, next);
+        if (previous == next)
+        {
+            return;
+        }
+        if (!gestureDone && previous is ViewLook.Camera { Pilot: Pilot.Ready { Gesture: PilotGesture.Moving moving } }
+            && !(next is ViewLook.Camera { Pilot: Pilot.Ready { Gesture: PilotGesture.Moving still } } && still.Before == moving.Before && still.Start == moving.Start))
+        {
+            _looks[viewport] = next;
+            moving.Keys?.End(cancel: true);
+            _shell.PreviewValues.Restore(moving.Before);
+        }
+        if (next is ViewLook.Editor && previous is ViewLook.Through { Ticket: not 0 } && _shell.Host.Linked)
+        {
+            _shell.Host.Send(new ViewportLook((uint)viewport, ++_serial, 0, ViewportLookSource.EditorCamera, 0));
         }
         _looks[viewport] = next;
-        if (next is ViewLook.Through through)
-        {
-            Tell(viewport, through);
-        }
         Changed?.Invoke(viewport);
         _shell.Commands.InvalidateAll();
     }
 
-    // Tells the game a look when the preview is live for its owner and the game has not heard it for that session.
-    void Tell(int viewport, ViewLook.Through look)
+    // A look as it is once the game is told it: when the preview is live for its owner and the game has not heard it for
+    // that session, it goes to the game with a new serial and the session's ticket, and has no answer yet.
+    ViewLook Told(int viewport, ViewLook look)
     {
-        if (_shell.CutscenePreview.State is not CutscenePreviewState.Live live || live.Editor != look.Owner || live.Ticket == look.Ticket
-            || !_shell.Host.Linked)
+        if (look is not ViewLook.Through through || _shell.CutscenePreview.State is not CutscenePreviewState.Live live || live.Editor != through.Owner
+            || live.Ticket == through.Ticket || !_shell.Host.Linked)
         {
-            return;
+            return look;
         }
+        var serial = ++_serial;
         var (source, binding) = SourceOf(look) ?? (ViewportLookSource.EditorCamera, 0);
-        _shell.Host.Send(new ViewportLook((uint)viewport, look.Serial, live.Ticket, source, (uint)binding));
-        _looks[viewport] = look switch
+        _shell.Host.Send(new ViewportLook((uint)viewport, serial, live.Ticket, source, (uint)binding));
+        return look switch
         {
-            ViewLook.Cuts cuts => cuts with { Ticket = live.Ticket, Shown = null },
-            ViewLook.Camera camera => camera with { Ticket = live.Ticket, Shown = null },
+            ViewLook.Cuts cuts => cuts with { Serial = serial, Ticket = live.Ticket, Shown = null },
+            ViewLook.Camera camera => camera with { Serial = serial, Ticket = live.Ticket, Shown = null },
             _ => look,
         };
     }
@@ -221,17 +229,7 @@ public sealed class ViewLooks
             {
                 continue;
             }
-            if (_shell.CutscenePreview.Owner != through.Owner || !_shell.Cutscenes.Contains(through.Owner))
-            {
-                Become(i, ViewLook.Editor.Instance);
-                continue;
-            }
-            var before = _looks[i];
-            Tell(i, through);
-            if (_looks[i] != before)
-            {
-                Changed?.Invoke(i);
-            }
+            Become(i, _shell.CutscenePreview.Owner != through.Owner || !_shell.Cutscenes.Contains(through.Owner) ? ViewLook.Editor.Instance : through);
         }
     }
 
@@ -379,15 +377,16 @@ public sealed class ViewLooks
         {
             return;
         }
-        Become(viewport, camera with { Pilot = ready with { Gesture = PilotGesture.Idle.Instance } });
+        var idle = camera with { Pilot = ready with { Gesture = PilotGesture.Idle.Instance } };
         if (cancel)
         {
-            moving.Keys?.End(cancel: true);
-            _shell.PreviewValues.Restore(moving.Before);
+            // Become takes the gesture back: its keys and the values as they were.
+            Become(viewport, idle);
             var start = moving.Start;
             ready.Camera.Place([start.X, start.Y, start.Z], start.Yaw, start.Pitch);
             return;
         }
+        var keyed = false;
         if (moving.Keys is { IsOpen: true } keys)
         {
             var before = camera.Owner.Document.Position;
@@ -396,6 +395,12 @@ public sealed class ViewLooks
             {
                 _shell.Edited(new UndoTarget.Cutscene(camera.Owner));
             }
+            keyed = true;
+        }
+        // The gesture is over, so the look keeps the values that it set.
+        Become(viewport, idle, gestureDone: true);
+        if (keyed)
+        {
             _shell.PreviewValues.Keyed();
         }
     }

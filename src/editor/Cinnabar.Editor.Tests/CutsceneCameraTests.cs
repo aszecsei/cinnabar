@@ -106,7 +106,9 @@ public sealed class CutsceneCameraTests : IDisposable
         editor.ShowProblems(editor.Document.Text, new PreviewResult("", [], []));
         var reopened = _sent.OfType<CutscenePreviewOpen>().Last();
         var again = Assert.Single(_sent.OfType<ViewportLook>());
-        Assert.Equal((look.Serial, reopened.Ticket, ViewportLookSource.Cuts), (again.Serial, again.Ticket, again.Source));
+        Assert.Equal((reopened.Ticket, ViewportLookSource.Cuts), (again.Ticket, again.Source));
+        // A new serial for the new session, so the game takes it over the last.
+        Assert.True(again.Serial > look.Serial);
         Assert.Null(Assert.IsType<ViewLook.Cuts>(shell.Looks[0]).Shown);
     }
 
@@ -382,6 +384,29 @@ public sealed class CutsceneCameraTests : IDisposable
         Assert.IsType<ViewLook.Editor>(shell.Looks[0]);
         Assert.Equal(editorPose, shell.Viewports[0].Camera.Pose);
         Assert.False(shell.Looks.Escape(0));
+    }
+
+    [Fact]
+    public void AFrameDuringAGestureTakesTheGestureBackWithItsLook()
+    {
+        var (shell, editor, _) = NewShell();
+        using var _ = shell;
+        PilotWideShot(shell, editor);
+        shell.Keying.AutoKey = true;
+        var history = editor.Document.History.Count;
+
+        shell.Looks.BeginGesture(0);
+        shell.Looks.Move(0, c => c.Pan(40, 0, 1080));
+        Assert.True(editor.Document.InTransaction);
+        shell.FrameScene();
+
+        Assert.IsType<ViewLook.Editor>(shell.Looks[0]);
+        Assert.False(editor.Document.InTransaction);
+        Assert.Equal(history, editor.Document.History.Count);
+        Assert.IsType<PreviewValuesState.Empty>(shell.PreviewValues.State);
+        // The release that follows does nothing, and a new camera can be made.
+        shell.Looks.EndGesture(0, cancel: false);
+        Assert.Null(editor.NewCameraRefusal(shell.Viewports[0]));
     }
 
     [Fact]

@@ -1034,8 +1034,9 @@ look :: proc(
 	serial: u64,
 	source: link.Viewport_Look_Source,
 	binding: u32 = 0,
+	ticket: u64 = 1,
 ) -> link.Viewport_Look {
-	return {viewport = 0, serial = serial, ticket = 1, source = source, binding = binding}
+	return {viewport = 0, serial = serial, ticket = ticket, source = source, binding = binding}
 }
 
 // A scene view that looks through a camera binding draws from its spawned entity, and the editor hears the pose and
@@ -1087,6 +1088,14 @@ a_scene_view_looks_through_a_binding_and_through_the_cuts :: proc(t: ^testing.T)
 	testing.expect(t, !shown.camera)
 	_, _, looks = look_camera(&f.editor, &f.world, v)
 	testing.expect(t, !looks)
+
+	// A new session hears the look again, with a new serial and its ticket, and draws through the camera.
+	step(f, open(2, SECOND / 2))
+	step(f, look(3, .Binding, SHOT_A, ticket = 2))
+	shown, told = find_message(step(f), link.Viewport_Look_Shown)
+	testing.expect(t, told && shown.camera)
+	testing.expect_value(t, shown.serial, 3)
+	testing.expect_value(t, shown.binding, SHOT_A)
 }
 
 // The editor's values move a spawned binding that it has no entity for, by the binding's ID, while the preview stands
