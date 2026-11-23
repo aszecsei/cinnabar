@@ -55,6 +55,7 @@ public sealed class CutsceneCurveInput
     ValueAxis _zoomValue;
     // The curves that the value axis was last fitted to, so a new set of curves fits again.
     IReadOnlyList<string> _fittedTo = [];
+    bool _fittedNormalized;
 
     public CutsceneCurveInput(CutsceneEditor editor) => _editor = editor;
 
@@ -97,12 +98,16 @@ public sealed class CutsceneCurveInput
     /// <summary>The view should draw again.</summary>
     public event Action? Invalidated;
 
-    /// <summary>Forgets the curves, after the cutscene, the selection or the hidden curves change. A new set of curves fits the value axis to them.</summary>
+    /// <summary>
+    /// Forgets the curves, after the cutscene, the selection or the hidden curves change. A new set of curves, or a change
+    /// of the normalized view, fits the value axis to them.
+    /// </summary>
     public void Refresh()
     {
         _layout = null;
         _list = null;
-        if (!_editor.ShownCurves.SequenceEqual(_fittedTo) && Height > 0 && Layout.Rows.Count > 0)
+        var refit = !_editor.ShownCurves.SequenceEqual(_fittedTo) || _fittedNormalized != _editor.CurvesNormalized;
+        if (refit && Height > 0 && Layout.Rows.Count > 0)
         {
             FitValues();
         }
@@ -121,6 +126,7 @@ public sealed class CutsceneCurveInput
     internal void SetValue(ValueAxis value)
     {
         _fittedTo = _editor.ShownCurves;
+        _fittedNormalized = _editor.CurvesNormalized;
         Value = value;
         Invalidated?.Invoke();
     }
@@ -129,6 +135,7 @@ public sealed class CutsceneCurveInput
     void FitValues()
     {
         _fittedTo = _editor.ShownCurves;
+        _fittedNormalized = _editor.CurvesNormalized;
         if (Layout.FrameSpan(new HashSet<string>(), _editor.CurvesNormalized) is { } span)
         {
             Value = ValueAxis.Fit(span.Min, span.Max, Height);
@@ -149,6 +156,7 @@ public sealed class CutsceneCurveInput
         _editor.SetTimeView(TimelineView.Fit(start, end, TimeWidth, TimelineZoom.Ticks));
         _editor.SetFollow(false);
         _fittedTo = _editor.ShownCurves;
+        _fittedNormalized = _editor.CurvesNormalized;
         Value = ValueAxis.Fit(span.Min, span.Max, Height);
         Invalidated?.Invoke();
     }
@@ -325,7 +333,8 @@ public sealed class CutsceneCurveInput
                     return;
                 }
                 _drag = drag;
-                _targets = [.. _editor.File.Markers.Select(m => m.Start).OfType<int>()];
+                // What the timeline's drags snap to, but the moving keys.
+                _targets = _editor.Layout().SnapTargets(_moving.SelectMany(m => m.Paths).ToHashSet());
                 _gesture = Gesture.Keys;
                 return;
             }

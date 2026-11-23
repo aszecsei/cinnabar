@@ -107,6 +107,11 @@ public sealed class CutsceneCurveEditsTests
         file = Parse();
         CutsceneCurveEdits.AddKey(file, "section:1/channel:value", 150000, stepped: true);
         Assert.Equal("key 150000 4 constant", Key(file, 3));
+        // After a linear key, a new key is linear, so the line stays straight: 3 at 60000 to 4 at 120000 is 3.5 at 90000.
+        file = Parse();
+        CutsceneCurveEdits.SetTangents(file, ["section:1/channel:value/key:1"], TangentMode.Linear);
+        CutsceneCurveEdits.AddKey(file, "section:1/channel:value", 90000);
+        Assert.Equal("key 90000 3.5 linear", Key(file, 2));
         // A locked track takes no key.
         Assert.Null(CutsceneCurveEdits.AddKey(Parse(), "section:1/channel:value", 30000, locked: new HashSet<int> { 1 }));
     }

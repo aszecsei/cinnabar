@@ -432,7 +432,7 @@ The curve editor shows the curves of the selected tracks over time, below the ti
 - **Curve Editor** (Ctrl+E), or the toolbar's **Curves** button, opens it below the timeline, with a split between them. It is the tab's, and not saved.
 - **The curves are the selection's.** A selected track shows each of its channels. A selected section, channel or key shows its channel. A selection of keys only keeps the curves that showed and adds its own, so a click on a key does not hide the other curves. With nothing selected, the curves stay.
 - **The list** on the left is as wide as the timeline's headers. Each row is one channel of one section, with its color. A click on the color hides or shows the curve. A click on the name selects the curve's keys.
-- **Colors:** a channel whose name ends in `x` or `r` is red, `y` or `g` green, `z` or `b` blue, and `w` or `a` grey. Other channels take colors from a palette in order.
+- **Colors:** the part of a channel's name after its last `_`, or the whole name, sets its color: `x` or `r` is red, `y` or `g` green, `z` or `b` blue, and `w` or `a` grey. So `position_x` is red. Other channels take colors from a palette in the order that they show.
 - **A channel of assets,** such as a property track's `$<guid>` keys, has no curve.
 
 ### The view
@@ -452,10 +452,10 @@ The curve editor shows the curves of the selected tracks over time, below the ti
 - **A click** on a key selects it. Ctrl adds or removes it, and Shift adds it. A drag in empty space selects the keys in a box. A click in empty space clears the selection.
 - **The selection is the timeline's.** A key selected in the curve editor is selected on the timeline too. Undo and Esc put it back as the timeline's drags do.
 - **A drag** of a selected key moves every selected key in time and value, as one undo entry (`Move Keys`). Esc cancels it.
-  - Time snaps as the timeline does: to the markers and the playhead within 6 pixels, or else to frames. Ctrl turns snapping off for the drag, and Snap (N) for all of them.
+  - Time snaps as the timeline's drags do: to the edges of the sections, the triggers, the other keys, the markers and the playhead within 6 pixels, or else to frames. Ctrl turns snapping off for the drag, and Snap (N) for all of them.
   - Shift moves only along the axis that has moved more.
   - A key stays inside its section, and keys that pass each other change places, as on the timeline.
-- **A double-click** on a curve adds an `auto` key there, with the value that the curve has there, and selects it (`Add Key`).
+- **A double-click** on a curve adds a key there, with the value that the curve has there, and selects it (`Add Key`). After a `linear` or a `constant` key, the new key takes that interpolation, so a straight line or a step stays as it was. Otherwise the new key is `auto`, which can change the curve's shape around it.
 - **Delete,** with the curve editor's keyboard, deletes the selected keys. A channel that loses its last key goes too.
 - A locked track's curve is dim. Its keys do not move, and it takes no key.
 
@@ -473,9 +473,10 @@ A key's interpolation decides the segment from it to the next key, as [Tracks: C
 | Flatten Tangents | 6 | `bezier 0`, or `bezier 0 0` when broken: flat. |
 
 - Auto, Linear and Constant drop the slopes and the weights. Unify, Break and Flatten keep a Bezier key's weights.
-- For a key that is not a Bezier key, the slopes that Unify and Break start from are the slopes that the evaluator gives it, so the curve does not change shape.
+- For a key that is not a Bezier key, Unify and Break start from the slopes that the evaluator gives it. So an `auto` key keeps its curve's shape. A `linear` or a `constant` key's segment to the next key becomes a curve.
 - **Handles.** A selected `bezier` or `auto` key shows a handle on each side that has a key. A handle is 40 pixels long and shows the slope's direction on screen. Its length is not a weight.
 - **A drag of a handle** sets the slope from the key to the pointer, as one undo entry (`Drag Tangent`) that Esc cancels. An `auto` key becomes a Bezier key. A key that is not broken takes the slope on both sides, and a broken key on the handle's side only.
+- **The preview follows a drag when it ends.** The text cooks when the undo entry closes, as for the timeline's drags, so the viewport shows a drag of a key or a handle at its release.
 
 ### Stepped curves
 

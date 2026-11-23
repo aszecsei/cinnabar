@@ -153,9 +153,10 @@ public static class CutsceneCurveEdits
     }
 
     /// <summary>
-    /// Adds an <c>auto</c> key to a channel at a tick on its section's time, with the value that the curve has there, or
-    /// with stepped, the value that the curve holds there. A key already at that tick stays as it is. Returns the key's
-    /// path, or null when the channel does not read or its track is locked.
+    /// Adds a key to a channel at a tick on its section's time, with the value that the curve has there, or with stepped,
+    /// the value that the curve holds there, as a constant key. A new key after a linear or a constant key takes its
+    /// interpolation, so a straight line or a step stays as it is; any other is <c>auto</c>. A key already at that tick
+    /// stays as it is. Returns the key's path, or null when the channel does not read or its track is locked.
     /// </summary>
     public static string? AddKey(CutsceneFile file, string channelPath, int tick, bool stepped = false, IReadOnlySet<int>? locked = null)
     {
@@ -172,7 +173,11 @@ public static class CutsceneCurveEdits
         var curve = keys.Select(k => k.Key).ToList();
         var value = stepped ? CutsceneCurve.Step(curve, tick) : CutsceneCurve.Value(curve, tick);
         var text = stepped ? Math.Round(value).ToString(System.Globalization.CultureInfo.InvariantCulture) : CutsceneKeying.Format(value);
-        var key = keys[0].Block.KeyLike(tick, text, stepped ? "constant" : "auto");
+        var before = curve.LastOrDefault(k => k.Time < tick);
+        var interpolation = stepped ? "constant" : curve.Any(k => k.Time < tick) && before.Interp is CurveInterp.Linear or CurveInterp.Constant
+            ? new CurveKey(tick, value, before.Interp).Interpolation()
+            : "auto";
+        var key = keys[0].Block.KeyLike(tick, text, interpolation);
         file.Insert(channel, channel.Children.Count, key);
         CutsceneFile.SortChildren(channel);
         return CutsceneFile.PathOf(key);

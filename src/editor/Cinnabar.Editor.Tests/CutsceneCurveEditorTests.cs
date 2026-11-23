@@ -202,6 +202,8 @@ public sealed class CutsceneCurveEditorTests : IDisposable
         Assert.Equal(CutscenePane.Timeline, editor.KeyboardPane);
         shell.Commands.Get(EditorCommands.CutsceneCurvesNormalized).Execute();
         Assert.True(editor.CurvesNormalized);
+        // The normalized view fits the values again: -1 to 1, with a tenth of the span on each side.
+        Assert.Equal(1.2, input.Value.Top, 6);
 
         // Every curve command has a key, and no key is bound twice.
         Assert.Empty(shell.KeyBindings.Warnings);
