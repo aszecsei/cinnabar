@@ -97,7 +97,7 @@ public sealed class PropertiesView : ScrollViewer
     FieldKey? KeyOf(ulong entity, ulong component, Link.Protocol.FieldInfo f)
     {
         var keying = _shell.Keying;
-        return keying.TargetOf(entity, component, f) == null
+        return keying.TargetOf(entity, component, f) == null && keying.CandidateOf(entity, component, f) == null
             ? null
             : new FieldKey(() => keying.StateOf(entity, component, f), () => keying.Key(entity, component, f), () => keying.AddTrack(entity, component, f),
                 () => keying.RemoveKey(entity, component, f), () => keying.CanRemoveKey(entity, component, f), () => keying.GoToTrack(entity, component, f));
@@ -107,7 +107,7 @@ public sealed class PropertiesView : ScrollViewer
     FieldKey? KeyOf(IReadOnlyList<ulong> entities, ulong component, Link.Protocol.FieldInfo f)
     {
         var keying = _shell.Keying;
-        return entities.Any(e => keying.TargetOf(e, component, f) == null)
+        return entities.Any(e => keying.TargetOf(e, component, f) == null && keying.CandidateOf(e, component, f) == null)
             ? null
             : new FieldKey(() => keying.StateOf(entities, component, f), () => keying.Key(entities, component, f), () => keying.AddTrack(entities, component, f),
                 () => keying.RemoveKey(entities, component, f), () => entities.Any(e => keying.CanRemoveKey(e, component, f)),

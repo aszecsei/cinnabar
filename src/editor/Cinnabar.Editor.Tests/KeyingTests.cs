@@ -311,14 +311,87 @@ public sealed class KeyingTests : IDisposable
     }
 
     [Fact]
-    public void AnEntityThatNoBindingPossessesHasNoKeyButton()
+    public void AKeyOfAnEntityThatNoBindingPossessesAsksToPossessItAndKeysItInOneEntry()
     {
-        var (shell, _, _) = NewShell(Cutscene.Replace("0000000000000001", "0000000000000002"));
+        var (shell, editor, _) = NewShell(Cutscene.Replace("0000000000000001", "0000000000000002"));
         using var __ = shell;
+        var original = editor.Document.Text;
+        var asked = new List<IReadOnlyList<string>>();
+        var answer = false;
+        shell.Keying.AskPossess = (names, cutscene) =>
+        {
+            asked.Add(names);
+            Assert.Equal("door", cutscene);
+            return Task.FromResult(answer);
+        };
 
         Assert.Null(shell.Keying.BindingOf(Door));
-        Assert.Null(shell.Keying.StateOf(Door, LightId, Brightness));
-        Assert.NotNull(shell.Keying.KeyTransformRefusal());
+        var state = shell.Keying.StateOf(Door, LightId, Brightness)!;
+        Assert.Equal(KeyState.None, state.State);
+        Assert.Null(state.Refusal);
+        Assert.Contains("possess", state.Tip);
+
+        // No: nothing changes.
+        shell.Keying.Key(Door, LightId, Brightness);
+        Assert.Equal(["Door"], Assert.Single(asked));
+        Assert.Equal(original, editor.Document.Text);
+
+        // Yes: the binding, its track and the key are one entry.
+        answer = true;
+        shell.Keying.Key(Door, LightId, Brightness);
+        Assert.Equal(["Possess and Key"], editor.Document.History);
+        Assert.Equal(2, shell.Keying.BindingOf(Door));
+        var lines = editor.Document.Text.Split('\n');
+        Assert.Contains("binding 2 \"Door 2\"", lines);
+        Assert.Contains($"\tpossess = @{SceneGuid}/0000000000000001", lines);
+        Assert.Equal([2.0], CutsceneKeying.KeysAt(editor.File, new KeyTarget.Property(2, LightId, "brightness", PropertyShape.Number), 0));
+        Assert.Equal(KeyState.Keyed, State(shell));
+    }
+
+    [Fact]
+    public void KeyTransformAsksToPossessTheSelectionThatNoBindingHas()
+    {
+        var (shell, editor, _) = NewShell(Cutscene.Replace("0000000000000001", "0000000000000002"));
+        using var __ = shell;
+        shell.Selection.Select(Door);
+        shell.Keying.AskPossess = (_, _) => Task.FromResult(true);
+
+        Assert.Null(shell.Keying.KeyTransformRefusal());
+        shell.Commands.Get(EditorCommands.CutsceneKeyTransform).Execute();
+
+        Assert.Equal(["Possess and Key Transform"], editor.Document.History);
+        Assert.Equal([0.0, 0, 0], CutsceneKeying.KeysAt(editor.File, new KeyTarget.Pose(2, PosePart.Position), 0).Select(v => v!.Value));
+    }
+
+    [Fact]
+    public void AutoKeyAsksOnceToPossessAnEntityAndANoSendsItsEditsToTheScene()
+    {
+        var (shell, editor, _) = NewShell(Cutscene.Replace("0000000000000001", "0000000000000002"));
+        using var __ = shell;
+        shell.Keying.AutoKey = true;
+        shell.Keying.AutoKeyAddTracks = true;
+        var asked = 0;
+        shell.Keying.AskPossess = (_, _) =>
+        {
+            asked++;
+            return Task.FromResult(false);
+        };
+
+        Assert.IsType<FieldRoute.Refused>(shell.Keying.Route([Door], LightId, Brightness));
+        Assert.Equal(1, asked);
+        Assert.IsType<FieldRoute.Scene>(shell.Keying.Route([Door], LightId, Brightness));
+        Assert.Equal(1, asked);
+
+        // With a yes, the binding comes as an entry of its own, and the next edit keys.
+        var (other, otherEditor, _) = NewShell(Cutscene.Replace("0000000000000001", "0000000000000002"));
+        using var ___ = other;
+        other.Keying.AutoKey = true;
+        other.Keying.AutoKeyAddTracks = true;
+        other.Keying.AskPossess = (_, _) => Task.FromResult(true);
+        Assert.IsType<FieldRoute.Refused>(other.Keying.Route([Door], LightId, Brightness));
+        Assert.Equal(["Possess Door"], otherEditor.Document.History);
+        Assert.IsType<FieldRoute.Key>(other.Keying.Route([Door], LightId, Brightness));
+        Assert.Empty(editor.Document.History);
     }
 
     [Fact]
@@ -359,9 +432,10 @@ public sealed class KeyingTests : IDisposable
         Assert.Same(editor, shell.ActiveGraphEditor);
         Assert.Equal("track:1", editor.Selection);
 
-        // An entity that no binding possesses has no button.
+        // An entity that no binding possesses has an empty button, which offers to possess it.
         editor.Document.Edit("Unbind", f => f.Find("binding:1")!.Set("possess", $"@{SceneGuid}/0000000000000002"));
-        Assert.DoesNotContain(content.GetLogicalDescendants().OfType<Button>(), b => b.ContextMenu != null && b.ContextMenu == Name().ContextMenu);
+        Assert.Contains("key-none", Key().Classes);
+        Assert.Contains("possess", (string)ToolTip.GetTip(Key())!);
     });
 
     [Fact]

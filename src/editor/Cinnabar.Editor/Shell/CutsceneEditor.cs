@@ -201,6 +201,12 @@ public sealed class CutsceneEditor : IGraphEditor
         }
     }
 
+    /// <summary>
+    /// The entities that the designer chose not to possess when auto-key asked, for this tab: their edits go to the
+    /// scene, and auto-key does not ask again.
+    /// </summary>
+    internal HashSet<PossessRef> DeclinedPossess { get; } = [];
+
     /// <summary>The playhead in ticks: where a split, Home and End act. It is the editor's, not the document's, so it is in no undo entry.</summary>
     public int Playhead => _playhead;
 

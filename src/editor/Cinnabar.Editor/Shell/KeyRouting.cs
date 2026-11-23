@@ -249,7 +249,18 @@ public sealed partial class Keying
         var held = _shell.World.IsHeld(handle, component, Hash(field.Name)) || _shell.PreviewValues.ValueOf(handle, component, field.Name) != null;
         if (TargetOf(handle, component, field) is not { } target)
         {
-            return held ? new FieldRoute.Refused("The preview holds this field, and no track keys it, so an edit would not show.") : FieldRoute.Scene.Instance;
+            if (held)
+            {
+                return new FieldRoute.Refused("The preview holds this field, and no track keys it, so an edit would not show.");
+            }
+            // Auto-key that adds tracks asks once whether to possess an entity that no binding has.
+            if (_autoKey && _autoKeyAddTracks && CandidateOf(handle, component, field) != null && PossessOf(handle) is { } entity
+                && !cutscene.DeclinedPossess.Contains(entity))
+            {
+                _ = AskAutoPossess(handle);
+                return new FieldRoute.Refused("No binding possesses this entity. Answer whether to possess it, then edit it again.");
+            }
+            return FieldRoute.Scene.Instance;
         }
         var keys = _autoKey && (_autoKeyAddTracks || CutsceneKeying.TrackOf(cutscene.File, target) != null);
         if (!held && !keys)

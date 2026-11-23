@@ -50,9 +50,19 @@ public sealed partial class Keying
     /// for another field that a property track animates. Null for an entity that no binding possesses, and for a field
     /// that no track keys.
     /// </summary>
-    public KeyTarget? TargetOf(ulong handle, ulong component, FieldInfo field)
+    public KeyTarget? TargetOf(ulong handle, ulong component, FieldInfo field) =>
+        BindingOf(handle) is { } binding ? TargetFor(handle, binding, component, field) : null;
+
+    /// <summary>
+    /// What would key a field of an entity that no binding possesses yet, once a binding possesses it, or null: for one
+    /// that a binding possesses, that the cutscene cannot name, or with no cutscene.
+    /// </summary>
+    public KeyTarget? CandidateOf(ulong handle, ulong component, FieldInfo field) =>
+        Cutscene != null && BindingOf(handle) == null && PossessOf(handle) != null ? TargetFor(handle, 0, component, field) : null;
+
+    KeyTarget? TargetFor(ulong handle, int binding, ulong component, FieldInfo field)
     {
-        if (BindingOf(handle) is not { } binding || _shell.World.Find(handle) is not { } node)
+        if (_shell.World.Find(handle) is not { } node)
         {
             return null;
         }
@@ -77,9 +87,16 @@ public sealed partial class Keying
     /// <summary>What a field's key button shows at the playhead, or null for a field that has none.</summary>
     public KeyButton? StateOf(ulong handle, ulong component, FieldInfo field)
     {
-        if (Cutscene is not { } cutscene || TargetOf(handle, component, field) is not { } target)
+        if (Cutscene is not { } cutscene)
         {
             return null;
+        }
+        if (TargetOf(handle, component, field) is not { } target)
+        {
+            return CandidateOf(handle, component, field) == null
+                ? null
+                : new KeyButton(KeyState.None, cutscene.Document.InTransaction ? "A drag is under way in the cutscene." : null,
+                    $"No binding of {Path.GetFileNameWithoutExtension(cutscene.Document.Path)} possesses this entity. Click to possess it, then add a track and key the field.");
         }
         var file = cutscene.File;
         var refusal = CutsceneKeying.Refusal(file, target, cutscene.Locked) ?? (cutscene.Document.InTransaction ? "A drag is under way in the cutscene." : null);
@@ -101,6 +118,11 @@ public sealed partial class Keying
     /// <summary>Keys a field at the playhead, adding its track when it has none, as one undo entry.</summary>
     public void Key(ulong handle, ulong component, FieldInfo field)
     {
+        if (CandidateOf(handle, component, field) != null)
+        {
+            _ = PossessThen([handle], "Possess and Key", component, field, key: true);
+            return;
+        }
         if (TargetOf(handle, component, field) is { } target && StateOf(handle, component, field) is { Refusal: null })
         {
             Edit($"Key {FieldValues.Humanize(field.Name)}", file => SetKeys(file, handle, target, TrackName(target, field)));
@@ -116,6 +138,11 @@ public sealed partial class Keying
     /// <summary>Adds the track that keys a field, with no key, as one undo entry.</summary>
     public void AddTrack(ulong handle, ulong component, FieldInfo field)
     {
+        if (CandidateOf(handle, component, field) != null)
+        {
+            _ = PossessThen([handle], "Possess and Add Track", component, field, key: false);
+            return;
+        }
         if (Cutscene is { } cutscene && TargetOf(handle, component, field) is { } target && CutsceneKeying.TrackOf(cutscene.File, target) == null)
         {
             Edit("Add Track", file => CutsceneKeying.AddTrack(file, target, TrackName(target, field)));
@@ -153,6 +180,12 @@ public sealed partial class Keying
     /// </summary>
     public KeyButton? StateOf(IReadOnlyList<ulong> handles, ulong component, FieldInfo field)
     {
+        if (handles.Count > 1 && Cutscene is { } cutscene && handles.Any(h => CandidateOf(h, component, field) != null)
+            && handles.All(h => TargetOf(h, component, field) != null || CandidateOf(h, component, field) != null))
+        {
+            return new KeyButton(KeyState.None, cutscene.Document.InTransaction ? "A drag is under way in the cutscene." : null,
+                $"No binding of {Path.GetFileNameWithoutExtension(cutscene.Document.Path)} possesses some of the {handles.Count} selected entities. Click to possess them, then key the field of each.");
+        }
         if (handles.Count == 1)
         {
             return StateOf(handles[0], component, field);
@@ -174,6 +207,11 @@ public sealed partial class Keying
     /// <summary>Keys a field of several entities at the playhead, adding tracks where they have none, as one undo entry.</summary>
     public void Key(IReadOnlyList<ulong> handles, ulong component, FieldInfo field)
     {
+        if (handles.Count > 1 && handles.Any(h => CandidateOf(h, component, field) != null))
+        {
+            _ = PossessThen(handles, "Possess and Key", component, field, key: true);
+            return;
+        }
         if (StateOf(handles, component, field) is not { Refusal: null })
         {
             return;
@@ -219,11 +257,22 @@ public sealed partial class Keying
     }
 
     /// <summary>Why Key Transform cannot act now, or null when it can.</summary>
-    public string? KeyTransformRefusal() => Refusal(BoundSelection().Select(e => (e.Handle, Parts(e.Binding, PosePart.Position, PosePart.Rotation, PosePart.Scale))));
+    public string? KeyTransformRefusal() => Cutscene is { Document.InTransaction: false } && PossessableSelection().Count > 0
+        ? null
+        : Refusal(BoundSelection().Select(e => (e.Handle, Parts(e.Binding, PosePart.Position, PosePart.Rotation, PosePart.Scale))));
 
-    /// <summary>Keys the position, rotation and scale of each selected entity that a binding possesses, as one undo entry.</summary>
+    /// <summary>
+    /// Keys the position, rotation and scale of each selected entity that a binding possesses, as one undo entry. When
+    /// some selected entities have no binding, it asks first whether to possess them, and keys them too.
+    /// </summary>
     public void KeyTransform()
     {
+        if (PossessableSelection() is { Count: > 0 } unbound && _shell.World.Type(SceneEdits.TransformId) is { } type
+            && type.Fields.FirstOrDefault(f => f.Name == "position") is { } position)
+        {
+            _ = PossessThen([.. _shell.Selection.Entities], "Possess and Key Transform", SceneEdits.TransformId, position, key: true, pose: true);
+            return;
+        }
         if (KeyTransformRefusal() == null)
         {
             Edit("Key Transform", file =>
@@ -266,6 +315,111 @@ public sealed partial class Keying
         if (Cutscene is { } cutscene)
         {
             cutscene.Key(label, edit);
+        }
+    }
+
+    // The selected entities that no binding possesses, which the cutscene can name.
+    List<ulong> PossessableSelection() =>
+        Cutscene == null ? [] : [.. _shell.Selection.Entities.Where(h => BindingOf(h) == null && PossessOf(h) != null)];
+
+    /// <summary>
+    /// Asks whether to possess entities that no binding possesses (see docs/editor/cutscene-editor.md#possessing). The
+    /// window answers; with no window, as in tests, nothing is asked and nothing possessed.
+    /// </summary>
+    public Func<IReadOnlyList<string>, string, Task<bool>>? AskPossess { get; set; }
+
+    // The one question that is open, so a second click or edit does not ask again while it is.
+    bool _asking;
+
+    // Asks to possess the entities that no binding possesses, then in one undo entry adds their bindings and keys a field
+    // of all of them, or with pose, their position, rotation and scale; or without key, adds the field's tracks.
+    async Task PossessThen(IReadOnlyList<ulong> handles, string label, ulong component, FieldInfo field, bool key, bool pose = false)
+    {
+        if (Cutscene is not { } cutscene || AskPossess is not { } ask || _asking)
+        {
+            return;
+        }
+        var unbound = handles.Where(h => BindingOf(h) == null && PossessOf(h) != null).ToList();
+        bool yes;
+        _asking = true;
+        try
+        {
+            yes = await ask([.. unbound.Select(h => _shell.World.Find(h)?.Name ?? "?")], Path.GetFileNameWithoutExtension(cutscene.Document.Path));
+        }
+        finally
+        {
+            _asking = false;
+        }
+        if (!yes || Cutscene != cutscene)
+        {
+            return;
+        }
+        Edit(label, file =>
+        {
+            var bindings = handles.ToDictionary(h => h, h => BindingOf(h));
+            foreach (var handle in unbound)
+            {
+                if (PossessOf(handle) is { } entity)
+                {
+                    bindings[handle] = CutsceneKeying.AddBinding(file, entity, _shell.World.Find(handle)?.Name ?? "Entity");
+                }
+            }
+            foreach (var (handle, binding) in bindings)
+            {
+                if (binding is not { } b)
+                {
+                    continue;
+                }
+                var targets = pose ? Parts(b, PosePart.Position, PosePart.Rotation, PosePart.Scale) : [.. new[] { TargetFor(handle, b, component, field) }.OfType<KeyTarget>()];
+                foreach (var target in targets)
+                {
+                    if (key)
+                    {
+                        SetKeys(file, handle, target, pose ? "Transform" : TrackName(target, field));
+                    }
+                    else
+                    {
+                        CutsceneKeying.AddTrack(file, target, TrackName(target, field));
+                    }
+                }
+            }
+        });
+    }
+
+    /// <summary>
+    /// With auto-key and add tracks on, an edit of an entity that no binding possesses asks once whether to possess it.
+    /// A yes possesses it, as one undo entry, so its next edit keys; a no sends its edits to the scene while the tab is
+    /// open.
+    /// </summary>
+    async Task AskAutoPossess(ulong handle)
+    {
+        if (Cutscene is not { } cutscene || AskPossess is not { } ask || _asking || PossessOf(handle) is not { } entity)
+        {
+            return;
+        }
+        bool yes;
+        _asking = true;
+        try
+        {
+            yes = await ask([_shell.World.Find(handle)?.Name ?? "?"], Path.GetFileNameWithoutExtension(cutscene.Document.Path));
+        }
+        finally
+        {
+            _asking = false;
+        }
+        if (Cutscene != cutscene)
+        {
+            return;
+        }
+        if (!yes)
+        {
+            cutscene.DeclinedPossess.Add(entity);
+            Raise();
+            return;
+        }
+        if (BindingOf(handle) == null)
+        {
+            Edit($"Possess {_shell.World.Find(handle)?.Name}", file => CutsceneKeying.AddBinding(file, entity, _shell.World.Find(handle)?.Name ?? "Entity"));
         }
     }
 

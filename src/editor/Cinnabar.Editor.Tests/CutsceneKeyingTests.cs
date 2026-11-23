@@ -52,6 +52,23 @@ public sealed class CutsceneKeyingTests
     static IReadOnlyList<string> Lines(CutsceneFile file) => file.Text.ReplaceLineEndings("\n").Split('\n');
 
     [Fact]
+    public void ABindingThatPossessesAnEntityGoesAfterTheLastBindingWithANameOfItsOwn()
+    {
+        var file = Parse();
+        Assert.Equal(4, CutsceneKeying.AddBinding(file, new PossessRef(Guid, 0xd4), "Fox"));
+        var lines = Lines(file).ToList();
+        var at = lines.IndexOf("binding 4 \"Fox 2\"");
+        Assert.True(at > lines.IndexOf("binding 3 \"Crate\"") && at < lines.IndexOf("track 1 transform \"Path\""));
+        Assert.Equal($"\tpossess = @{Guid}/00000000000000d4", lines[at + 1]);
+        Assert.Equal(4, CutsceneKeying.BindingOf(file, new PossessRef(Guid, 0xd4)));
+
+        // With no binding, it goes before the first track, or last.
+        var bare = Parse("cutscene 1\nlength = 600000\n");
+        Assert.Equal(1, CutsceneKeying.AddBinding(bare, new PossessRef(Guid, 1), "Door"));
+        Assert.Equal(["cutscene 1", "length = 600000", "binding 1 \"Door\"", $"\tpossess = @{Guid}/0000000000000001", ""], Lines(bare));
+    }
+
+    [Fact]
     public void APossessReadsAnIdOrAnInstancesPathAndIgnoresCase()
     {
         var file = Parse();

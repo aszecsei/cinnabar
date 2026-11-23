@@ -81,6 +81,7 @@ public sealed class MainWindow : Window
         shell.Content.RenameRequested += item => _ = AskRename(item);
         shell.Content.DeleteRequested += items => _ = ConfirmDelete(items);
         shell.Content.AskRewriteRequires = AskRewriteRequires;
+        shell.Keying.AskPossess = AskPossess;
         shell.Content.RequiresRewritten += result => _ = ShowRewrittenRequires(result);
         shell.Content.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
         shell.Content.DraftLeft += () => _ = AskDraft();
@@ -445,6 +446,15 @@ public sealed class MainWindow : Window
         const int Shown = 8;
         var list = string.Join("\n", lines.Take(Shown).Select(l => $"    {l}"));
         return lines.Count > Shown ? $"{list}\n    and {lines.Count - Shown} more" : list;
+    }
+
+    // A key of an entity that no binding possesses (see docs/editor/cutscene-editor.md#possessing).
+    async Task<bool> AskPossess(IReadOnlyList<string> names, string cutscene)
+    {
+        var what = names.Count == 1 ? $"\"{names[0]}\"" : $"these {names.Count} entities";
+        var message = $"No binding of {cutscene} possesses {what}.\n\n" + (names.Count == 1 ? "" : ListOf(names) + "\n\n")
+            + "Possess adds a binding for each, which the cutscene takes over while it plays, as one undo entry with the keys.";
+        return await Dialogs.Ask(this, "Possess", message, "Possess", "Cancel") == "Possess";
     }
 
     async Task<bool?> AskRewriteRequires(IReadOnlyList<CookAsset> scripts)
