@@ -234,6 +234,30 @@ public sealed class ViewLooks
         }
     }
 
+    /// <summary>
+    /// What a view's frame guides say of its camera (see docs/editor/cutscene-editor.md#frame-guides): the drawn camera's
+    /// sensor aspect, and its name, focal length and the shot at the playhead. A scene view that the game drew through a
+    /// camera has all three. The Game view, while a session is open, has the shot's camera's name. Others have none.
+    /// </summary>
+    public (double? Aspect, string? Info) CameraInfoOf(EditorViewport viewport)
+    {
+        if (viewport.IsGame)
+        {
+            return _shell.CutscenePreview.State is CutscenePreviewState.Open open
+                ? (null, CutsceneTimelineLayout.ShotAt(open.Editor.File, open.Editor.Playhead, open.Editor.SilentTracks()) ?? "gameplay")
+                : (null, null);
+        }
+        if (this[viewport.Index] is not ViewLook.Through { Shown: { Camera: true } shown } through)
+        {
+            return (null, null);
+        }
+        var file = through.Owner.File;
+        var camera = file.Bindings.FirstOrDefault(b => b.Id == (int)shown.Binding)?.Name;
+        var shot = CutsceneTimelineLayout.ShotAt(file, through.Owner.Playhead, through.Owner.SilentTracks());
+        double? aspect = shown.Sensor is [> 0 and var w, > 0 and var h] ? w / h : null;
+        return (aspect, FrameGuides.CameraInfo(camera, shown.FocalLength > 0 ? shown.FocalLength : null, shot));
+    }
+
     /// <summary>The game drew a looking view: the answer to the view's look, when its serial is the look's.</summary>
     internal void OnShown(ViewportLookShown shown)
     {

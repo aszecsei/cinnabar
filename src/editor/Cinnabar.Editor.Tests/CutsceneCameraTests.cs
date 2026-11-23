@@ -2,6 +2,7 @@ using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Shell;
+using Cinnabar.Editor.Tools;
 using Asset = Cinnabar.Editor.Link.Cook.Asset;
 using Root = Cinnabar.Editor.Link.Cook.Root;
 using Welcome = Cinnabar.Editor.Link.Cook.Welcome;
@@ -136,5 +137,22 @@ public sealed class CutsceneCameraTests : IDisposable
 
         shell.Commands.Get(EditorCommands.CutsceneLookThroughCuts).Execute();
         Assert.IsType<ViewLook.Cuts>(shell.Looks[0]);
+    }
+
+    [Fact]
+    public void TheGuidesAreEachViewsAndViewportJsonKeepsThem()
+    {
+        var (shell, _, _) = NewShell();
+        using var _ = shell;
+
+        shell.Commands.Get(EditorCommands.SafeAreas).Execute();
+        shell.SetGuides(shell.Viewports[1], shell.Viewports[1].Guides with { Mask = true, Aspect = GuideAspect.Custom, Custom = 2.2 });
+
+        Assert.True(shell.SettingsViewport.Guides.Safe);
+        Assert.False(shell.Viewports[1].Guides.Safe);
+        Assert.True(shell.Commands.Get(EditorCommands.SafeAreas).IsChecked);
+        var json = shell.Settings.Read(EditorSettings.ViewportFileName)!;
+        Assert.Contains("\"Guides\"", json);
+        Assert.Contains("2.2", json);
     }
 }

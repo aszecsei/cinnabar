@@ -39,6 +39,7 @@ public sealed class ViewportToolbar : StackPanel
         }
         Children.Add(Button(_shadingText, "What this viewport shows: the lit scene, or a debug view of what makes it.", ShadingMenu()));
         Children.Add(Button(new TextBlock { Text = "Show" }, "What this viewport draws: the renderer's features, the icons and shapes of lights, volumes and cameras, and its exposure.", ShowMenu()));
+        Children.Add(Button(new TextBlock { Text = "Guides" }, "Guides over this viewport's frame: an aspect mask, the safe areas, a rule-of-thirds grid and the camera's name and lens.", GuidesMenu()));
         Children.Add(Button(new TextBlock { Text = "Quality" }, "Draw this viewport at a quality in place of the game's, and choose how its frame fits.", QualityMenu()));
         if (viewport.HasCamera)
         {
@@ -244,6 +245,44 @@ public sealed class ViewportToolbar : StackPanel
         {
             menu.Radio(parent.Items, option, () => choice.Get(Settings) == option, () => Settings = choice.Set(Settings, option));
         }
+    }
+
+    // The frame guides (see docs/editor/cutscene-editor.md#frame-guides), which only the editor draws, over this viewport.
+    LiveMenu GuidesMenu()
+    {
+        var menu = new LiveMenu();
+        FrameGuideSettings Guides() => _viewport.Guides;
+        void Set(FrameGuideSettings guides) => _shell.SetGuides(_viewport, guides);
+        foreach (var guide in ViewportOptions.Guides)
+        {
+            menu.Check(menu.Items, guide.Label, () => guide.IsOn(Guides()), () => Set(guide.Set(Guides(), !guide.IsOn(Guides()))), guide.Description);
+        }
+        menu.Items.Add(new Separator());
+        var aspect = menu.Submenu(menu.Items, () => $"Aspect: {(Guides().Aspect == GuideAspect.Custom ? $"{Guides().Custom:0.##}:1" : FrameGuides.Label(Guides().Aspect))}",
+            "The aspect that the mask and the guides frame.");
+        foreach (var choice in Enum.GetValues<GuideAspect>())
+        {
+            menu.Radio(aspect.Items, FrameGuides.Label(choice), () => Guides().Aspect == choice, () => Set(Guides() with { Aspect = choice, Mask = true }));
+        }
+        var custom = new NumericUpDown
+        {
+            Minimum = (decimal)FrameGuides.MinAspect,
+            Maximum = (decimal)FrameGuides.MaxAspect,
+            Increment = 0.01m,
+            FormatString = "0.00",
+            Width = 110,
+        };
+        ToolTip.SetTip(custom, "The custom aspect, as width over height.");
+        custom.ValueChanged += (_, e) =>
+        {
+            if (e.NewValue is { } value && (double)value != Guides().Custom)
+            {
+                Set(Guides() with { Custom = (double)value, Aspect = GuideAspect.Custom, Mask = true });
+            }
+        };
+        aspect.Items.Add(new MenuItem { Header = custom, StaysOpenOnClick = true });
+        menu.OnOpening(() => custom.Value = (decimal)Guides().Custom);
+        return menu;
     }
 
     LiveMenu QualityMenu()

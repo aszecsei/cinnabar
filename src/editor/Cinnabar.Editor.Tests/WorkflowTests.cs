@@ -59,7 +59,7 @@ public sealed class WorkflowTests : IDisposable
         // A viewport's own: its settings, its view and the Scene's views (see docs/editor/viewport.md#toolbar).
         string[] viewport =
         [
-            .. ViewportOptions.Toggles.Select(t => t.Command), .. ViewportOptions.Choices.Select(c => c.Command),
+            .. ViewportOptions.Toggles.Select(t => t.Command), .. ViewportOptions.Choices.Select(c => c.Command), .. ViewportOptions.Guides.Select(g => g.Command),
             EditorCommands.DebugView, EditorCommands.ExposureUp, EditorCommands.ExposureDown, EditorCommands.ExposureReset,
             EditorCommands.ViewProjection, EditorCommands.View2D, EditorCommands.SceneLayout, EditorCommands.ViewportScale, EditorCommands.Stats,
             EditorCommands.FrameSelected, EditorCommands.FrameScene, EditorCommands.OrbitSelection,

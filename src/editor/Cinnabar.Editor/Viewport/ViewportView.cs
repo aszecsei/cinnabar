@@ -51,6 +51,7 @@ public sealed class ViewportView : Grid
     readonly Border _activeFrame;
     // The menus at the top left: their presses are theirs, not the frame's.
     readonly ViewportToolbar _toolbar;
+    readonly FrameGuidesOverlay _guides;
     readonly ViewportControl _control;
     readonly Border _overlay;
     // The Game view's notice that the world has no camera; null in a scene view.
@@ -118,6 +119,8 @@ public sealed class ViewportView : Grid
         ClipToBounds = true;
         _control = new ViewportControl { Session = _session };
         Children.Add(_control);
+        _guides = new FrameGuidesOverlay(_control, GuideState);
+        Children.Add(_guides);
 
         _box = new Border
         {
@@ -241,6 +244,11 @@ public sealed class ViewportView : Grid
             _shell.Keying.Changed += ShowAutoKey;
             _shell.ActiveViewportChanged += ShowActive;
             _shell.ViewportsChanged += ShowActive;
+            _shell.GuidesChanged += ShowGuides;
+            _shell.Looks.Changed += ShowLook;
+            _shell.CutscenePreview.Changed += _guides.InvalidateVisual;
+            _shell.CutscenePreview.PlayheadMoved += _guides.InvalidateVisual;
+            _session.ViewChanged += _guides.InvalidateVisual;
             _timer.Start();
             if (_viewport.IsGame)
             {
@@ -273,6 +281,11 @@ public sealed class ViewportView : Grid
             _shell.Keying.Changed -= ShowAutoKey;
             _shell.ActiveViewportChanged -= ShowActive;
             _shell.ViewportsChanged -= ShowActive;
+            _shell.GuidesChanged -= ShowGuides;
+            _shell.Looks.Changed -= ShowLook;
+            _shell.CutscenePreview.Changed -= _guides.InvalidateVisual;
+            _shell.CutscenePreview.PlayheadMoved -= _guides.InvalidateVisual;
+            _session.ViewChanged -= _guides.InvalidateVisual;
             if (_viewport.IsGame)
             {
                 _shell.WorldCameraChanged -= ShowCamera;
@@ -306,6 +319,29 @@ public sealed class ViewportView : Grid
         if (!_shell.StepTurn(_viewport, elapsed))
         {
             _turnTimer.Stop();
+        }
+    }
+
+    // What the frame guides draw: the view's guides, and the camera that it looks through, if any.
+    FrameGuideState GuideState()
+    {
+        var (aspect, info) = _shell.Looks.CameraInfoOf(_viewport);
+        return new FrameGuideState(_viewport.Guides, aspect, info);
+    }
+
+    void ShowGuides(EditorViewport viewport)
+    {
+        if (viewport == _viewport)
+        {
+            _guides.InvalidateVisual();
+        }
+    }
+
+    void ShowLook(int viewport)
+    {
+        if (viewport == _viewport.Index)
+        {
+            _guides.InvalidateVisual();
         }
     }
 

@@ -1,10 +1,15 @@
 using Cinnabar.Editor.Link.Protocol;
+using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>A setting of a viewport that is on or off, such as its bloom.</summary>
 public sealed record ViewportToggle(string Command, string Label, string Description, Func<ViewportSettings, bool> IsOn,
     Func<ViewportSettings, bool, ViewportSettings> Set, string? Icon = null);
+
+/// <summary>A frame guide of a viewport that is on or off, such as its safe areas, which only the editor draws.</summary>
+public sealed record GuideToggle(string Command, string Label, string Description, Func<FrameGuideSettings, bool> IsOn,
+    Func<FrameGuideSettings, bool, FrameGuideSettings> Set);
 
 /// <summary>A setting of a viewport that is one of a list of options, such as its anti-aliasing.</summary>
 public sealed record ViewportChoice(string Command, string Label, string Description, IReadOnlyList<string> Options,
@@ -79,6 +84,19 @@ public static class ViewportOptions
     public static IReadOnlyList<ViewportChoice> QualityChoices { get; } = [Quality, AntiAliasing, GlobalIllumination, Reflections, ReflectionsLevel, RenderScale];
 
     public static IReadOnlyList<ViewportChoice> Choices { get; } = [Shapes, .. QualityChoices];
+
+    /// <summary>The frame guides that the editor draws over a viewport (see docs/editor/cutscene-editor.md#frame-guides).</summary>
+    public static IReadOnlyList<GuideToggle> Guides { get; } =
+    [
+        new(EditorCommands.AspectMask, "Aspect Mask", "Shade the frame outside the aspect that the guides choose: the camera's, or one of the screens'.",
+            g => g.Mask, (g, on) => g with { Mask = on }),
+        new(EditorCommands.SafeAreas, "Safe Areas", "Draw the action safe area, 93% of the framed shot, and the title safe area, 90%.",
+            g => g.Safe, (g, on) => g with { Safe = on }),
+        new(EditorCommands.Thirds, "Rule of Thirds", "Draw a rule-of-thirds grid and a centre mark over the framed shot.",
+            g => g.Thirds, (g, on) => g with { Thirds = on }),
+        new(EditorCommands.CameraInfo, "Camera Info", "Write the camera's name, its focal length and the shot's name over the frame while the view looks through a camera.",
+            g => g.CameraInfo, (g, on) => g with { CameraInfo = on }),
+    ];
 
     /// <summary>
     /// The debug views (see docs/rendering/post-processing.md#debug-views) by what a person looks for with them, for a

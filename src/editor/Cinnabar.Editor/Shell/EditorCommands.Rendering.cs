@@ -147,6 +147,11 @@ static partial class EditorCommands
             commands.Register(Command.Toggle(toggle.Command, toggle.Label, () => toggle.IsOn(shell.ViewportSettings),
                 on => shell.ViewportSettings = toggle.Set(shell.ViewportSettings, on), toggle.Description, toggle.Icon));
         }
+        foreach (var guide in ViewportOptions.Guides)
+        {
+            commands.Register(Command.Toggle(guide.Command, guide.Label, () => guide.IsOn(shell.SettingsViewport.Guides),
+                on => shell.SetGuides(shell.SettingsViewport, guide.Set(shell.SettingsViewport.Guides, on)), guide.Description, "frame"));
+        }
         foreach (var choice in ViewportOptions.Choices)
         {
             commands.Register(new ChoiceCommand(choice.Command, choice.Label, choice.Options, () => choice.Get(shell.ViewportSettings),

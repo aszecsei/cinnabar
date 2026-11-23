@@ -202,6 +202,10 @@ static partial class EditorCommands
     public const string MeshletHierarchy = "view.meshletHierarchy";
     public const string ShadingStats = "view.shadingStats";
     public const string Icons = "view.icons";
+    public const string AspectMask = "view.aspectMask";
+    public const string SafeAreas = "view.safeAreas";
+    public const string Thirds = "view.thirds";
+    public const string CameraInfo = "view.cameraInfo";
     public const string Helpers = "view.helpers";
     public const string ExposureUp = "view.exposureUp";
     public const string ExposureDown = "view.exposureDown";

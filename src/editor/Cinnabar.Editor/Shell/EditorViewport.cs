@@ -90,6 +90,9 @@ public sealed class EditorViewport
     /// <summary>Whether the viewport has an editor camera: a scene view.</summary>
     public bool HasCamera => _camera != null;
 
+    /// <summary>The guides that the editor draws over the frame. The shell changes it (<see cref="EditorShell.SetGuides"/>).</summary>
+    public FrameGuideSettings Guides { get; internal set; } = new();
+
     /// <summary>How the viewport draws. The shell changes it (<see cref="EditorShell.ApplyViewportSettings"/>).</summary>
     public ViewportSettings Settings { get; internal set; }
 
