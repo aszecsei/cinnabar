@@ -8,20 +8,21 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
+using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Shell;
-using CommunityToolkit.Mvvm.Input;
 
 namespace Cinnabar.Editor.Panels;
 
 /// <summary>
 /// The Weather Map panel (see docs/editor/shell-and-panels.md#weather-map): the atmosphere volume's weather map as an
 /// image that fills the panel, with its red, green and blue the clouds' coverage, precipitation and type; a brush that
-/// paints one channel toward a value, or toward 0 with Shift, each stroke written to the PNG when it ends; Ctrl+Z,
-/// while the panel has the focus, undoes a stroke; and New Weather Map, which fills the map from noise, making the
-/// file when the volume has none. The map, its file and the strokes are the shell's <see cref="WeatherMapSession"/>.
+/// paints one channel toward a value, or toward 0 with Shift, each stroke written to the PNG when it ends; Undo, while
+/// the panel has the keyboard, undoes a stroke, as the panel is then the focused command scope; and New Weather Map,
+/// which fills the map from noise, making the file when the volume has none. The map, its file and the strokes are the
+/// shell's <see cref="WeatherMapSession"/>.
 /// </summary>
-public sealed class WeatherMapView : DockPanel
+public sealed class WeatherMapView : DockPanel, ICommandScope
 {
     static readonly IReadOnlyList<string> Channels = ["Coverage", "Precipitation", "Type"];
 
@@ -54,22 +55,24 @@ public sealed class WeatherMapView : DockPanel
     // What a new map is made of.
     WeatherGeneration _generation = new();
 
+    /// <summary>Undo undoes a stroke, and nothing when there is none, rather than the scene's last edit.</summary>
+    public ScopedCommand? Handler(string commandId) => commandId == EditorCommands.Undo
+        ? new(() => _session.UndoStroke(), () => _session.Strokes > 0 && !_session.IsPainting)
+        : null;
+
     public WeatherMapView(EditorShell shell)
     {
         _shell = shell;
         _session = shell.WeatherMaps;
         Focusable = true;
         _undo = new Button { Content = "Undo Stroke", HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center };
-        ToolTip.SetTip(_undo, "Undo the last stroke, or the last Generate, and write the file again (Ctrl+Z while the panel has the focus).");
+        var undoKey = shell.KeyBindings.ShortcutOf(EditorCommands.Undo) is { } key ? $" ({key} while the panel has the keyboard)" : "";
+        ToolTip.SetTip(_undo, $"Undo the last stroke, or the last Generate, and write the file again{undoKey}.");
         _undo.Click += (_, _) => _session.UndoStroke();
         _revert = new Button { Content = "Revert to Saved", HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center };
         ToolTip.SetTip(_revert, "Read the file again, dropping the strokes since.");
         _revert.Click += (_, _) => _session.RevertToSaved();
-        KeyBindings.Add(new KeyBinding
-        {
-            Gesture = new KeyGesture(Key.Z, KeyModifiers.Control),
-            Command = new RelayCommand(() => _session.UndoStroke(), () => TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not TextBox),
-        });
+        FocusFollower.Scope(this, shell.Commands, this);
 
         var top = new StackPanel { Classes = { "properties" }, Spacing = 4 };
         top.Children.Add(new StackPanel { Classes = { "properties-header" }, Children = { new TextBlock { Text = "Weather Map", Classes = { "title" } } } });
@@ -197,6 +200,8 @@ public sealed class WeatherMapView : DockPanel
         ShareHeight();
         _status.Text = _session.Status();
         _undo.IsEnabled = _session.Strokes > 0 && !_session.IsPainting;
+        // Undo is the panel's while it has the keyboard, so the ribbon's Undo follows the strokes.
+        _shell.Commands.Get(EditorCommands.Undo).Invalidate();
         _revert.IsEnabled = _session.State is WeatherMapSession.MapState.Indexed or WeatherMapSession.MapState.Written;
         if (_generate != null)
         {

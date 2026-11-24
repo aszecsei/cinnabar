@@ -7,6 +7,7 @@ using Avalonia.Input.Platform;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Ribbon;
@@ -24,9 +25,10 @@ namespace Cinnabar.Editor.Panels;
 /// list of the visible rows, the assets in the middle, as tiles or a list, and the selected asset's details on the right.
 /// Everything comes from the cook daemon's index, and what shows is the shell's <see cref="ContentBrowserModel"/>, as a view
 /// lasts only until docking rebuilds it. The menus, the keys and dragging onto a folder do the asset operations, which the
-/// daemon does.
+/// daemon does. While it has the keyboard it is the focused command scope (see docs/editor/shell-and-panels.md#commands),
+/// so Delete, Duplicate and Select All act on the assets, not on the entities.
 /// </summary>
-public sealed class ContentBrowserView : DockPanel
+public sealed class ContentBrowserView : DockPanel, ICommandScope
 {
     /// <summary>Dragged assets, by their GUIDs, separated by spaces.</summary>
     public static readonly DataFormat<string> AssetFormat = DataFormat.CreateStringApplicationFormat("cinnabar-asset");
@@ -128,10 +130,14 @@ public sealed class ContentBrowserView : DockPanel
                 _model.Open(new ContentFolder(row.Root, row.Path));
             }
         };
-        BrowserKey(Key.F2, KeyModifiers.None, () => RunOnSelection(EditorCommands.RenameAsset));
-        BrowserKey(Key.D, KeyModifiers.Control, () => RunOnSelection(EditorCommands.DuplicateAsset));
-        BrowserKey(Key.Delete, KeyModifiers.None, () => RunOnSelection(EditorCommands.DeleteAsset));
-        BrowserKey(Key.A, KeyModifiers.Control, _model.SelectAll);
+        FocusFollower.Scope(this, shell.Commands, this);
+        // Rename has no command of the scene's to take, so its key is the panel's own.
+        KeyBindings.Add(new KeyBinding
+        {
+            Gesture = new KeyGesture(Key.F2),
+            Command = new RelayCommand(() => _shell.Commands.Get(EditorCommands.RenameAsset).Execute(),
+                () => TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not TextBox),
+        });
         _search.TextChanged += (_, _) =>
         {
             if (!_syncing)
@@ -159,23 +165,35 @@ public sealed class ContentBrowserView : DockPanel
             .Add(() => _shell.Cook.ProgressChanged += ShowStatus, () => _shell.Cook.ProgressChanged -= ShowStatus);
     }
 
-    // A key that means one thing here and another on the entities, which comes first while the browser has the focus, as
-    // it is nearer than the window's. It does nothing for lack of a selection, not the entities' command, and leaves a
-    // text box its keys.
-    void BrowserKey(Key key, KeyModifiers modifiers, Action run) =>
-        KeyBindings.Add(new KeyBinding
-        {
-            Gesture = new KeyGesture(key, modifiers),
-            Command = new RelayCommand(run, () => TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not TextBox),
-        });
-
-    void RunOnSelection(string id)
+    // The scene's commands that run an asset command here, which then has their keys.
+    static readonly Dictionary<string, string> AssetCommands = new()
     {
-        var command = _shell.Commands.Get(id);
-        if (_model.Selection.Count > 0 && command.CanExecute)
+        [EditorCommands.DeleteEntity] = EditorCommands.DeleteAsset,
+        [EditorCommands.DuplicateEntity] = EditorCommands.DuplicateAsset,
+    };
+
+    /// <summary>
+    /// Delete and Duplicate run the asset commands, which do nothing for lack of a selection rather than act on the
+    /// entities, and Select All selects every asset that shows.
+    /// </summary>
+    public ScopedCommand? Handler(string commandId)
+    {
+        if (commandId == EditorCommands.SelectAll)
         {
-            command.Execute();
+            return new(_model.SelectAll);
         }
+        return AssetCommands.TryGetValue(commandId, out var asset) ? ScopedCommand.Of(_shell.Commands.Get(asset)) : null;
+    }
+
+    // The key of an asset command in the browser: the key of the scene's command that runs it here, or F2 for Rename.
+    KeyGesture? AssetGesture(string id)
+    {
+        if (id == EditorCommands.RenameAsset)
+        {
+            return new KeyGesture(Key.F2);
+        }
+        var verb = AssetCommands.FirstOrDefault(p => p.Value == id).Key;
+        return verb == null ? null : CommandViews.ParseGesture(_shell.KeyBindings.ShortcutOf(verb));
     }
 
     void OnContextChanged()
@@ -640,13 +658,7 @@ public sealed class ContentBrowserView : DockPanel
         {
             var command = _shell.Commands.Get(id);
             var item = new MenuItem { Header = command.Label.Replace(" Asset", ""), Command = new RelayCommand(() => command.Execute()) };
-            item.InputGesture = id switch
-            {
-                EditorCommands.RenameAsset => new KeyGesture(Key.F2),
-                EditorCommands.DuplicateAsset => new KeyGesture(Key.D, KeyModifiers.Control),
-                EditorCommands.DeleteAsset => new KeyGesture(Key.Delete),
-                _ => null,
-            };
+            item.InputGesture = AssetGesture(id);
             menu.Opening += (_, _) => item.IsEnabled = command.CanExecute;
             menu.Items.Add(item);
         }

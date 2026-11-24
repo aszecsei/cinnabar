@@ -64,7 +64,7 @@ public sealed class BehaviorTreeCanvas : NodeGraphCanvas
     int _footUnderMouse;
 
     public BehaviorTreeCanvas(EditorShell shell, DecisionEditor editor)
-        : base(editor)
+        : base(editor, shell.Commands)
     {
         _shell = shell;
         _editor = editor;

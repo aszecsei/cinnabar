@@ -75,7 +75,7 @@ public sealed class AnimationGraphCanvas : NodeGraphCanvas
     Vec2 _dragEnd;
 
     public AnimationGraphCanvas(EditorShell shell, AnimationGraphEditor editor)
-        : base(editor)
+        : base(editor, shell.Commands)
     {
         _shell = shell;
         _editor = editor;

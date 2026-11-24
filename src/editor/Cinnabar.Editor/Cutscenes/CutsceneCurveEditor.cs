@@ -40,7 +40,6 @@ sealed class CutsceneCurveEditor : Control
     readonly CutsceneEditor _editor;
     readonly Dictionary<string, FormattedText> _texts = [];
     readonly Dictionary<uint, (IPen Line, IPen Dim, IBrush Fill, IPen Outside)> _colors = [];
-    CutscenePaneFocus? _focus;
 
     public CutsceneCurveEditor(CutsceneEditor editor)
     {
@@ -52,6 +51,8 @@ sealed class CutsceneCurveEditor : Control
         void Changed() => Input.Refresh();
         void Redraw() => InvalidateVisual();
         void Frame() => Input.Frame();
+        // Tells the editor when the keyboard is in the curve editor.
+        FocusFollower.Follow(this, () => _editor.SetKeyboardPane(CutscenePane.Curves), () => _editor.LeaveKeyboardPane(CutscenePane.Curves));
         new ViewSubscriptions(this, attached: Input.Refresh)
             .Add(() => _editor.Changed += Changed, () => _editor.Changed -= Changed)
             .Add(() => _editor.TimeViewChanged += Redraw, () => _editor.TimeViewChanged -= Redraw)
@@ -60,19 +61,6 @@ sealed class CutsceneCurveEditor : Control
     }
 
     public CutsceneCurveInput Input { get; }
-
-    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
-    {
-        base.OnAttachedToVisualTree(e);
-        _focus = new CutscenePaneFocus(this, _editor, CutscenePane.Curves);
-    }
-
-    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
-    {
-        _focus?.Dispose();
-        _focus = null;
-        base.OnDetachedFromVisualTree(e);
-    }
 
     FormattedText Text(string text, IBrush brush, double size = 11)
     {

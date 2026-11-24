@@ -13,7 +13,8 @@ namespace Cinnabar.Editor.UiDocuments;
 /// <summary>
 /// The UI editor's tree (see docs/editor/ui-editor.md#the-tree): the document's elements, then its templates, each row
 /// indented by its depth. A click selects an element; a drag moves it before, after or into another, by where on the
-/// row it is dropped. The buttons add an element from the palette, add a template, and duplicate and delete.
+/// row it is dropped. The buttons add an element from the palette, add a template, and duplicate and delete, as Ctrl+D and
+/// Delete do while the tree has the keyboard (see <see cref="UiElementScope"/>).
 /// </summary>
 sealed class UiTreeView : DockPanel
 {
@@ -43,14 +44,15 @@ sealed class UiTreeView : DockPanel
         }
         buttons.Children.Add(new Button { Content = "Add", Flyout = add, Classes = { "field-button" }, Margin = new Thickness(0, 0, 4, 0) });
         buttons.Children.Add(SmallButton("Template", "Add a template, which scripts copy with Ui.add", _editor.AddTemplate));
-        buttons.Children.Add(SmallButton("Duplicate", "Copy the element after itself (Ctrl+D)", () =>
+        string Keys(string tip, string command) => shell.KeyBindings.ShortcutOf(command) is { } key ? $"{tip} ({key})" : tip;
+        buttons.Children.Add(SmallButton("Duplicate", Keys("Copy the element after itself", EditorCommands.DuplicateEntity), () =>
         {
             if (_editor.SelectedNode is { } n)
             {
                 _editor.Duplicate(n);
             }
         }));
-        buttons.Children.Add(SmallButton("Delete", "Delete the element (Delete)", () =>
+        buttons.Children.Add(SmallButton("Delete", Keys("Delete the element", EditorCommands.DeleteEntity), () =>
         {
             if (_editor.SelectedNode is { } n)
             {
@@ -61,6 +63,7 @@ sealed class UiTreeView : DockPanel
         Children.Add(buttons);
         Children.Add(new ScrollViewer { Content = _rows, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled });
         Focusable = true;
+        FocusFollower.Scope(this, shell.Commands, new UiElementScope(editor));
         new ViewSubscriptions(this, attached: Refresh)
             .Add(() => _editor.Changed += Refresh, () => _editor.Changed -= Refresh)
             .Add(() => _editor.SelectionChanged += ShowSelection, () => _editor.SelectionChanged -= ShowSelection)
@@ -260,24 +263,5 @@ sealed class UiTreeView : DockPanel
             _ => (node.Parent, _editor.IndexOf(node.Index) + 1),
         };
         return dragged != node.Index && _editor.CanMove(dragged, parent) ? (parent, index, where) : null;
-    }
-
-    protected override void OnKeyDown(KeyEventArgs e)
-    {
-        base.OnKeyDown(e);
-        if (_editor.SelectedNode is not { } n)
-        {
-            return;
-        }
-        if (e.Key == Key.Delete)
-        {
-            _editor.Delete(n);
-            e.Handled = true;
-        }
-        else if (e.Key == Key.D && e.KeyModifiers == KeyModifiers.Control)
-        {
-            _editor.Duplicate(n);
-            e.Handled = true;
-        }
     }
 }

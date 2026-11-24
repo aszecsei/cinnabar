@@ -1,3 +1,4 @@
+using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Cutscenes;
 using Cinnabar.Editor.Document;
@@ -23,7 +24,7 @@ public enum CutscenePane
 /// tests can drive the editor without a window. Blocks are named by path, since an undo reads the file again and
 /// replaces its block objects.
 /// </summary>
-public sealed partial class CutsceneEditor : IGraphEditor
+public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
 {
     readonly EditorShell _shell;
     readonly List<string> _selection = [];
@@ -659,6 +660,28 @@ public sealed partial class CutsceneEditor : IGraphEditor
 
     /// <summary>Which pane has the keyboard. F, Delete and the tangent commands act on the curve editor while it does.</summary>
     public CutscenePane KeyboardPane => _pane;
+
+    /// <summary>
+    /// The scene's Delete and Duplicate while a pane has the keyboard, as the active editor's tab takes them (see
+    /// <see cref="EditorScope"/>): Delete deletes what is selected, or else the selected binding with its tracks.
+    /// </summary>
+    public ScopedCommand? Handler(string commandId) => commandId switch
+    {
+        _ when !TimelineFocused => null,
+        EditorCommands.DeleteEntity => new(() =>
+        {
+            if (CanEditSelection)
+            {
+                DeleteSelected(ripple: false);
+            }
+            else
+            {
+                _ = DeleteBinding();
+            }
+        }, () => CanEditSelection || CanDeleteBinding),
+        EditorCommands.DuplicateEntity => new(Duplicate, () => CanDuplicate),
+        _ => null,
+    };
 
     /// <summary>
     /// The one writer of <see cref="KeyboardPane"/>, which each pane's view calls as the focus moves. When neither pane
