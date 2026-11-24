@@ -126,7 +126,11 @@ public sealed class FieldCommitTests
     {
         var commits = new List<string>();
         var box = new TextBox { Text = "Door" };
-        Kit.CommitOnEnterOrBlur(box, commits.Add);
+        Kit.CommitOnEnterOrBlur(box, text =>
+        {
+            commits.Add(text);
+            return true;
+        });
 
         box.Text = "Gate";
         Enter(box);

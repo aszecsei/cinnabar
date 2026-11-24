@@ -83,14 +83,10 @@ static class Kit
     /// Makes a box commit its text on Enter and when it loses the focus, and put the text back on Escape, as
     /// <see cref="CommitBox"/> does. It commits a text once: a box that commits on Enter and then loses the focus, as it
     /// does when its view builds again without it, does not commit again. So the commit must not compare with a value
-    /// that it captured, which is old by then.
+    /// that it captured, which is old by then. A commit that returns false puts the text back; the setter says why.
     /// </summary>
-    public static void CommitOnEnterOrBlur(TextBox box, Action<string> commit) =>
-        CommitBox.Attach(box, text =>
-        {
-            commit(text);
-            return Verdict.Took;
-        });
+    public static void CommitOnEnterOrBlur(TextBox box, Func<string, bool> commit) =>
+        CommitBox.Attach(box, text => commit(text) ? Verdict.Took : Verdict.Refused(null));
 
     public static ComboBox Choice(IEnumerable<string> options, string? selected, Action<string> pick)
     {
