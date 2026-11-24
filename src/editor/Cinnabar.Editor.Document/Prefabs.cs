@@ -2,7 +2,7 @@ namespace Cinnabar.Editor.Document;
 
 /// <summary>
 /// One prefab that the open scene uses (see docs/editor/prefabs.md#the-editors-documents): its file, its GUID, its
-/// scene as the file has it, with one root, and the scene that the file has. The scene's undo stack holds its edits,
+/// scene, with one root, and the scene that the file has. The scene's undo stack holds its edits,
 /// as a mesh document's are, so it keeps no history of its own.
 /// </summary>
 public sealed class PrefabDocument(string path, string guid, Scene scene, SavedSnapshot<Scene> saved)
