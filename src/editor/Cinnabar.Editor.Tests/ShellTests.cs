@@ -523,4 +523,48 @@ public sealed class ShellTests : IDisposable
             Directory.Delete(_settingsDirectory, recursive: true);
         }
     }
+
+    [Fact]
+    public void AShellBuiltOnAContextRefreshesTheCommandsOnItsNextTurnOnceForEveryChange()
+    {
+        var previous = SynchronizationContext.Current;
+        var context = new RecordingContext();
+        SynchronizationContext.SetSynchronizationContext(context);
+        try
+        {
+            using var dir = new TempDirectory("command-refresh");
+            using var shell = TestShell.Open(dir, null, null);
+            context.RunAll();
+            var save = shell.Commands.Get(EditorCommands.Save);
+            var changes = 0;
+            save.Changed += () => changes++;
+
+            shell.StopGame();
+            shell.StopGame();
+            shell.StopGame();
+            Assert.Equal(0, changes);
+            context.RunAll();
+            Assert.Equal(1, changes);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+    }
+
+    /// <summary>Keeps what is posted until the test runs it, as one turn of the UI thread.</summary>
+    sealed class RecordingContext : SynchronizationContext
+    {
+        readonly Queue<(SendOrPostCallback Callback, object? State)> _posted = [];
+
+        public override void Post(SendOrPostCallback d, object? state) => _posted.Enqueue((d, state));
+
+        public void RunAll()
+        {
+            while (_posted.TryDequeue(out var posted))
+            {
+                posted.Callback(posted.State);
+            }
+        }
+    }
 }
