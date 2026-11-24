@@ -241,18 +241,18 @@ fields_flatten_and_hide :: proc(t: ^testing.T) {
 		append(&names, field.name)
 	}
 	testing.expect_value(t, len(fields), 14)
-	testing.expect_value(t, fields[13].kind, Field_Kind.Vector2)
+	testing.expect_value(t, fields[13].kind, ecs.Field_Kind.Vector2)
 	testing.expect_value(t, fields[12].name, "inner.amount")
 	testing.expect_value(t, fields[12].offset, u32(offset_of(Probe, inner)))
 	// An array of asset references is a field for each element.
 	testing.expect_value(t, fields[11].name, "skins.1")
 	testing.expect_value(t, fields[11].offset, u32(offset_of(Probe, skins) + size_of(format.Guid)))
 	testing.expect_value(t, fields[11].asset_kind, "material")
-	testing.expect_value(t, fields[9].kind, Field_Kind.Asset)
+	testing.expect_value(t, fields[9].kind, ecs.Field_Kind.Asset)
 	testing.expect_value(t, fields[9].asset_kind, "mesh")
-	testing.expect_value(t, fields[4].kind, Field_Kind.Enum)
+	testing.expect_value(t, fields[4].kind, ecs.Field_Kind.Enum)
 	testing.expect_value(t, fields[4].enum_values[1], Enum_Value{"Busy", 5})
-	testing.expect_value(t, fields[7].kind, Field_Kind.Position)
+	testing.expect_value(t, fields[7].kind, ecs.Field_Kind.Position)
 }
 
 @(private = "file")
@@ -272,7 +272,7 @@ editor_tags_are_a_list :: proc(t: ^testing.T) {
 	testing.expect(t, fields[1].read_only && fields[1].has_range)
 	testing.expect_value(t, fields[1].range_min, -1)
 	// Only a [3]f32 can be a color.
-	testing.expect_value(t, fields[2].kind, Field_Kind.Vector2)
+	testing.expect_value(t, fields[2].kind, ecs.Field_Kind.Vector2)
 	testing.expect(t, !fields[2].color)
 }
 @(private = "file")
@@ -302,7 +302,7 @@ a_setting_that_the_scene_sets_is_overridden :: proc(t: ^testing.T) {
 	fields := component_fields(Knob, context.temp_allocator)
 	testing.expect_value(t, len(fields), 2)
 	testing.expect_value(t, fields[0].name, "gain")
-	testing.expect_value(t, fields[0].kind, Field_Kind.F32)
+	testing.expect_value(t, fields[0].kind, ecs.Field_Kind.F32)
 	testing.expect(t, fields[0].has_override && fields[0].has_range)
 	testing.expect_value(
 		t,

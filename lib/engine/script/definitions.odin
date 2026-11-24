@@ -135,7 +135,7 @@ field_type :: proc(f: ^Field, allocator: runtime.Allocator) -> string {
 			names[i] = fmt.aprintf("%q", name, allocator = allocator)
 		}
 		return strings.join(names, " | ", allocator)
-	case .Vector:
+	case .Vector3:
 		return "vector"
 	case .Quaternion:
 		return "Quaternion"
@@ -143,6 +143,7 @@ field_type :: proc(f: ^Field, allocator: runtime.Allocator) -> string {
 		return "WorldPosition"
 	case .Entity:
 		return "Entity?"
+	case .Vector2, .Asset:
 	}
 	return "any"
 }

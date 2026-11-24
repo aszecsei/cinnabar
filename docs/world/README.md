@@ -38,6 +38,7 @@ The world is one `ecs.World` in `Game_State`. The game draws it in 1 to 5 game v
 | `transform.odin` | `Transform`, `Local_Transform`, `Parent`, `Previous_Transform`, propagation, `presented` |
 | `children.odin` | The child lists and the orphan list, `children_iter` |
 | `position.odin` | `World_Position` and its two operations |
+| `fields.odin` | `Field_Kind`, `FIELD_TRAITS`, `field_kind_of`, and `read_integer` and `write_integer` with an `Overflow` |
 | `name.odin` | The `Name` component |
 
 The data flow in a frame: systems read and write components through queries, in parallel jobs; their structural changes go to command buffers, which `apply` runs at fixed points; the script phase edits the world directly because it is serial; and at the end, [render extraction](render-extraction.md#render-extraction) writes what the GPU needs into frame memory. Two packages sit directly on `ecs`: `lib/engine/volume` ([Volumes](volumes.md#volumes)) and `lib/engine/scene`, the loader that fills a world from a cooked scene or the editor's snapshot, and loads and unloads scenes one at a time ([Scenes](scenes.md), [Editor](../editor/document-and-scenes.md#scenes)).

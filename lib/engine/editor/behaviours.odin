@@ -411,16 +411,11 @@ behaviour_value :: proc(
 			floats = {f64(f.vector.x), f64(f.vector.y), f64(f.vector.z), 0},
 		}
 	case .Entity:
+		id, other := scene.encode_entity_ref(w, f.entity, ids, scenes, holder)
 		v = {
 			kind   = .Entity,
-			entity = id_of(w, f.entity, ids),
-		}
-		if number, owned := scene.scene_of(w, f.entity);
-		   scenes != nil && owned && number != holder && f.entity not_in ids {
-			v.scene = ([16]u8)(scene.scene_guid(scenes, number))
-			if v.scene == {} {
-				v.entity = 0
-			}
+			entity = id,
+			scene  = ([16]u8)(other),
 		}
 	case .Asset:
 		v = {

@@ -28,6 +28,12 @@ definitions_cover_components_and_game_bindings :: proc(t: ^testing.T) {
 	expect(t, text, "\ttarget: Entity?\n")
 	expect(t, text, "\tdrift: vector\n")
 	testing.expect(t, !strings.contains(text, "secret"))
+	// Scripts cannot hold a [2]f32 or an asset reference, so those fields are left out too.
+	expect(
+		t,
+		text,
+		"declare extern type TemperRef extends ComponentRef with\n\tlean: \"Back\" | \"Ahead\"\n\tpitch: \"Quiet\" | \"Loud\"\nend\n",
+	)
 	// get is overloaded for each component, and for behaviour classes.
 	expect(t, text, "((Entity, HealthType) -> HealthRef?)")
 	expect(t, text, "((Entity, TransformType) -> TransformRef?)")

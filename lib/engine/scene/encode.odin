@@ -43,7 +43,7 @@ encode_fields :: proc(
 		   mem.compare_ptrs(
 			   rawptr(uintptr(data) + at),
 			   rawptr(uintptr(base) + at),
-			   field_size(field),
+			   ecs.field_size(field.kind, field.enum_base),
 		   ) !=
 			   0 {
 			append(
@@ -101,13 +101,13 @@ field_value :: proc(
 			ints = {0 = 1 if (^bool)(src)^ else 0},
 		}
 	case .I8, .I16, .I32, .I64, .U8, .U16, .U32, .U64:
-		v = integer_value(get_integer(src, field.kind))
+		v = integer_value(ecs.read_integer(src, field.kind, .Refuse))
 	case .F32:
 		v = numbers(f64((^f32)(src)^))
 	case .F64:
 		v = numbers((^f64)(src)^)
 	case .Enum:
-		value := get_integer(src, field.enum_base)
+		value := ecs.read_integer(src, field.enum_base, .Refuse)
 		for e in field.enum_values {
 			if e.value == value {
 				return {kind = .Name, text = strings.clone(e.name, allocator)}
@@ -135,23 +135,40 @@ field_value :: proc(
 			v.floats[i] = f64(raw)
 		}
 	case .Entity:
-		target := (^ecs.Entity)(src)^
 		v = {
-			kind   = .Entity,
-			entity = scene_id_for(w, target, ids),
+			kind = .Entity,
 		}
-		if scenes != nil {
-			if number, owned := scene_of(w, target); owned && number != holder {
-				v.scene = scene_guid(scenes, number)
-				if v.scene == {} {
-					v.entity = 0
-				}
-			}
-		}
+		v.entity, v.scene = encode_entity_ref(w, (^ecs.Entity)(src)^, ids, scenes, holder)
 	case .Asset:
 		v = {
 			kind  = .Asset,
 			asset = (^format.Guid)(src)^,
+		}
+	}
+	return
+}
+
+// encode_entity_ref is a reference to an entity as a scene writes it: its scene ID (see scene_id_for), and with scenes,
+// the GUID of its scene when that is not holder, the number of the scene that holds the reference. A reference to a
+// scene without a GUID is none. A draft, an entity in ids, is new in the document, so it is never in another scene.
+encode_entity_ref :: proc(
+	w: ^ecs.World,
+	target: ecs.Entity,
+	ids: map[ecs.Entity]u64,
+	scenes: ^Scenes,
+	holder: u32,
+) -> (
+	id: u64,
+	scene: format.Guid,
+) {
+	id = scene_id_for(w, target, ids)
+	if scenes == nil || target in ids {
+		return
+	}
+	if number, owned := scene_of(w, target); owned && number != holder {
+		scene = scene_guid(scenes, number)
+		if scene == {} {
+			id = 0
 		}
 	}
 	return
@@ -190,28 +207,4 @@ numbers :: proc(values: ..f64) -> (v: format.Scene_Value) {
 @(private = "file")
 integer_value :: proc(value: i64) -> format.Scene_Value {
 	return {kind = .Number, count = 1, integer = 1, ints = {0 = value}, floats = {0 = f64(value)}}
-}
-
-// get_integer reads an integer of the kind. A u64 beyond i64's range keeps its bits, as put_integer takes it.
-@(private = "file")
-get_integer :: proc(src: rawptr, kind: Field_Kind) -> i64 {
-	#partial switch kind {
-	case .I8:
-		return i64((^i8)(src)^)
-	case .I16:
-		return i64((^i16)(src)^)
-	case .I32:
-		return i64((^i32)(src)^)
-	case .I64:
-		return (^i64)(src)^
-	case .U8:
-		return i64((^u8)(src)^)
-	case .U16:
-		return i64((^u16)(src)^)
-	case .U32:
-		return i64((^u32)(src)^)
-	case .U64:
-		return i64((^u64)(src)^)
-	}
-	return 0
 }

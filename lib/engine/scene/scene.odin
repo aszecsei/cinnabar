@@ -660,7 +660,7 @@ field_place :: proc(
 	case is_flag:
 		return {int(field.override_offset), 1}, true
 	}
-	return {int(field.offset), field_size(field^)}, true
+	return {int(field.offset), ecs.field_size(field.kind, field.enum_base)}, true
 }
 
 // field_bytes gives the bytes that set_field would write into a field of a component, and where they go, without
@@ -703,7 +703,7 @@ field_bytes :: proc(
 		warn(&l, "%s.%s takes %s, so it is not set", info.name, f.name, expected)
 		return
 	}
-	return {int(field.offset), field_size(field^)}, bytes, true
+	return {int(field.offset), ecs.field_size(field.kind, field.enum_base)}, bytes, true
 }
 
 // behaviour_field converts a behaviour's value to a script value, for the entity with scene ID id. The script
@@ -940,7 +940,7 @@ write_field :: proc(
 		}
 		(^bool)(dst)^ = v.ints[0] != 0
 	case .I8, .I16, .I32, .I64, .U8, .U16, .U32, .U64:
-		if !integer || !put_integer(dst, field.kind, v.ints[0]) {
+		if !integer || !ecs.write_integer(dst, field.kind, v.ints[0], .Refuse) {
 			return "an integer in its range"
 		}
 	case .F32:
@@ -971,7 +971,7 @@ write_field :: proc(
 		case:
 			return "one of its enum's names"
 		}
-		if !put_integer(dst, field.enum_base, value) {
+		if !ecs.write_integer(dst, field.enum_base, value, .Refuse) {
 			return "a value that fits its enum"
 		}
 	case .Vector3:
@@ -1025,71 +1025,14 @@ write_field :: proc(
 reset_field :: proc(data, defaults: rawptr, field: Field) {
 	dst := rawptr(uintptr(data) + uintptr(field.offset))
 	if defaults != nil {
-		mem.copy(dst, rawptr(uintptr(defaults) + uintptr(field.offset)), field_size(field))
+		mem.copy(
+			dst,
+			rawptr(uintptr(defaults) + uintptr(field.offset)),
+			ecs.field_size(field.kind, field.enum_base),
+		)
 	} else {
-		mem.zero(dst, field_size(field))
+		mem.zero(dst, ecs.field_size(field.kind, field.enum_base))
 	}
-}
-
-@(private)
-field_size :: proc(field: Field) -> int {
-	switch field.kind {
-	case .Bool, .I8, .U8:
-		return 1
-	case .I16, .U16:
-		return 2
-	case .I32, .U32, .F32:
-		return 4
-	case .I64, .U64, .F64, .Entity, .Vector2:
-		return 8
-	case .Enum:
-		return field_size(Field{kind = field.enum_base})
-	case .Vector3:
-		return 12
-	case .Quaternion:
-		return 16
-	case .Position:
-		return 24
-	case .Asset:
-		return size_of(format.Guid)
-	}
-	return 0
-}
-
-// put_integer writes an integer of the kind, and returns false, writing nothing, if it does not fit. A u64 beyond
-// i64's range arrives with its bits in an i64.
-@(private = "file")
-put_integer :: proc(dst: rawptr, kind: Field_Kind, value: i64) -> bool {
-	fits :: proc(value: i64, $T: typeid) -> bool {
-		return value >= i64(min(T)) && value <= i64(max(T))
-	}
-	#partial switch kind {
-	case .I8:
-		fits(value, i8) or_return
-		(^i8)(dst)^ = i8(value)
-	case .I16:
-		fits(value, i16) or_return
-		(^i16)(dst)^ = i16(value)
-	case .I32:
-		fits(value, i32) or_return
-		(^i32)(dst)^ = i32(value)
-	case .I64:
-		(^i64)(dst)^ = value
-	case .U8:
-		fits(value, u8) or_return
-		(^u8)(dst)^ = u8(value)
-	case .U16:
-		fits(value, u16) or_return
-		(^u16)(dst)^ = u16(value)
-	case .U32:
-		fits(value, u32) or_return
-		(^u32)(dst)^ = u32(value)
-	case .U64:
-		(^u64)(dst)^ = u64(value)
-	case:
-		return false
-	}
-	return true
 }
 
 @(private)

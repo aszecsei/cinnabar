@@ -12,6 +12,7 @@ import "core:time"
 import "cinnabar:core"
 import "cinnabar:core/luau"
 import script_host "cinnabar:core/script"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 @(private)
@@ -29,6 +30,28 @@ Health :: struct {
 	mood:   Mood,
 	target: ecs.Entity,
 	drift:  [3]f32,
+}
+
+@(private)
+Lean :: enum i8 {
+	Back  = -100,
+	Ahead = 100,
+}
+
+@(private)
+Pitch :: enum u8 {
+	Quiet = 0,
+	Loud  = 200,
+}
+
+// Temper has enums whose values do not fit a signed byte, or are negative, and the field kinds that scripts cannot
+// hold: a [2]f32 and an asset reference.
+@(private)
+Temper :: struct {
+	lean:  Lean,
+	pitch: Pitch,
+	spot:  [2]f32,
+	art:   format.Guid,
 }
 
 // Score has a field named value at another offset than Health's, for the direct access tests.
@@ -56,6 +79,7 @@ World_Fixture :: struct {
 register_world_test :: proc(r: ^Runtime) {
 	expose(r, Health, Health{limit = 100})
 	expose(r, Score)
+	expose(r, Temper)
 	define(r, "Test.report", proc(L: ^luau.State) -> c.int {
 		f := (^World_Fixture)(context.user_ptr)
 		append(&f.reports, luau.L_checknumber(L, 1))
@@ -103,6 +127,7 @@ setup_world :: proc(t: ^testing.T) -> ^World_Fixture {
 	ecs.register_engine_components(&f.world.registry)
 	ecs.register_component(&f.world.registry, Health)
 	ecs.register_component(&f.world.registry, Score)
+	ecs.register_component(&f.world.registry, Temper)
 	register_components(&f.world.registry)
 	context.user_ptr = f
 	testing.expect(t, init(&f.runtime, &f.platform, &f.world, nil, register_world_test))
@@ -330,6 +355,39 @@ target = e
 		testing.expect_value(t, h.value, 6)
 		testing.expect_value(t, h.mood, Mood.Angry)
 		testing.expect_value(t, h.drift, [3]f32{1, 2, 3})
+	}
+}
+
+// An enum's value is written as its integer, negative or past a signed byte. A [2]f32 or an asset field is hidden.
+@(test)
+scripts_set_enums_of_any_value_and_see_no_vector2_or_asset :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
+local temper = World.spawn():add(Temper, {lean = "Back", pitch = "Loud"})
+Test.report(temper.lean == "Back" and 1 or 0)
+Test.report(temper.pitch == "Loud" and 1 or 0)
+for _, name in {"spot", "art"} do
+	local ok, message = pcall(function() return temper[name] end)
+	Test.report(not ok and string.find(message, "Temper has no field " .. name, 1, true) and 1 or 0)
+end
+`,
+		),
+	)
+	expect_reports(t, f, {1, 1, 1, 1})
+	found := make([dynamic]ecs.Entity, context.temp_allocator)
+	ecs.collect(&f.world, {ecs.registry_find_type(&f.world.registry, Temper).id}, &found)
+	testing.expect_value(t, len(found), 1)
+	if len(found) == 1 {
+		temper := ecs.get(&f.world, found[0], Temper)
+		testing.expect_value(t, temper.lean, Lean.Back)
+		testing.expect_value(t, temper.pitch, Pitch.Loud)
 	}
 }
 
