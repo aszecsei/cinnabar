@@ -106,7 +106,9 @@ perception_view :: proc(data: []byte) -> (blob: ^Perception_Blob, ok: bool) {
 		}
 	}
 	for r, i in rows {
-		if r.source > .Loudest_Noise || !slice_fits(data, r.key, 1, 1) || !slice_fits(data, r.tag, 1, 1) {
+		if r.source > .Loudest_Noise ||
+		   !slice_fits(data, r.key, 1, 1) ||
+		   !slice_fits(data, r.tag, 1, 1) {
 			return nil, false
 		}
 		if perception_source_reads_row(r.source) {

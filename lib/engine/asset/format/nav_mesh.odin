@@ -180,8 +180,16 @@ nav_mesh_view :: proc(data: []byte) -> (blob: ^Nav_Mesh_Blob, ok: bool) {
 		   tile.z != u32(i) / max(blob.tiles_x, 1) ||
 		   !range_inside(tile.first_vertex, tile.vertex_count, vertex_total) ||
 		   !range_inside(tile.first_polygon, tile.polygon_count, u64(len(polygons))) ||
-		   !range_inside(tile.first_detail_vertex, tile.detail_vertex_count, detail_vertex_total) ||
-		   !range_inside(tile.first_detail_triangle, tile.detail_triangle_count, detail_triangle_total) {
+		   !range_inside(
+				   tile.first_detail_vertex,
+				   tile.detail_vertex_count,
+				   detail_vertex_total,
+			   ) ||
+		   !range_inside(
+				   tile.first_detail_triangle,
+				   tile.detail_triangle_count,
+				   detail_triangle_total,
+			   ) {
 			return nil, false
 		}
 		for &p, j in polygons[tile.first_polygon:][:tile.polygon_count] {

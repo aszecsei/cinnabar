@@ -149,9 +149,7 @@ bundle_view :: proc(
 		}
 	}
 	for d in bundle_dependency_slices(head, header) {
-		if !slice_fits(head, d, 1, 1) ||
-		   d.size == 0 ||
-		   d.size > BUNDLE_MAX_NAME {
+		if !slice_fits(head, d, 1, 1) || d.size == 0 || d.size > BUNDLE_MAX_NAME {
 			return nil, nil, false
 		}
 	}

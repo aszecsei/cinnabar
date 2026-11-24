@@ -174,9 +174,19 @@ decision_view :: proc(data: []byte) -> (blob: ^Decision_Blob, ok: bool) {
 	if blob.technique > max(Decision_Technique) ||
 	   blob.state_size > MAX_DECISION_STATE ||
 	   !slice_fits(data, blob.nodes, size_of(Decision_Node), align_of(Decision_Node)) ||
-	   !slice_fits(data, blob.conditions, size_of(Decision_Condition), align_of(Decision_Condition)) ||
+	   !slice_fits(
+			   data,
+			   blob.conditions,
+			   size_of(Decision_Condition),
+			   align_of(Decision_Condition),
+		   ) ||
 	   !slice_fits(data, blob.ops, size_of(Decision_Op), align_of(Decision_Op)) ||
-	   !slice_fits(data, blob.constants, size_of(Decision_Constant), align_of(Decision_Constant)) ||
+	   !slice_fits(
+			   data,
+			   blob.constants,
+			   size_of(Decision_Constant),
+			   align_of(Decision_Constant),
+		   ) ||
 	   !slice_fits(data, blob.actions, size_of(Decision_Action), align_of(Decision_Action)) ||
 	   !slice_fits(data, blob.args, size_of(Decision_Arg), align_of(Decision_Arg)) ||
 	   !slice_fits(data, blob.writes, size_of(Decision_Write), align_of(Decision_Write)) ||

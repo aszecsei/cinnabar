@@ -194,7 +194,12 @@ animation_graph_layout :: proc() -> u64 {
 // animation_graph_view checks an animation graph blob: its header, its layout, that its slices and records are inside
 // it, and that every index between its records is in range.
 animation_graph_view :: proc(data: []byte) -> (blob: ^Animation_Graph_Blob, ok: bool) {
-	blob = blob_open(data, .Animation_Graph, animation_graph_layout(), Animation_Graph_Blob) or_return
+	blob = blob_open(
+		data,
+		.Animation_Graph,
+		animation_graph_layout(),
+		Animation_Graph_Blob,
+	) or_return
 	if !slice_fits(data, blob.root_motion, 1, 1) ||
 	   !slice_fits(data, blob.source_path, 1, 1) ||
 	   !slice_fits(
@@ -203,7 +208,12 @@ animation_graph_view :: proc(data: []byte) -> (blob: ^Animation_Graph_Blob, ok: 
 			   size_of(Animation_Graph_Parameter),
 			   align_of(Animation_Graph_Parameter),
 		   ) ||
-	   !slice_fits(data, blob.clips, size_of(Animation_Graph_Clip), align_of(Animation_Graph_Clip)) ||
+	   !slice_fits(
+			   data,
+			   blob.clips,
+			   size_of(Animation_Graph_Clip),
+			   align_of(Animation_Graph_Clip),
+		   ) ||
 	   !slice_fits(
 			   data,
 			   blob.markers,
@@ -268,7 +278,8 @@ animation_graph_view :: proc(data: []byte) -> (blob: ^Animation_Graph_Blob, ok: 
 		}
 	}
 	for c in clips {
-		if !slice_fits(data, c.name, 1, 1) || !range(c.first_marker, c.marker_count, len(markers)) {
+		if !slice_fits(data, c.name, 1, 1) ||
+		   !range(c.first_marker, c.marker_count, len(markers)) {
 			return nil, false
 		}
 	}

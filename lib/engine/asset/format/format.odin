@@ -488,7 +488,8 @@ slice_fits :: proc "contextless" (data: []byte, s: Slice, size, align: int) -> b
 	return(
 		u64(s.offset) + u64(s.size) <= u64(len(data)) &&
 		int(s.size) % size == 0 &&
-		int(s.offset) % align == 0 	)
+		int(s.offset) % align == 0 \
+	)
 }
 
 // blob_records is a slice of a blob as records of T. The blob's view has checked the slice with slice_fits.

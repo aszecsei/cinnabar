@@ -221,7 +221,12 @@ material_view :: proc(data: []byte) -> (blob: ^Material_Blob, ok: bool) {
 }
 
 material_instance_view :: proc(data: []byte) -> (blob: ^Material_Instance_Blob, ok: bool) {
-	blob = blob_open(data, .Material_Instance, material_instance_layout(), Material_Instance_Blob) or_return
+	blob = blob_open(
+		data,
+		.Material_Instance,
+		material_instance_layout(),
+		Material_Instance_Blob,
+	) or_return
 	if !slice_fits(data, blob.block, 1, 1) ||
 	   !slice_fits(data, blob.textures, size_of(Material_Texture), align_of(Material_Texture)) ||
 	   !slice_fits(data, blob.source_path, 1, 1) {

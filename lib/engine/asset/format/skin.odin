@@ -58,9 +58,7 @@ skin_view :: proc(data: []byte) -> (blob: ^Skin_Blob, ok: bool) {
 		return nil, false
 	}
 	for j, i in skin_joints(data, blob) {
-		if j.parent < -1 ||
-		   int(j.parent) >= i ||
-		   !slice_fits(data, j.name, 1, 1) {
+		if j.parent < -1 || int(j.parent) >= i || !slice_fits(data, j.name, 1, 1) {
 			return nil, false
 		}
 	}
