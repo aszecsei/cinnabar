@@ -164,101 +164,11 @@ sealed class CommandViews(CommandRegistry commands, KeyBindings keyBindings)
         return new PathIcon { Data = geometry, Width = size, Height = size };
     }
 
-    /// <summary>
-    /// Adds a menu's entries to a menu's items (see <see cref="MenuEntry"/>): a command as <see cref="MenuItem"/> makes
-    /// it, a line for a separator, and a menu under a label with its own entries. An entry whose command the registry
-    /// no longer has, as a game's command after a reload, is left out.
-    /// </summary>
-    public void AddEntries(ItemCollection items, IEnumerable<MenuEntry> entries, List<Action> unsubscribe)
-    {
-        foreach (var entry in entries)
-        {
-            switch (entry)
-            {
-                case MenuCommand command when Commands.Find(command.Command) != null:
-                    items.Add(MenuItem(command.Command, unsubscribe));
-                    break;
-                case MenuSeparator:
-                    items.Add(new Separator());
-                    break;
-                case Submenu submenu:
-                    var item = new MenuItem { Header = submenu.Label, Icon = Icon(submenu.Icon, 16) };
-                    AddEntries(item.Items, submenu.Entries, unsubscribe);
-                    items.Add(item);
-                    break;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Fills a menu's items from its entries as the menu opens, with each command's state then: for a menu that a view
-    /// makes many times, which must leave nothing listening to the commands. <paramref name="before"/> runs before a
-    /// command does, as to select what the menu was opened on.
-    /// </summary>
-    public static void Fill(CommandRegistry commands, ItemCollection items, IEnumerable<MenuEntry> entries, Action? before = null)
-    {
-        foreach (var entry in entries)
-        {
-            switch (entry)
-            {
-                case MenuCommand { Command: var id } when commands.Find(id) is { } command:
-                    var item = new MenuItem { Header = command.Label, Icon = Icon(command.Icon, 16), IsEnabled = command.CanExecute };
-                    if (command.IsToggle)
-                    {
-                        item.ToggleType = MenuItemToggleType.CheckBox;
-                        item.IsChecked = command.IsChecked;
-                    }
-                    item.Click += (_, _) =>
-                    {
-                        before?.Invoke();
-                        command.Execute();
-                    };
-                    ToolTip.SetTip(item, command.Description);
-                    items.Add(item);
-                    break;
-                case MenuSeparator:
-                    items.Add(new Separator());
-                    break;
-                case Submenu submenu:
-                    var parent = new MenuItem { Header = submenu.Label, Icon = Icon(submenu.Icon, 16) };
-                    Fill(commands, parent.Items, submenu.Entries, before);
-                    items.Add(parent);
-                    break;
-            }
-        }
-    }
-
     /// <summary>A flyout of a menu's entries, for a button.</summary>
     public MenuFlyout Flyout(IEnumerable<MenuEntry> entries, List<Action> unsubscribe)
     {
         var menu = new MenuFlyout();
-        AddEntries(menu.Items, entries, unsubscribe);
+        MenuBuilder.Build(menu.Items, entries, Commands, KeyBindings, MenuBinding.Subscribed(unsubscribe));
         return menu;
-    }
-
-    /// <summary>A menu item that runs a command, with its icon, shortcut and check mark, and its description as a tooltip.</summary>
-    public MenuItem MenuItem(string id, List<Action> unsubscribe)
-    {
-        var command = Commands.Get(id);
-        var item = new MenuItem
-        {
-            Header = command.Label,
-            Icon = Icon(command.Icon, 16),
-            Command = Adapter(id),
-            InputGesture = Gesture(id),
-        };
-        if (command.Description != null)
-        {
-            ToolTip.SetTip(item, command.Description);
-        }
-        if (command.IsToggle)
-        {
-            item.ToggleType = MenuItemToggleType.CheckBox;
-            void Update() => item.IsChecked = command.IsChecked;
-            Update();
-            command.Changed += Update;
-            unsubscribe.Add(() => command.Changed -= Update);
-        }
-        return item;
     }
 }

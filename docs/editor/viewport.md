@@ -67,7 +67,7 @@ The editor shows the game in two kinds of view, in two documents of the dock lay
   | Three | The two of a row side by side, and the third across the other row |
   | Four | The quad |
 
-- **The presets** are shortcuts that set the toggles and nothing more: Single is Perspective alone, Two Side by Side is Perspective and Top, and Quad is all four. The Layout menu marks the preset that the toggles make, and marks none when they make no preset. The `viewport.layout` command, a choice of the presets for the command palette, then shows Custom, which is not a choice. Nothing but the toggles is kept.
+- **The presets** are shortcuts that set the toggles and nothing more: Single is Perspective alone, Two Side by Side is Perspective and Top, and Quad is all four. The Layout menu marks the preset that the toggles make, and marks none when they make no preset. The `viewport.layout` command, a choice of the presets for the command palette, then shows Custom, which is not one of its options. Nothing but the toggles is kept.
 - **A change of the views** keeps every view that stays on in the document, and moves it to its cell, so its target stays and only its size can change; a view that goes off leaves the document, which closes it in the game, and one that comes on opens when its control has a size.
 - **The views' cameras:** Perspective starts at the origin, looking along +z. Top, Front and Side start when they are first shown, from the Perspective view's camera: the same pivot at the same distance, so all four frame the same spot. Top looks down, a degree short of straight so that its heading means something, with +z up the view. Front looks along -z from +z, with +x to the left. Side looks along -x from +x, with +z to the right. Top, Front and Side are orthographic until the user chooses otherwise, and the first is a perspective camera (see [Projection](#projection)). A view that has moved keeps its place when it hides and shows again.
 - **Visibility drives drawing.** A viewport is open in the game exactly while its `ViewportControl` is attached, visible and has a size. The control shows its session at its size (`ViewportSession.Presence`, `Shown` or `Hidden`, the one state that `Show` and `Hide` change), so a document that is behind another is hidden, as are the views that are off, a closed document and a window with no area. Only the views that are on show, and with the Game in front none of the four. The shell compares the presence with what the game was told (`EditorViewport.Opened`, which `SyncViewport` alone changes) and sends the difference:
@@ -94,16 +94,16 @@ The editor shows the game in two kinds of view, in two documents of the dock lay
 
 ## Toolbar
 
-Each viewport has a toolbar at its top left, with a menu for each part of what is the viewport's own (`ViewportToolbar` in `Cinnabar.Editor.Viewport`). A menu reads its viewport's state when it opens, and changes that viewport and no other. The buttons do not take the focus, so the viewport keeps its keys. The rule that puts these controls in the viewport is in [Users and workflows](workflows.md#where-a-control-lives).
+Each viewport has a toolbar at its top left, with a menu for each part of what is the viewport's own (`ViewportToolbar` in `Cinnabar.Editor.Viewport`). A menu reads its viewport's state when it opens, and changes that viewport and no other. The editor's commands in it, as Projection, 2D View, the exposure's and Frame Selected, are the registry's, with their labels, shortcuts and descriptions: they act in the viewport that was last used, so a menu that has them makes its viewport that one as it opens, and again before one runs. The buttons do not take the focus, so the viewport keeps its keys. The rule that puts these controls in the viewport is in [Users and workflows](workflows.md#where-a-control-lives).
 
 | Menu | Viewports | Contents |
 |---|---|---|
 | View | The scene views | Top, Bottom, Front, Back, Right and Left, which turn the view (see [View gizmo](#view-gizmo)). Perspective, Orthographic and 2D View (see [Projection](#projection)). Look Through: Editor Camera, Cuts and each camera of the cutscene (see [Cutscene editor: Look through](cutscene-editor.md#look-through)). Frame Selected, Frame Scene and Orbit Selection. |
 | Shading | All | Lit, then the debug views in groups. |
-| Show | All | A toggle for each feature that the viewport draws. Icons and Shapes. Exposure, with Brighter, Darker and Reset. Frame Statistics and Shading Stats. |
+| Show | All | A toggle for each feature that the viewport draws. Icons and Shapes. Exposure, with Brighter, Darker and Reset Exposure. Frame Statistics and Shading Stats. |
 | Guides | All | Aspect Mask, Safe Areas, Rule of Thirds and Camera Info, and the mask's Aspect: Camera, 2.39:1, 1.85:1, 16:9, 4:3 or a custom value (see [Cutscene editor: Frame guides](cutscene-editor.md#frame-guides)). |
 | Quality | All | Quality, Anti-Aliasing, Global Illumination, Reflections, Reflections Level and Render Scale (see [Quality](#quality)). Frame Size, which is Fit or 100%. |
-| Layout | The scene views | Single, Two Side by Side and Quad, and a toggle for each of the four views (see [Views](#views)). |
+| Layout | The scene views | Single, Two Side by Side and Quad, the options of `viewport.layout`, and a toggle for each of the four views, the `viewport.view.<number>` commands (see [Views](#views)). |
 
 - **The buttons:** the View button shows the view's name and projection, such as `Top · Ortho` (see [View gizmo](#view-gizmo)). The Shading button shows the view that the viewport draws, such as Lit. The Layout button is an icon.
 - **The Game view** has the game's camera, so its toolbar has no View menu and no Layout menu.

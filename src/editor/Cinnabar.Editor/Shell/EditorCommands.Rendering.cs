@@ -73,8 +73,9 @@ static partial class EditorCommands
             scale => scale == Viewport.ViewportScale.Fit ? "Fit" : "100%",
             description: "Fit the frame to the viewport, or show one frame pixel per screen pixel.",
             icon: "scale"));
-        // A preset is a shortcut for the four toggles: the choice shows the preset that they make, or Custom.
-        commands.Register(new ChoiceCommand(SceneLayout, "Layout", [.. ScenePreset.All.Select(p => p.Name), ScenePreset.Custom],
+        // A preset is a shortcut for the four toggles: the choice shows the preset that they make, or Custom, which is not
+        // an option, since there is nothing to choose in it.
+        commands.Register(new ChoiceCommand(SceneLayout, "Layout", [.. ScenePreset.All.Select(p => p.Name)],
             () => shell.ScenePresetName, name =>
             {
                 if (ScenePreset.Find(name) is { } preset)

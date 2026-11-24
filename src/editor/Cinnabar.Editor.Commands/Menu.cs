@@ -41,8 +41,13 @@ public abstract record MenuEntry
     }
 }
 
-/// <summary>A command, which shows with its label, icon, shortcut and check.</summary>
-public sealed record MenuCommand(string Command) : MenuEntry;
+/// <summary>
+/// A command, which shows with its label, icon, shortcut and check, and a choice command as its options. A menu that acts
+/// on a target, as a row's menu does on its row, names the command with <paramref name="Focus"/>, which makes the target
+/// current before the command runs, and <paramref name="Label"/> in place of the command's own when the menu's context
+/// says it better, as Focus does for Frame Selected.
+/// </summary>
+public sealed record MenuCommand(string Command, Action? Focus = null, string? Label = null) : MenuEntry;
 
 /// <summary>A line between two groups of entries.</summary>
 public sealed record MenuSeparator : MenuEntry;

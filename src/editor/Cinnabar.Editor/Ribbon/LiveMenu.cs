@@ -1,5 +1,4 @@
 using Avalonia.Controls;
-using Avalonia.Input;
 using Cinnabar.Editor.Commands;
 
 namespace Cinnabar.Editor.Ribbon;
@@ -8,9 +7,10 @@ namespace Cinnabar.Editor.Ribbon;
 /// A menu for a button, whose items are made once and whose state is read each time it opens: what is checked, what is
 /// enabled, and the labels that say a value. So a view that docking makes many times leaves nothing listening to the
 /// commands, and the menu still shows the state of the moment. The items must not be added or removed as the menu
-/// opens: a <see cref="MenuFlyout"/> takes its size before that, and would show as a sliver.
+/// opens: a <see cref="MenuFlyout"/> takes its size before that, and would show as a sliver. What is read as the menu
+/// opens is read in the order that it was added, so a menu that acts on a target adds what makes it current first.
 /// </summary>
-sealed class LiveMenu
+sealed class LiveMenu : IMenuBinding
 {
     readonly List<Action> _refresh = [];
 
@@ -80,56 +80,10 @@ sealed class LiveMenu
     /// <summary>What else to read as the menu opens.</summary>
     public void OnOpening(Action refresh) => _refresh.Add(refresh);
 
-    /// <summary>
-    /// A command, with its label, icon, check and shortcut, enabled while it can run. <paramref name="before"/> runs
-    /// before the command does, as to select what the menu was opened on.
-    /// </summary>
-    public MenuItem Command(ItemCollection items, Command command, string? shortcut = null, Action? before = null)
+    /// <summary>A command's item reads its state as the menu opens (see <see cref="MenuBuilder"/>).</summary>
+    void IMenuBinding.Bind(Command command, Action read)
     {
-        var item = Item(items, command.Label, () =>
-        {
-            before?.Invoke();
-            command.Execute();
-        }, command.Description, () => command.CanExecute);
-        item.Icon = CommandViews.Icon(command.Icon, 16);
-        if (command.IsToggle)
-        {
-            item.ToggleType = MenuItemToggleType.CheckBox;
-            _refresh.Add(() => item.IsChecked = command.IsChecked);
-        }
-        if (shortcut != null)
-        {
-            try
-            {
-                item.InputGesture = KeyGesture.Parse(shortcut);
-            }
-            catch (ArgumentException)
-            {
-                // A key binding that is not a gesture has a warning in the console already.
-            }
-        }
-        return item;
-    }
-
-    /// <summary>A menu's entries (see <see cref="MenuEntry"/>): its commands, lines, and menus under labels.</summary>
-    public void Entries(ItemCollection items, CommandRegistry commands, IEnumerable<MenuEntry> entries, Action? before = null)
-    {
-        foreach (var entry in entries)
-        {
-            switch (entry)
-            {
-                case MenuCommand { Command: var id } when commands.Find(id) is { } command:
-                    Command(items, command, before: before);
-                    break;
-                case MenuSeparator:
-                    items.Add(new Separator());
-                    break;
-                case Submenu submenu:
-                    var parent = new MenuItem { Header = submenu.Label, Icon = CommandViews.Icon(submenu.Icon, 16) };
-                    Entries(parent.Items, commands, submenu.Entries, before);
-                    items.Add(parent);
-                    break;
-            }
-        }
+        read();
+        _refresh.Add(read);
     }
 }

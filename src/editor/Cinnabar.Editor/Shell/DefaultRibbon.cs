@@ -133,8 +133,7 @@ static class DefaultRibbon
                     ]),
                     new RibbonGroup("AI",
                     [
-                        new Dropdown("New Decision", "decision",
-                            [EditorCommands.NewDecision, EditorCommands.NewUtilityDecision, EditorCommands.NewGoapDecision, EditorCommands.NewHtnDecision])
+                        new Dropdown("New Decision", "decision", NewDecisionMenu)
                         { Description = "Make a decision asset, which says how an agent thinks, in the content browser's folder." },
                         new SmallStack([EditorCommands.NewBlackboard]),
                     ]),
@@ -207,6 +206,25 @@ static class DefaultRibbon
 
     static IEnumerable<MenuEntry> Kinds(string category) =>
         EntityCatalog.All.Where(t => t.Category == category).Select(t => (MenuEntry)Add(t.Id));
+
+    // The four kinds of decision, one for each technique.
+    static readonly IReadOnlyList<MenuEntry> NewDecisionMenu =
+        [EditorCommands.NewDecision, EditorCommands.NewUtilityDecision, EditorCommands.NewGoapDecision, EditorCommands.NewHtnDecision];
+
+    /// <summary>
+    /// The New menu of the content browser's folders: a command for each kind of asset that the content browser makes,
+    /// with the decisions in a menu of their own, as the ribbon has them, and a folder last.
+    /// </summary>
+    public static IReadOnlyList<MenuEntry> NewAssetMenu() =>
+    [
+        EditorCommands.NewScript, EditorCommands.NewBehaviour, EditorCommands.NewSceneAsset,
+        EditorCommands.NewMaterial, EditorCommands.NewMaterialFunction, EditorCommands.NewMesh,
+        EditorCommands.NewPrefab, EditorCommands.NewEffect,
+        EditorCommands.NewAnimationGraph, EditorCommands.NewUiDocument,
+        EditorCommands.NewSpriteSheet, EditorCommands.NewBlackboard, EditorCommands.NewCutscene,
+        new Submenu("New Decision", "decision", NewDecisionMenu),
+        EditorCommands.NewFolder,
+    ];
 
     /// <summary>
     /// The Add menu, which the ribbon, the outliner and the Scene's tool strip show: the empty entity, then a menu for
