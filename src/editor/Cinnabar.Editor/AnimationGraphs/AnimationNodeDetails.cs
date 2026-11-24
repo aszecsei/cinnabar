@@ -16,14 +16,12 @@ sealed class AnimationNodeDetails : ScrollViewer
     // A subclass takes ScrollViewer's template only by its style key.
     protected override Type StyleKeyOverride => typeof(ScrollViewer);
 
-    readonly EditorShell _shell;
     readonly AnimationGraphEditor _editor;
     readonly StackPanel _content = new() { Margin = new Thickness(8), Spacing = 2 };
     string _shown = "";
 
-    public AnimationNodeDetails(EditorShell shell, AnimationGraphEditor editor)
+    public AnimationNodeDetails(AnimationGraphEditor editor)
     {
-        _shell = shell;
         _editor = editor;
         Content = _content;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
@@ -34,12 +32,6 @@ sealed class AnimationNodeDetails : ScrollViewer
     }
 
     AnimationGraphFile Graph => _editor.Document.Graph;
-
-    void Rebuild()
-    {
-        _shown = "";
-        Refresh();
-    }
 
     // The panel builds again only when what it shows changed, so a box keeps its focus while a drag moves the node.
     void Refresh()
@@ -93,35 +85,14 @@ sealed class AnimationNodeDetails : ScrollViewer
     Control NumberField(AnimationGraphNode node, string key, string watermark)
     {
         var id = node.Id;
-        return ValueBox(node.Get(key) ?? "", watermark, text =>
-        {
-            if (text.Trim() == "")
-            {
-                _editor.SetField(id, key, null);
-            }
-            else if (Numbers(text, 1) is { } n)
-            {
-                _editor.SetField(id, key, n.Write());
-            }
-            else
-            {
-                _shell.Console.Add(Model.LogLevel.Warning, $"animation graph: {key} is a number, such as {watermark}");
-                Rebuild();
-            }
-        });
+        return ValueBox(node.Get(key) ?? "", ValueFormats.Optional(ValueFormats.Numbers(1)), watermark, n => _editor.SetField(id, key, n?.Write()));
     }
 
     void ShowState(AnimationGraphNode state)
     {
         var id = state.Id;
-        _content.Children.Add(Row("Name", ValueBox(state.Get("name") ?? "", "name", text =>
-        {
-            if (!_editor.RenameState(id, text.Trim()))
-            {
-                _shell.Console.Add(Model.LogLevel.Warning, $"animation graph: {text} is not a name for a state, or another state has it");
-                Rebuild();
-            }
-        })));
+        _content.Children.Add(Row("Name", ValueBox(state.Get("name") ?? "", ValueFormats.Text, "name", text => _editor.RenameState(id, text.Trim()),
+            "not a name for a state, or another state has it")));
         // A motion is a clip or a blend, which the menu names as its label does.
         var blends = Graph.Nodes.Where(n => n.Kind == AnimationGraphNodeKind.Blend1D).ToDictionary(n => $"{_editor.Label(n.Id)} (node {n.Id})", n => n.Id);
         var motion = state.Get("motion");
@@ -164,18 +135,7 @@ sealed class AnimationNodeDetails : ScrollViewer
         {
             var line = new Grid { ColumnDefinitions = new ColumnDefinitions("*,60,Auto"), ColumnSpacing = 4, Margin = new Thickness(0, 1) };
             line.Children.Add(Choice(Graph.Clips.Select(c => c.Name), clip, picked => _editor.SetField(id, $"input.{index}", picked)));
-            var value = ValueBox(at ?? "", "at", text =>
-            {
-                if (Numbers(text, 1) is { } n)
-                {
-                    _editor.SetField(id, $"at.{index}", n.Write());
-                }
-                else
-                {
-                    _shell.Console.Add(Model.LogLevel.Warning, "animation graph: an input's at is the parameter's value where it plays alone");
-                    Rebuild();
-                }
-            });
+            var value = ValueBox(at ?? "", ValueFormats.Numbers(1), "at", n => _editor.SetField(id, $"at.{index}", n.Write()));
             ToolTip.SetTip(value, "The parameter's value where this clip plays alone.");
             Grid.SetColumn(value, 1);
             line.Children.Add(value);

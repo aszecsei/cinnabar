@@ -3,7 +3,6 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Cinnabar.Editor.Document;
 
 namespace Cinnabar.Editor.Panels;
 
@@ -15,9 +14,27 @@ static class Kit
 {
     /// <summary>
     /// A box that edits text: Enter or leaving it commits, and Escape puts the text back. With
-    /// <paramref name="multiline"/>, Enter starts a line and Ctrl+Enter commits.
+    /// <paramref name="multiline"/>, Enter starts a line and Ctrl+Enter commits. The setter takes every text.
     /// </summary>
-    public static Control ValueBox(string text, string watermark, Action<string> commit, bool multiline = false)
+    public static Control ValueBox(string text, string watermark, Action<string> commit, bool multiline = false) =>
+        ValueBox(text, ValueFormats.Text, watermark, commit, multiline);
+
+    /// <summary>
+    /// A box that edits a value of a <paramref name="format"/>, which starts as the document's
+    /// <paramref name="text"/>. A text that does not parse puts the value back and shows the problem as the box's tip.
+    /// </summary>
+    public static Control ValueBox<T>(string text, IValueFormat<T> format, string watermark, Action<T> set, bool multiline = false) =>
+        ValueBox(text, format, watermark, value =>
+        {
+            set(value);
+            return true;
+        }, "", multiline);
+
+    /// <summary>
+    /// A box whose setter can refuse a value, as one that would rename a parameter to a name that another has. A
+    /// refusal puts the value back and shows <paramref name="refused"/> as the box's tip.
+    /// </summary>
+    public static Control ValueBox<T>(string text, IValueFormat<T> format, string watermark, Func<T, bool> set, string refused, bool multiline = false)
     {
         var box = new TextBox
         {
@@ -28,42 +45,25 @@ static class Kit
             TextWrapping = multiline ? TextWrapping.Wrap : TextWrapping.NoWrap,
             MinHeight = multiline ? 60 : 20,
         };
-        CommitOnEnterOrBlur(box, commit, multiline);
+        CommitBox.Attach(box, typed =>
+            !format.TryParse(typed, out var value, out var problem) ? Verdict.Refused(problem)
+            : set(value) ? Verdict.Took
+            : Verdict.Refused(refused), multiline);
         return new Border { Classes = { "value-box", "editable" }, Child = box };
     }
 
     /// <summary>
-    /// Makes a box commit its text on Enter, or Ctrl+Enter with <paramref name="multiline"/>, and when it loses the
-    /// focus, and put the text back on Escape. It commits a text once: a box that commits on Enter and then loses the
-    /// focus, as it does when its view builds again without it, does not commit again. So the commit must not compare
-    /// with a value that it captured, which is old by then.
+    /// Makes a box commit its text on Enter and when it loses the focus, and put the text back on Escape, as
+    /// <see cref="CommitBox"/> does. It commits a text once: a box that commits on Enter and then loses the focus, as it
+    /// does when its view builds again without it, does not commit again. So the commit must not compare with a value
+    /// that it captured, which is old by then.
     /// </summary>
-    public static void CommitOnEnterOrBlur(TextBox box, Action<string> commit, bool multiline = false)
-    {
-        var committed = box.Text ?? "";
-        void Commit()
+    public static void CommitOnEnterOrBlur(TextBox box, Action<string> commit) =>
+        CommitBox.Attach(box, text =>
         {
-            if ((box.Text ?? "") != committed)
-            {
-                committed = box.Text ?? "";
-                commit(committed);
-            }
-        }
-        box.KeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Enter && (!multiline || e.KeyModifiers == KeyModifiers.Control))
-            {
-                Commit();
-                e.Handled = true;
-            }
-            else if (e.Key == Key.Escape)
-            {
-                box.Text = committed;
-                e.Handled = true;
-            }
-        };
-        box.LostFocus += (_, _) => Commit();
-    }
+            commit(text);
+            return Verdict.Took;
+        });
 
     public static ComboBox Choice(IEnumerable<string> options, string? selected, Action<string> pick)
     {
@@ -157,10 +157,6 @@ static class Kit
         return grid;
     }
 
-    /// <summary>Numbers as a value box takes them, with a count that they must have, or any count up to four for 0.</summary>
-    public static GraphNumbers? Numbers(string text, int count = 0) =>
-        GraphNumbers.TryParse(text) is { } n && (count == 0 || n.Values.Count == count) ? n : null;
-
     /// <summary>The color of a linear color's first three numbers, as the screen shows it.</summary>
     public static Color SrgbColor(IReadOnlyList<double> linear)
     {
@@ -175,6 +171,17 @@ static class Kit
         BorderBrush = new SolidColorBrush(Palette.SwatchBorder),
         BorderThickness = new Thickness(1),
     };
+
+    /// <summary>A swatch, and the box that edits its color beside it.</summary>
+    public static DockPanel WithSwatch(Control swatch, Control box)
+    {
+        var line = new DockPanel();
+        swatch.Margin = new Thickness(0, 0, 6, 0);
+        DockPanel.SetDock(swatch, Avalonia.Controls.Dock.Left);
+        line.Children.Add(swatch);
+        line.Children.Add(box);
+        return line;
+    }
 
     /// <summary>A swatch of a linear color, as the screen shows it.</summary>
     public static Border Swatch(IReadOnlyList<double> rgba)

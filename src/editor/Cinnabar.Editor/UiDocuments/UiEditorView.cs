@@ -40,20 +40,8 @@ public sealed class UiEditorView : DockPanel
 
         var screens = UiEditor.Screens.Select(s => s.Label).Append(Custom).ToList();
         var current = UiEditor.Screens.FirstOrDefault(s => (s.Width, s.Height) == editor.Screen).Label ?? Custom;
-        var width = ValueBox(editor.Screen.Width.ToString(CultureInfo.InvariantCulture), "width", text =>
-        {
-            if (int.TryParse(text, out var w))
-            {
-                editor.SetScreen(w, editor.Screen.Height);
-            }
-        });
-        var height = ValueBox(editor.Screen.Height.ToString(CultureInfo.InvariantCulture), "height", text =>
-        {
-            if (int.TryParse(text, out var h))
-            {
-                editor.SetScreen(editor.Screen.Width, h);
-            }
-        });
+        var width = WidthBox(editor);
+        var height = HeightBox(editor);
         width.Width = height.Width = 56;
         width.IsVisible = height.IsVisible = current == Custom;
         var screen = Choice(screens, current, pick =>
@@ -71,13 +59,7 @@ public sealed class UiEditorView : DockPanel
         toolbar.Children.Add(width);
         toolbar.Children.Add(height);
 
-        var scale = ValueBox(editor.ScaleFactor.ToString(CultureInfo.InvariantCulture), "ui.scale", text =>
-        {
-            if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var factor))
-            {
-                editor.SetScaleFactor(factor);
-            }
-        });
+        var scale = ScaleBox(editor);
         scale.Width = 48;
         ToolTip.SetTip(scale, "What multiplies the screen's UI scale, as the project's ui.scale does: from 0.25 to 4");
         toolbar.Children.Add(Label("scale"));
@@ -145,6 +127,21 @@ public sealed class UiEditorView : DockPanel
             Grid.SetColumn(split, at);
         }
         grid.Children.Add(split);
+    }
+
+    static readonly IValueFormat<int> ScreenSize = ValueFormats.Integer(UiEditor.MinScreen, UiEditor.MaxScreen);
+
+    // The custom screen's width and height, and the scale factor: each refuses a value that the editor would clamp.
+    internal static Control WidthBox(UiEditor editor) =>
+        ValueBox(ScreenSize.Format(editor.Screen.Width), ScreenSize, "width", w => editor.SetScreen(w, editor.Screen.Height));
+
+    internal static Control HeightBox(UiEditor editor) =>
+        ValueBox(ScreenSize.Format(editor.Screen.Height), ScreenSize, "height", h => editor.SetScreen(editor.Screen.Width, h));
+
+    internal static Control ScaleBox(UiEditor editor)
+    {
+        var format = ValueFormats.Number(UiEditor.MinScaleFactor, UiEditor.MaxScaleFactor);
+        return ValueBox(format.Format(editor.ScaleFactor), format, "ui.scale", editor.SetScaleFactor);
     }
 
     void Show()

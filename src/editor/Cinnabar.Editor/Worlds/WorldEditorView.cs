@@ -63,12 +63,6 @@ public sealed class WorldEditorView : DockPanel
             .Add(() => _shell.ModeChanged += Refresh, () => _shell.ModeChanged -= Refresh);
     }
 
-    void Rebuild()
-    {
-        _shown = "";
-        Refresh();
-    }
-
     void Refresh()
     {
         var state = _editor.Checks.State;
@@ -139,12 +133,12 @@ public sealed class WorldEditorView : DockPanel
         if (!persistent)
         {
             var (min, max) = (scene.Min, scene.Max);
-            Put(ValueBox(min == null ? "" : WorldFile.Format(min), "[0, 0, 0]", t => Commit(ParseVector(t) is { } v ? () => _editor.SetBounds(guid, v, max ?? v) : null)), 2);
-            Put(ValueBox(max == null ? "" : WorldFile.Format(max), "[0, 0, 0]", t => Commit(ParseVector(t) is { } v ? () => _editor.SetBounds(guid, min ?? v, v) : null)), 3);
+            Put(ValueBox(min == null ? "" : WorldFile.Format(min), Vector, "[0, 0, 0]", v => _editor.SetBounds(guid, v, max ?? v)), 2);
+            Put(ValueBox(max == null ? "" : WorldFile.Format(max), Vector, "[0, 0, 0]", v => _editor.SetBounds(guid, min ?? v, v)), 3);
             var (load, unload) = (scene.LoadDistance, scene.UnloadDistance);
-            Put(ValueBox(load is { } l ? WorldFile.Format(l) : "", "25", t => Commit(ParseNumber(t) is { } v ? () => _editor.SetDistances(guid, v, unload) : null)), 4);
-            Put(ValueBox(unload is { } u ? WorldFile.Format(u) : "", "auto", t =>
-                Commit(t.Trim() == "" ? () => _editor.SetDistances(guid, load ?? 25, null) : ParseNumber(t) is { } v ? () => _editor.SetDistances(guid, load ?? 25, v) : null)), 5);
+            Put(ValueBox(load is { } l ? WorldFile.Format(l) : "", ValueFormats.Number(), "25", v => _editor.SetDistances(guid, v, unload)), 4);
+            // Empty is the default, which follows the load distance.
+            Put(ValueBox(unload is { } u ? WorldFile.Format(u) : "", ValueFormats.OptionalNumber(), "auto", v => _editor.SetDistances(guid, load ?? 25, v)), 5);
         }
         var play = new TextBlock { Text = _editor.PlayState(scene), VerticalAlignment = VerticalAlignment.Center };
         Put(play, 6);
@@ -157,16 +151,8 @@ public sealed class WorldEditorView : DockPanel
         return column;
     }
 
-    // Runs an edit, or shows the cells again as they were when the text was not a number.
-    void Commit(Action? edit)
-    {
-        if (edit == null)
-        {
-            Rebuild();
-            return;
-        }
-        edit();
-    }
+    // A bound: three numbers, with or without the brackets.
+    static readonly IValueFormat<double[]> Vector = ValueFormats.Of(ParseVector, WorldFile.Format, "three numbers, such as [0, 0, 0]");
 
     static double? ParseNumber(string text) =>
         double.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && double.IsFinite(number) ? number : null;

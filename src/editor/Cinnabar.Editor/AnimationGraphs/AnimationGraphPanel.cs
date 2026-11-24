@@ -130,23 +130,13 @@ sealed class AnimationGraphPanel : ScrollViewer
         FontSize = 12,
     };
 
-    void Refuse(string name)
-    {
-        _shell.Console.Add(Model.LogLevel.Warning, $"animation graph: {name} is not a name, or another has it");
-        Rebuild();
-    }
+    const string NotAName = "not a name, or another has it";
 
     Control ParamView(AnimationGraphParam p)
     {
         var (name, type, value) = (p.Name, p.Type, p.Default);
         var panel = new StackPanel { Spacing = 2 };
-        var box = ValueBox(name, "name", text =>
-        {
-            if (!_editor.SetParam(name, text.Trim(), type, value))
-            {
-                Refuse(text);
-            }
-        });
+        var box = ValueBox(name, ValueFormats.Text, "name", text => _editor.SetParam(name, text.Trim(), type, value), NotAName);
         var types = Types.Contains(type) ? Types : [.. Types, type];
         var choice = Choice(types, type, t => _editor.SetParam(name, name, t, t == "trigger" ? null : t == "bool" ? "false" : "0"));
         choice.Width = 80;
@@ -167,22 +157,8 @@ sealed class AnimationGraphPanel : ScrollViewer
         }
         else if (type == "float")
         {
-            panel.Children.Add(Row("Default", ValueBox(value ?? "", "0", text =>
-            {
-                if (text.Trim() == "")
-                {
-                    _editor.SetParam(name, name, type, null);
-                }
-                else if (Numbers(text, 1) is { } n)
-                {
-                    _editor.SetParam(name, name, type, n.Write());
-                }
-                else
-                {
-                    _shell.Console.Add(Model.LogLevel.Warning, $"animation graph: {name}'s default is a number");
-                    Rebuild();
-                }
-            })));
+            panel.Children.Add(Row("Default", ValueBox(value ?? "", ValueFormats.Optional(ValueFormats.Numbers(1)), "0", n =>
+                _editor.SetParam(name, name, type, n?.Write()))));
         }
         foreach (var problem in _editor.Problems.Where(q => q.Node == null && Graph.BlockAt(q.Line) == p))
         {
@@ -199,13 +175,7 @@ sealed class AnimationGraphPanel : ScrollViewer
     {
         var (name, guid) = (c.Name, c.Guid);
         var panel = new StackPanel { Spacing = 2 };
-        var box = ValueBox(name, "name", text =>
-        {
-            if (!_editor.SetClip(name, text.Trim(), guid))
-            {
-                Refuse(text);
-            }
-        });
+        var box = ValueBox(name, ValueFormats.Text, "name", text => _editor.SetClip(name, text.Trim(), guid), NotAName);
         var top = new DockPanel();
         var remove = SmallButton("×", "Remove it", () => _editor.RemoveClip(name));
         DockPanel.SetDock(remove, DockSide.Right);

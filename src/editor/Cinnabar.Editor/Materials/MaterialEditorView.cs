@@ -128,13 +128,8 @@ public sealed class MaterialEditorView : DockPanel
         _settings.Children.Add(Labeled("Blend", Choice(MaterialGraph.Blends, graph.Blend, b => _editor.SetSettings("Set Blend", g => g.Blend = b)), 100));
         if (graph.Blend == "masked")
         {
-            _settings.Children.Add(Labeled("Cutoff", ValueBox(GraphNumbers.Format(graph.Cutoff), "0.5", text =>
-            {
-                if (double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cutoff))
-                {
-                    _editor.SetSettings("Set Cutoff", g => g.Cutoff = cutoff);
-                }
-            }), 60));
+            _settings.Children.Add(Labeled("Cutoff", ValueBox(GraphNumbers.Format(graph.Cutoff), ValueFormats.Number(), "0.5", cutoff =>
+                _editor.SetSettings("Set Cutoff", g => g.Cutoff = cutoff)), 60));
         }
         if (graph.Blend == "transparent")
         {

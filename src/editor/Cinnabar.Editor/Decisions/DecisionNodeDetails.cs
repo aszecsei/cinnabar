@@ -172,29 +172,11 @@ sealed class DecisionNodeDetails : ScrollViewer
             MinimumPrefixLength = 1,
             Classes = { "value-edit" },
         };
-        var committed = text;
-        void Commit()
+        CommitBox.Attach(box, typed =>
         {
-            if (box.Text != committed)
-            {
-                committed = box.Text ?? "";
-                commit(committed);
-            }
-        }
-        box.KeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Enter && !box.IsDropDownOpen)
-            {
-                Commit();
-                e.Handled = true;
-            }
-            else if (e.Key == Key.Escape && !box.IsDropDownOpen)
-            {
-                box.Text = committed;
-                e.Handled = true;
-            }
-        };
-        box.LostFocus += (_, _) => Commit();
+            commit(typed);
+            return Verdict.Took;
+        });
         return new Border { Classes = { "value-box", "editable" }, Child = box };
     }
 
