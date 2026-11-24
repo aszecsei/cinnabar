@@ -229,15 +229,13 @@ public sealed class CookSession : ChildLinkSession<CookLink>, IPreviewCooker
         }
     }
 
-    protected override bool StartsAgain(TimeSpan uptime)
+    protected override void OnExitedByItself(TimeSpan uptime)
     {
-        if (uptime < RestartAfter)
+        if (uptime >= RestartAfter)
         {
-            return false;
+            Say("editor: starting the cook daemon again");
+            Start();
         }
-        Say("editor: starting the cook daemon again");
-        Start();
-        return true;
     }
 
     // The link's requests and cooks end with it.

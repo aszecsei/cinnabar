@@ -206,8 +206,10 @@ public abstract class ChildLinkSession<TLink> : IDisposable where TLink : IChild
     /// <summary><see cref="State"/> changed from <paramref name="previous"/>. Raised once for each change.</summary>
     protected abstract void OnStateChanged(LinkState<TLink> previous);
 
-    /// <summary>The running child exited by itself. Starts it again and says so, or says no to end in Exited.</summary>
-    protected virtual bool StartsAgain(TimeSpan uptime) => false;
+    /// <summary>The running child exited by itself after <paramref name="uptime"/>. It may start the child again; if it does not, the session ends in Exited.</summary>
+    protected virtual void OnExitedByItself(TimeSpan uptime)
+    {
+    }
 
     public void Stop()
     {
@@ -377,7 +379,9 @@ public abstract class ChildLinkSession<TLink> : IDisposable where TLink : IChild
             return;
         }
         Say($"editor: the {TLink.Child} exited with code {code}");
-        if (StartsAgain(run.Uptime.Elapsed))
+        OnExitedByItself(run.Uptime.Elapsed);
+        // A new run has replaced this one.
+        if (State.Run != run)
         {
             return;
         }
