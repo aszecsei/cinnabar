@@ -1,10 +1,10 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
+using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Ribbon;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Tools;
-using CameraProjection = Cinnabar.Editor.Link.Protocol.CameraProjection;
 using DebugView = Cinnabar.Editor.Link.Protocol.DebugView;
 
 namespace Cinnabar.Editor.Viewport;
@@ -92,14 +92,24 @@ public sealed class ViewportToolbar : StackPanel
         return button;
     }
 
-    // A command of the editor's, with its own label and state: what is not one viewport's, but belongs with the menu. It
-    // acts in this viewport.
-    void Command(LiveMenu menu, string id) =>
-        menu.Command(menu.Items, _shell.Commands.Get(id), _shell.KeyBindings.ShortcutOf(id), () => _shell.ActivateViewport(_viewport));
+    // A menu whose commands act in this viewport: the editor's commands act in the viewport that was last used, so the
+    // menu makes this one that viewport as it opens, before its commands read their state, and again before one runs.
+    LiveMenu ViewportMenu()
+    {
+        var menu = new LiveMenu();
+        menu.OnOpening(Activate);
+        return menu;
+    }
+
+    void Activate() => _shell.ActivateViewport(_viewport);
+
+    // Commands of the editor's, with their own labels and state, which act in this viewport.
+    void Commands(LiveMenu menu, ItemCollection items, params MenuEntry[] entries) =>
+        MenuBuilder.Build(items, entries, _shell.Commands, _shell.KeyBindings, menu, Activate);
 
     LiveMenu ViewMenu()
     {
-        var menu = new LiveMenu();
+        var menu = ViewportMenu();
         foreach (var axis in Enum.GetValues<ViewAxis>())
         {
             menu.Radio(menu.Items, axis.ToString(), () => ViewGizmo.Aligned(_viewport.Camera) == axis, () =>
@@ -108,28 +118,9 @@ public sealed class ViewportToolbar : StackPanel
                 _shell.LookAlong(_viewport, axis);
             });
         }
-        menu.Items.Add(new Separator());
-        foreach (var projection in Enum.GetValues<CameraProjection>())
-        {
-            menu.Radio(menu.Items, projection.ToString(), () => _viewport.Camera.Projection == projection, () =>
-            {
-                _shell.ActivateViewport(_viewport);
-                _shell.SetProjection(_viewport, projection);
-            }, projection == CameraProjection.Orthographic
-                ? "Draw the view without perspective, as a plan or an elevation is drawn. Orbiting it makes it a perspective view."
-                : "Draw the view with perspective.");
-        }
-        menu.Item(menu.Items, "2D View", () =>
-        {
-            _shell.ActivateViewport(_viewport);
-            _shell.Show2D(_viewport);
-        }, "Look at the scene as a 2D game's camera does: without perspective, along +z, with +x to the right and +y up.");
-        menu.Items.Add(new Separator());
+        Commands(menu, menu.Items, new MenuSeparator(), EditorCommands.ViewProjection, EditorCommands.View2D, new MenuSeparator());
         LookThroughMenu(menu);
-        menu.Items.Add(new Separator());
-        Command(menu, EditorCommands.FrameSelected);
-        Command(menu, EditorCommands.FrameScene);
-        Command(menu, EditorCommands.OrbitSelection);
+        Commands(menu, menu.Items, new MenuSeparator(), EditorCommands.FrameSelected, EditorCommands.FrameScene, EditorCommands.OrbitSelection);
         return menu;
     }
 
@@ -213,7 +204,7 @@ public sealed class ViewportToolbar : StackPanel
 
     LiveMenu ShowMenu()
     {
-        var menu = new LiveMenu();
+        var menu = ViewportMenu();
         void Toggle(ViewportToggle toggle) =>
             menu.Check(menu.Items, toggle.Label, () => toggle.IsOn(Settings), () => Settings = toggle.Set(Settings, !toggle.IsOn(Settings)), toggle.Description);
         foreach (var feature in ViewportOptions.Features)
@@ -225,9 +216,7 @@ public sealed class ViewportToolbar : StackPanel
         Choice(menu, ViewportOptions.Shapes);
         menu.Items.Add(new Separator());
         var exposure = menu.Submenu(menu.Items, () => Settings.ExposureOffset == 0 ? "Exposure" : $"Exposure ({Settings.ExposureOffset:+0.#;-0.#} stops)");
-        menu.Item(exposure.Items, "Brighter", () => Settings = Settings with { ExposureOffset = Settings.ExposureOffset + EditorShell.ExposureStep }, "Add half a stop to this viewport's exposure.");
-        menu.Item(exposure.Items, "Darker", () => Settings = Settings with { ExposureOffset = Settings.ExposureOffset - EditorShell.ExposureStep }, "Take half a stop from this viewport's exposure.");
-        menu.Item(exposure.Items, "Reset", () => Settings = Settings with { ExposureOffset = 0 }, "Show the exposure that the volumes give, with no offset.", () => Settings.ExposureOffset != 0);
+        Commands(menu, exposure.Items, EditorCommands.ExposureUp, EditorCommands.ExposureDown, EditorCommands.ExposureReset);
         menu.Items.Add(new Separator());
         menu.Check(menu.Items, "Frame Statistics", () => _viewport.Session.ShowStats, () =>
         {
@@ -303,18 +292,11 @@ public sealed class ViewportToolbar : StackPanel
 
     LiveMenu LayoutMenu()
     {
+        // The Scene's views are not one viewport's, so these commands need no viewport of their own.
         var menu = new LiveMenu();
-        foreach (var preset in ScenePreset.All)
-        {
-            menu.Radio(menu.Items, preset.Name, () => _shell.SceneViews == preset.Views, () => _shell.SetSceneViews(preset.Views));
-        }
-        menu.Items.Add(new Separator());
-        for (var i = 0; i < EditorViewport.SceneViews; i++)
-        {
-            var index = i;
-            menu.Check(menu.Items, _shell.Viewports[index].Title, () => _shell.SceneViews.HasFlag((SceneViewSet)(1 << index)), () => _shell.ToggleSceneView(index),
-                "Show or hide this view in the Scene. One view always stays.", () => _shell.CanToggleSceneView(index));
-        }
+        MenuBuilder.Build(menu.Items,
+            [EditorCommands.SceneLayout, new MenuSeparator(), .. Enumerable.Range(0, EditorViewport.SceneViews).Select(i => (MenuEntry)EditorCommands.SceneViewToggle(i))],
+            _shell.Commands, _shell.KeyBindings, menu);
         return menu;
     }
 }

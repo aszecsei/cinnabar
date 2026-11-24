@@ -371,7 +371,7 @@ public sealed class ViewportTests : IDisposable
     {
         using var shell = NewShell(show: false);
         var command = (ChoiceCommand)shell.Commands.Get(EditorCommands.SceneLayout);
-        Assert.Equal(["Single", "Two Side by Side", "Quad", "Custom"], command.Options);
+        Assert.Equal(["Single", "Two Side by Side", "Quad"], command.Options);
         Assert.Equal("Single", command.Selected);
 
         command.Select("Quad");
@@ -386,7 +386,7 @@ public sealed class ViewportTests : IDisposable
         Assert.Equal(P, shell.SceneViews);
         // Custom is not a preset to choose.
         shell.ToggleSceneView(1);
-        command.Select("Custom");
+        Assert.Throws<ArgumentException>(() => command.Select("Custom"));
         Assert.Equal(P | T, shell.SceneViews);
     }
 

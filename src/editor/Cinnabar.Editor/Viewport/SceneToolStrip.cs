@@ -157,7 +157,7 @@ public sealed class SceneToolStrip : Border
         // The Add menu, which reads as it opens whether the scene can take each kind.
         var addMenu = new LiveMenu();
         addMenu.Flyout.Placement = PlacementMode.RightEdgeAlignedBottom;
-        addMenu.Entries(addMenu.Items, shell.Commands, DefaultRibbon.AddMenu());
+        MenuBuilder.Build(addMenu.Items, DefaultRibbon.AddMenu(), shell.Commands, shell.KeyBindings, addMenu);
         var add = new Button { Content = CommandViews.Icon("add", 16), Classes = { "tool-strip-button" }, Focusable = false, Flyout = addMenu.Flyout };
         ToolTip.SetTip(add, "Add\nAdd an entity of a common kind, ready to use: a light, a camera, a volume, a sound.");
 

@@ -15,7 +15,6 @@ using Cinnabar.Editor.Shell;
 using CommunityToolkit.Mvvm.Input;
 using Asset = Cinnabar.Editor.Link.Cook.Asset;
 using AssetKind = Cinnabar.Editor.Link.Cook.AssetKind;
-using AssetTemplate = Cinnabar.Editor.Link.Cook.AssetTemplate;
 using DockSide = Avalonia.Controls.Dock;
 
 namespace Cinnabar.Editor.Panels;
@@ -527,8 +526,8 @@ public sealed class ContentBrowserView : DockPanel, ICommandScope
         return view;
     }
 
-    // The menu of a folder, or of the assets' empty space for the open folder: new assets, and for a folder that is not
-    // a root, rename and delete.
+    // The menu of a folder, or of the assets' empty space for the open folder: the New commands, and for a folder that is
+    // not a root, rename and delete.
     ContextMenu FolderMenu(FolderRow? row)
     {
         var menu = new ContextMenu();
@@ -543,47 +542,7 @@ public sealed class ContentBrowserView : DockPanel, ICommandScope
         menu.Opening += (_, _) =>
         {
             menu.Items.Clear();
-            var linked = _shell.Content.CanChangeContent && (row != null || _model.Folder != null);
-            foreach (var (label, template) in new (string, AssetTemplate?)[]
-                {
-                    ("New Script", AssetTemplate.Script), ("New Behaviour", AssetTemplate.Behaviour), ("New Scene", AssetTemplate.Scene),
-                    ("New Material", AssetTemplate.Material), ("New Material Function", AssetTemplate.MaterialFunction), ("New Mesh", AssetTemplate.Mesh),
-                    ("New Prefab", AssetTemplate.Prefab), ("New Effect", AssetTemplate.Effect),
-                    ("New Animation Graph", AssetTemplate.AnimationGraph), ("New UI Document", AssetTemplate.Ui),
-                    ("New Sprite Sheet", AssetTemplate.SpriteSheet), ("New Blackboard", AssetTemplate.Blackboard), ("New Cutscene", AssetTemplate.Cutscene),
-                    ("New Folder", null),
-                })
-            {
-                menu.Items.Add(new MenuItem
-                {
-                    Header = label,
-                    IsEnabled = linked,
-                    Command = new RelayCommand(() =>
-                    {
-                        Open();
-                        _shell.Content.RequestNewAsset(template);
-                    }),
-                });
-            }
-            // A decision is of one technique, which its submenu picks.
-            var decision = new MenuItem { Header = "New Decision", IsEnabled = linked };
-            foreach (var (label, template) in new (string, AssetTemplate)[]
-                {
-                    ("Behavior Tree", AssetTemplate.DecisionBehaviorTree), ("Utility", AssetTemplate.DecisionUtility),
-                    ("GOAP", AssetTemplate.DecisionGoap), ("HTN", AssetTemplate.DecisionHtn),
-                })
-            {
-                decision.Items.Add(new MenuItem
-                {
-                    Header = label,
-                    Command = new RelayCommand(() =>
-                    {
-                        Open();
-                        _shell.Content.RequestNewAsset(template);
-                    }),
-                });
-            }
-            menu.Items.Insert(menu.Items.Count - 1, decision);
+            MenuBuilder.Build(menu.Items, DefaultRibbon.NewAssetMenu(), _shell.Commands, _shell.KeyBindings, MenuBinding.Snapshot, Open);
             if (row == null)
             {
                 return;

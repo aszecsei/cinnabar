@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.Input;
+using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Ribbon;
@@ -57,7 +58,7 @@ public sealed class OutlinerView : DockPanel
         _selection = shell.Selection;
         // The Add menu (see docs/editor/shell-and-panels.md#add), which reads each kind's state as it opens.
         var addMenu = new LiveMenu();
-        addMenu.Entries(addMenu.Items, _shell.Commands, DefaultRibbon.AddMenu());
+        MenuBuilder.Build(addMenu.Items, DefaultRibbon.AddMenu(), _shell.Commands, _shell.KeyBindings, addMenu);
         var add = new Button { Content = CommandViews.Icon("add", 14), Classes = { "outliner-add" }, Flyout = addMenu.Flyout, VerticalAlignment = VerticalAlignment.Center };
         ToolTip.SetTip(add, "Add\nAdd an entity of a common kind, ready to use: a light, a camera, a volume, a sound.");
         Avalonia.Automation.AutomationProperties.SetName(add, "Add");
@@ -674,6 +675,12 @@ public sealed class OutlinerView : DockPanel
             // then act on the entities, not on a graph or a timeline that had the keyboard (see
             // docs/editor/shell-and-panels.md#commands).
             _list.Focus();
+            // A row's menu acts on the selection when the row is in it, and on the row alone otherwise, so a row that
+            // is not selected becomes the selection as its menu opens, and the items show what they can do to it.
+            if (!_selection.Contains(row.Node.Handle))
+            {
+                _selection.Select(row.Node.Handle);
+            }
             menu.Items.Clear();
             FillRowMenu(menu, row);
         };
@@ -684,44 +691,26 @@ public sealed class OutlinerView : DockPanel
 
     void FillRowMenu(ContextMenu menu, OutlinerRow row)
     {
-        // A row's menu acts on the selection when the row is in it, and on the row alone otherwise.
-        void SelectRow()
-        {
-            if (!_selection.Contains(row.Node.Handle))
-            {
-                _selection.Select(row.Node.Handle);
-            }
-        }
-        MenuItem Item(string header, string command) => new()
-        {
-            Header = header,
-            IsEnabled = _shell.Commands.Get(command).CanExecute || !_selection.Contains(row.Node.Handle),
-            Command = new RelayCommand(() =>
-            {
-                SelectRow();
-                _shell.Commands.Get(command).Execute();
-            }),
-        };
-        menu.Items.Add(Item("Focus", EditorCommands.FrameSelected));
-        menu.Items.Add(new Separator());
-        menu.Items.Add(Item("Duplicate", EditorCommands.DuplicateEntity));
-        menu.Items.Add(Item("Delete", EditorCommands.DeleteEntity));
-        menu.Items.Add(new Separator());
+        void Commands(params MenuEntry[] entries) =>
+            MenuBuilder.Build(menu.Items, entries, _shell.Commands, _shell.KeyBindings, MenuBinding.Snapshot);
+        Commands(
+            new MenuCommand(EditorCommands.FrameSelected, Label: "Focus"),
+            new MenuSeparator(),
+            EditorCommands.DuplicateEntity,
+            EditorCommands.DeleteEntity,
+            new MenuSeparator());
         // The kinds of the Add menu, each of which goes where this row's entity is: the row alone is selected first,
         // since a new entity goes where the primary entity of the selection is.
         var add = new MenuItem { Header = "Add Here", Icon = CommandViews.Icon("add", 14) };
-        CommandViews.Fill(_shell.Commands, add.Items, DefaultRibbon.AddMenu(), () => _selection.Select(row.Node.Handle));
+        MenuBuilder.Build(add.Items, DefaultRibbon.AddMenu(), _shell.Commands, _shell.KeyBindings, MenuBinding.Snapshot,
+            () => _selection.Select(row.Node.Handle));
         menu.Items.Add(add);
         if (row.Node.Parent != 0)
         {
             menu.Items.Add(new MenuItem
             {
                 Header = "Move to Root",
-                Command = new RelayCommand(() =>
-                {
-                    SelectRow();
-                    _shell.Reparent(row.Node.SceneId, 0);
-                }),
+                Command = new RelayCommand(() => _shell.Reparent(row.Node.SceneId, 0)),
             });
         }
         // The sublevels that the selection can go to, with the row's own checked (see docs/editor/shell-and-panels.md#sublevels).
@@ -734,35 +723,34 @@ public sealed class OutlinerView : DockPanel
                 Header = name == "" ? "Base" : name,
                 ToggleType = MenuItemToggleType.Radio,
                 IsChecked = name == current,
-                Command = new RelayCommand(() =>
-                {
-                    SelectRow();
-                    _shell.AssignSublevel(name);
-                }),
+                Command = new RelayCommand(() => _shell.AssignSublevel(name)),
             });
         }
         menu.Items.Add(sublevels);
         menu.Items.Add(new Separator());
         if (_shell.InstanceOf(row.Node) is { } instance)
         {
-            menu.Items.Add(Item("Open Prefab", EditorCommands.OpenPrefab));
-            menu.Items.Add(Item("Select Prefab Asset", EditorCommands.SelectPrefabAsset));
-            menu.Items.Add(Item("Apply All", EditorCommands.ApplyAllPrefab));
-            menu.Items.Add(Item("Revert All", EditorCommands.RevertAllPrefab));
+            Commands(
+                EditorCommands.OpenPrefab,
+                EditorCommands.SelectPrefabAsset,
+                EditorCommands.ApplyAllPrefab,
+                EditorCommands.RevertAllPrefab);
             if (instance.IsInstanceRoot)
             {
-                menu.Items.Add(Item("Make Variant", EditorCommands.MakeVariant));
-                menu.Items.Add(Item("Unpack", EditorCommands.UnpackPrefab));
-                menu.Items.Add(Item("Unpack Completely", EditorCommands.UnpackPrefabCompletely));
+                Commands(
+                    EditorCommands.MakeVariant,
+                    EditorCommands.UnpackPrefab,
+                    EditorCommands.UnpackPrefabCompletely);
             }
         }
         else
         {
-            menu.Items.Add(Item("Make Prefab", EditorCommands.MakePrefab));
+            Commands(EditorCommands.MakePrefab);
         }
-        menu.Items.Add(new Separator());
-        menu.Items.Add(Item("Hide or Show", EditorCommands.HideSelected));
-        menu.Items.Add(Item("Lock or Unlock", EditorCommands.LockSelected));
+        Commands(
+            new MenuSeparator(),
+            new MenuCommand(EditorCommands.HideSelected, Label: "Hide or Show"),
+            new MenuCommand(EditorCommands.LockSelected, Label: "Lock or Unlock"));
     }
 
     // A scene's heading, with several scenes open: its file's name, a dot while it is dirty, and the active scene in
@@ -804,15 +792,9 @@ public sealed class OutlinerView : DockPanel
             IsEnabled = _shell.OpenEdit == null,
             Command = new RelayCommand(() => _shell.SaveScene(scene)),
         });
-        menu.Items.Add(new MenuItem
-        {
-            Header = "Close Scene",
-            Command = new RelayCommand(() =>
-            {
-                _shell.ActivateScene(scene);
-                _shell.Commands.Get(EditorCommands.CloseScene).Execute();
-            }),
-        });
+        // Save is this scene's, not the Save command's, which the active editor's tab takes first.
+        MenuBuilder.Build(menu.Items, [new MenuCommand(EditorCommands.CloseScene, () => _shell.ActivateScene(scene))],
+            _shell.Commands, _shell.KeyBindings, MenuBinding.Snapshot);
         view.ContextMenu = menu;
         return view;
     }
