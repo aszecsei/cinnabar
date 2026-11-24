@@ -469,7 +469,7 @@ public sealed class ShellTests : IDisposable
         // host.exe is not there, so the start fails at once, but it is attempted.
         shell.Host.Start(adapter: 1);
 
-        Assert.Contains("host.exe", Assert.IsType<Host.HostState.FailedToStart>(shell.Host.State).Reason);
+        Assert.Contains("host.exe", Assert.IsType<HostState.FailedToStart>(shell.Host.State).Reason);
         Assert.Contains(shell.Console.Lines, l => l.Text.Contains("cannot start"));
         Assert.True(shell.Commands.Get(EditorCommands.RestartHost).CanExecute);
     }
