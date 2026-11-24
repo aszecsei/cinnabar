@@ -178,6 +178,22 @@ public sealed class UiEditorTests : IDisposable
     }
 
     [Fact]
+    public void CancelInTheCanvasSelectsNothing()
+    {
+        var (shell, asset, _) = Menu();
+        using var __ = shell;
+        var editor = shell.OpenUiDocument(asset)!;
+        var cancel = new Cinnabar.Editor.UiDocuments.UiElementScope(editor).Handler(EditorCommands.Cancel)!;
+        editor.Select(editor.File.NodeById("resume")!.Index);
+
+        // Esc in the canvas is Cancel, which selects nothing, and with nothing selected cannot run.
+        Assert.True(cancel.CanExecute);
+        cancel.Run();
+        Assert.Null(editor.SelectedNode);
+        Assert.False(cancel.CanExecute);
+    }
+
+    [Fact]
     public void AStateThatTheCanvasShowsPicksItsVariant()
     {
         var (shell, asset, _) = Menu();

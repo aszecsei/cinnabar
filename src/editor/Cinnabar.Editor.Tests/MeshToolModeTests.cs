@@ -242,6 +242,29 @@ public sealed class MeshToolModeTests : IDisposable
         Assert.Equal(1, shell.Mesh.Tools.ToolPointCount);
     }
 
+    // The viewport's Cancel, after its look and its drag, is the shell's ladder, which in mesh mode is mesh mode's Escape.
+    [Fact]
+    public void CancelInTheViewportEndsWhatIsUnderWayThenTheToolThenTheSelectionThenTheMode()
+    {
+        using var shell = NewShell();
+        var cancel = ScopedCommand.FirstOf([.. shell.ViewportCancels]);
+        SelectFaces(shell, 5);
+        shell.Commands.Get(EditorCommands.MeshDraw).Execute();
+        Assert.True(shell.Mesh.Tools.AddToolPoint(PixelOf(shell, DrawCorners[0])));
+
+        cancel.Run();
+        Assert.Equal(0, shell.Mesh.Tools.ToolPointCount);
+        Assert.Equal(MeshTool.Draw, shell.Mesh.MeshTool);
+        cancel.Run();
+        Assert.Equal(MeshTool.Select, shell.Mesh.MeshTool);
+        cancel.Run();
+        Assert.True(shell.Mesh.MeshSelection.IsEmpty);
+        Assert.True(shell.Mesh.InMeshMode);
+        cancel.Run();
+        Assert.False(shell.Mesh.InMeshMode);
+        Assert.False(cancel.CanExecute);
+    }
+
     [Fact]
     public void EscapeEndsWhatIsUnderWayThenTheToolThenTheSelection()
     {

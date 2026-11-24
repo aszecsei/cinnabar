@@ -56,6 +56,13 @@ The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/i
   - a box that adds a setting as `name = value`.
 
   A time's name scrubs it a frame a pixel, ten frames with Shift and a frame every ten pixels with Ctrl, in one undo entry. Esc cancels the scrub. A typed value is one entry.
+- **Esc** is Cancel (`edit.cancel`), a shortcut in the `cutsceneEditor` scope. While the keyboard is anywhere in the tab, the tab is the focused command scope (`CutsceneCancelScope`, see [Commands](shell-and-panels.md#commands)). Cancel cancels the first of these that is under way:
+  1. a drag on the timeline, then one on the curves;
+  2. a field's scrub;
+  3. an armed pick of a binding's entity;
+  4. in the timeline or the curves, whichever has the keyboard, a box, or else the selection.
+
+  A text box, such as the search box or the time box, keeps its own Esc, except during a drag.
 - **The Cinematics workspace** puts the Scene and the Game side by side over a dock for the asset editors' tabs, with the outliner on the left and the properties and the undo history on the right (see [Workspaces](shell-and-panels.md#workspaces)). In a layout with that dock, `EditorLayout.EditorDocumentsDock`, a cutscene, a graph or any other asset editor opens there and not beside the scene view. A workspace switch keeps the open tabs, in the new layout's editors' dock or beside its scene view.
 
 ## The timeline

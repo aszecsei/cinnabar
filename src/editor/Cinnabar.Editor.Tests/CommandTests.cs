@@ -74,6 +74,27 @@ public class CommandTests
     }
 
     [Fact]
+    public void ALadderRunsItsFirstRungThatHoldsAndAskingWhetherItCanRunRunsNone()
+    {
+        var ran = new List<string>();
+        var drag = false;
+        var pick = true;
+        var cancel = ScopedCommand.FirstOf(
+            (() => drag, () => ran.Add("drag")),
+            (() => pick, () => ran.Add("pick")));
+
+        Assert.True(cancel.CanExecute);
+        Assert.Empty(ran);
+        cancel.Run();
+        drag = true;
+        cancel.Run();
+        Assert.Equal(["pick", "drag"], ran);
+
+        drag = pick = false;
+        Assert.False(cancel.CanExecute);
+    }
+
+    [Fact]
     public void TheFocusedScopeTakesACommandBeforeTheOtherScopesAndTheCommandsOwnAction()
     {
         var commands = new CommandRegistry();

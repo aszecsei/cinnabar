@@ -1,3 +1,5 @@
+using Cinnabar.Editor.Commands;
+using Cinnabar.Editor.Cutscenes;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Cook;
@@ -220,6 +222,29 @@ public sealed class CutsceneBindingsConvertTests : IDisposable
         Assert.False(shell.CancelBindingPicks());
         shell.Selection.Set([Lamp]);
         Assert.Equal(broken, editor.Document.Text);
+
+        // So does Cancel in a scene view, before mesh mode, and Cancel in the cutscene's tab before the selection.
+        var viewport = ScopedCommand.FirstOf([.. shell.ViewportCancels]);
+        Assert.False(viewport.CanExecute);
+        pick.Execute();
+        Assert.True(viewport.CanExecute);
+        viewport.Run();
+        Assert.Null(editor.Picking);
+        var tab = new CutsceneCancelScope(editor, new CutsceneTimelineInput(editor), new CutsceneCurveInput(editor)).Handler(EditorCommands.Cancel)!;
+        editor.SetKeyboardPane(CutscenePane.Timeline);
+        pick.Execute();
+        var selected = editor.SelectedPaths;
+        Assert.NotEmpty(selected);
+        tab.Run();
+        Assert.Null(editor.Picking);
+        Assert.Equal(selected, editor.SelectedPaths);
+        // Then the selection of the pane that has the keyboard, and with none, nothing.
+        tab.Run();
+        Assert.Empty(editor.SelectedPaths);
+        Assert.False(tab.CanExecute);
+        editor.Select(Binding(editor, 1));
+        editor.SetKeyboardPane(CutscenePane.None);
+        Assert.False(tab.CanExecute);
 
         // Armed, the next entity selected becomes the binding's, in one entry, and the row stays selected.
         shell.Selection.Set([]);

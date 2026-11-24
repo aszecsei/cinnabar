@@ -216,30 +216,11 @@ public sealed class CutsceneEditorView : DockPanel
         grid.Children.Add(details);
         Children.Add(grid);
 
-        // Esc cancels a drag on the timeline, on the curves or of a field, as it does every other drag, before the field
-        // sees the key.
-        AddHandler(KeyDownEvent, (_, e) =>
-        {
-            if (e.Key == Key.Escape && timeline.Input.Dragging)
-            {
-                timeline.Input.Escape();
-                e.Handled = true;
-            }
-            else if (e.Key == Key.Escape && _curveEditor.Input.Dragging)
-            {
-                _curveEditor.Input.Escape();
-                e.Handled = true;
-            }
-            else if (e.Key == Key.Escape && _editor.Document.InTransaction)
-            {
-                _editor.EndField(cancel: true);
-                e.Handled = true;
-            }
-            else if (e.Key == Key.Escape && _editor.CancelPick())
-            {
-                e.Handled = true;
-            }
-        }, RoutingStrategies.Tunnel);
+        // Esc is Cancel, which this tab's scope gives its order while the keyboard is anywhere in it. A scrub's handle
+        // takes no keyboard, so a drag under way takes Esc from a value box that has it.
+        var cancel = new CutsceneCancelScope(editor, timeline.Input, _curveEditor.Input);
+        FocusFollower.Scope(this, shell.Commands, cancel);
+        ScopeShortcuts.Attach(this, Commands.ShortcutScopes.CutsceneEditor, shell, beatsText: () => cancel.DragUnderWay);
 
         void Find()
         {

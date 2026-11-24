@@ -16,8 +16,11 @@ public static class ShortcutScopes
     /// <summary>The content browser.</summary>
     public const string ContentBrowser = "contentBrowser";
 
+    /// <summary>A cutscene editor's tab: its timeline, its curves and its details.</summary>
+    public const string CutsceneEditor = "cutsceneEditor";
+
     /// <summary>Every scope, in no order that matters.</summary>
-    public static readonly IReadOnlyList<string> All = [Viewport, Canvas, ContentBrowser];
+    public static readonly IReadOnlyList<string> All = [Viewport, Canvas, ContentBrowser, CutsceneEditor];
 
     /// <summary>Where a scope's keys work, for tooltips, as in "W in the viewport".</summary>
     public static string Label(string scope) => scope switch
@@ -25,6 +28,7 @@ public static class ShortcutScopes
         Viewport => "in the viewport",
         Canvas => "in a graph or UI canvas",
         ContentBrowser => "in the content browser",
+        CutsceneEditor => "in the cutscene editor",
         _ => $"in {scope}",
     };
 }

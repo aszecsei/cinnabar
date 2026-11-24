@@ -73,9 +73,16 @@ public sealed partial class EditorShell
         PickAt(pixel, mode);
     }
 
+    /// <summary>Whether a click in a view picks the focus of the camera that it looks through, which Esc disarms.</summary>
+    public bool FocusPickArmed(int viewport) =>
+        Looks[viewport] is ViewLook.Camera camera && camera.Owner.PicksFocusOnClick(viewport);
+
     /// <summary>Disarms the pick of the focus of the camera that a view looks through, as Esc does. False when none was armed.</summary>
     public bool CancelFocusPick(int viewport) =>
-        Looks[viewport] is ViewLook.Camera camera && camera.Owner.PicksFocusOnClick(viewport) && camera.Owner.DisarmFocusPick();
+        FocusPickArmed(viewport) && Looks[viewport] is ViewLook.Camera camera && camera.Owner.DisarmFocusPick();
+
+    /// <summary>Whether a cutscene's pick of a binding's entity is armed, which Esc in a scene view cancels.</summary>
+    public bool BindingPicking => _bindingPick != null;
 
     /// <summary>Cancels the armed pick of a binding's entity, as Esc does. False when none was armed.</summary>
     public bool CancelBindingPicks()
