@@ -1,5 +1,5 @@
 {
-	"about": "Token rules that the text formats share. text_lex_test.odin runs every row against lib/engine/asset/format, and the editor's LexemeFixtureTests runs every row against its C# twins, so the cooker and the editor read the same text the same way. value is checked only when ok is true: a string for strip_comment, strip_comment_word and guid rules (in lower case), a number for whole_ticks and whole_id, \"key=value\" for settings_line, and nothing for sublevel_name.",
+	"about": "Token rules that the text formats share. text_lex_test.odin runs every row against lib/engine/asset/format, and the editor's LexemeFixtureTests runs every row against its C# twins, so the cooker and the editor read the same text the same way. value is checked only when ok is true: a string for strip_comment, strip_comment_word and guid rules (in lower case), a number for whole_ticks and whole_id, \"key=value\" for settings_line, \"name=active\" or \"name=inactive\" for sublevel_setting (a settings line that declares a sublevel), and nothing for sublevel_name.",
 	"rows": [
 		{ "rule": "strip_comment", "input": "x = 1 # note", "ok": true, "value": "x = 1 " },
 		{ "rule": "strip_comment", "input": "# all", "ok": true, "value": "" },
@@ -80,6 +80,14 @@
 		{ "rule": "sublevel_name", "input": "a-b", "ok": false },
 		{ "rule": "sublevel_name", "input": "a.b", "ok": false },
 		{ "rule": "sublevel_name", "input": "a b", "ok": false },
-		{ "rule": "sublevel_name", "input": "café", "ok": false }
+		{ "rule": "sublevel_name", "input": "café", "ok": false },
+
+		{ "rule": "sublevel_setting", "input": "sublevel.lights = active", "ok": true, "value": "lights=active" },
+		{ "rule": "sublevel_setting", "input": "sublevel.Room_2 = inactive", "ok": true, "value": "Room_2=inactive" },
+		{ "rule": "sublevel_setting", "input": "sublevel.lights = on", "ok": false },
+		{ "rule": "sublevel_setting", "input": "sublevel.lights = Active", "ok": false },
+		{ "rule": "sublevel_setting", "input": "sublevel.lights", "ok": false },
+		{ "rule": "sublevel_setting", "input": "sublevel. = active", "ok": false },
+		{ "rule": "sublevel_setting", "input": "sublevel.a-b = active", "ok": false }
 	]
 }

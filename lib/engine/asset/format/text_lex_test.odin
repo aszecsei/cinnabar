@@ -48,6 +48,13 @@ every_lexeme_row_reads_as_the_fixture_says :: proc(t: ^testing.T) {
 			key, value: string
 			key, value, ok = settings_line(input)
 			got = json.String(fmt.tprintf("%s=%s", key, value))
+		case "sublevel_setting":
+			key, value, is_setting := settings_line(input)
+			if is_setting && sublevel_is_setting(key) {
+				name, active, problem := sublevel_parse_setting(key, value)
+				ok = problem == ""
+				got = json.String(fmt.tprintf("%s=%s", name, active ? "active" : "inactive"))
+			}
 		case "sublevel_name":
 			ok = sublevel_name_valid(input)
 			got = nil

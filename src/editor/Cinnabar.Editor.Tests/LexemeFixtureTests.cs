@@ -11,7 +11,7 @@ namespace Cinnabar.Editor.Tests;
 public sealed class LexemeFixtureTests
 {
     static readonly string[] Rules =
-        ["strip_comment", "strip_comment_word", "whole_ticks", "whole_id", "guid", "guid_ref", "settings_line", "sublevel_name"];
+        ["strip_comment", "strip_comment_word", "whole_ticks", "whole_id", "guid", "guid_ref", "settings_line", "sublevel_setting", "sublevel_name"];
 
     static JsonElement Fixture()
     {
@@ -86,6 +86,15 @@ public sealed class LexemeFixtureTests
             {
                 var ok = ProjectSettings.TryParseLine(input, out var key, out var value);
                 return (ok, $"{key}={value}");
+            }
+            case "sublevel_setting":
+            {
+                if (!ProjectSettings.TryParseLine(input, out var key, out var value))
+                {
+                    return (false, null);
+                }
+                var ok = ProjectSettings.TryParseSublevel(key, value, out var name, out var active);
+                return (ok, $"{name}={(active ? "active" : "inactive")}");
             }
             case "sublevel_name":
                 return (SceneFile.IsSublevelName(input), null);
