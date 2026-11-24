@@ -99,7 +99,7 @@ The game's side is `lib/engine/editor/live_texture.odin`.
 
 ## Saving
 
-Saving the scene saves every dirty map and foliage set that the scene names, after the scene and its meshes, through a temporary file: a height map as a 16-bit gray PNG, a mask as an 8-bit gray PNG and a layer map as an 8-bit RGBA PNG, which the cooker reads as it reads any texture (see [Content: Textures](../content/kinds/textures.md#textures)), and a foliage set as its `.instances` text. Each stays live until its cooked blob is current. Closing the scene closes its maps, with their unsaved strokes, as it closes its meshes.
+Saving the scene saves every dirty map and foliage set that the scene names, after the scene and its meshes, through a temporary file: a height map as a 16-bit gray PNG, a mask as an 8-bit gray PNG and a layer map as an 8-bit RGBA PNG, which the cooker reads as it reads any texture (see [Content: Textures](../content/kinds/textures.md#textures)), and a foliage set as its `.instances` text. A new map or set gets its `.meta` with its GUID at its first save, as every snapshot asset does (see [Document model](document-and-scenes.md#document-model)), and a new hole mask's and layer map's have their import settings. Each stays live until its cooked blob is current. Closing the scene closes its maps, with their unsaved strokes, as it closes its meshes.
 
 ## The sample
 
