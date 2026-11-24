@@ -135,6 +135,10 @@ static class TestShell
         var options = new EditorOptions("host.exe", "game.dll", scenePath) { AutosaveDirectory = dir.Combine("autosave") };
         return new EditorShell(projectPath == null ? options : options with { ProjectPath = projectPath }, new EditorSettings(dir.Combine("settings")));
     }
+
+    /// <summary>A left press in the active scene view, as the view makes one: the first of the shell's left tools that starts a drag, or null for a click.</summary>
+    public static IViewportDrag? Press(EditorShell shell, Vec2 pixel, DragKeys keys = default) =>
+        shell.LeftTools.Select(t => t.TryBegin(pixel, keys)).FirstOrDefault(d => d != null);
 }
 
 /// <summary>Meshes the mesh tests share.</summary>

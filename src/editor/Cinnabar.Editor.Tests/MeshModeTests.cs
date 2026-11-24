@@ -200,6 +200,33 @@ public sealed class MeshModeTests : IDisposable
     }
 
     [Fact]
+    public void ALostCaptureDropsABlockAndAnEndedBlockDragDoesNothing()
+    {
+        using var shell = NewShell();
+        shell.Commands.Get(EditorCommands.MeshBlock).Execute();
+        var drag = TestShell.Press(shell, Center + new Vec2(-100, -100));
+        Assert.NotNull(drag);
+        drag.Move(Center + new Vec2(100, 100), default);
+        Assert.NotNull(shell.Mesh.BlockFootprint);
+        drag.Lost();
+        Assert.Null(shell.Mesh.BlockFootprint);
+        Assert.False(shell.Scene!.CanUndo);
+        Assert.DoesNotContain(shell.Scene.Scene.Entities, e => e.Name == "block");
+
+        // Choosing the tool again drops the block; the old drag then leaves the next one alone.
+        var stale = TestShell.Press(shell, Center + new Vec2(-100, -100))!;
+        shell.Mesh.SetMeshTool(MeshTool.Create);
+        var next = TestShell.Press(shell, Center + new Vec2(-100, -100))!;
+        stale.Move(Center + new Vec2(-90, -90), default);
+        stale.End(default);
+        stale.Cancel();
+        Assert.NotNull(shell.Mesh.BlockFootprint);
+        next.Move(Center + new Vec2(100, 100), default);
+        next.End(default);
+        Assert.Equal("Block", Assert.Single(shell.Scene.History).Label);
+    }
+
+    [Fact]
     public void BlockMakesAMeshAndAnEntityThatSaveWrites()
     {
         using var shell = NewShell();

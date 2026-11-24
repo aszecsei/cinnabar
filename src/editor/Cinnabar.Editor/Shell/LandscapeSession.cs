@@ -13,7 +13,7 @@ namespace Cinnabar.Editor.Shell;
 /// goes on the scene's undo stack as the tiles that it changed, and saves with the scene as the PNGs that the cooker
 /// reads. A saved map is let go of once the daemon has cooked it.
 /// </summary>
-public sealed partial class LandscapeSession(EditorShell shell)
+public sealed partial class LandscapeSession(EditorShell shell) : IViewportTool
 {
     /// <summary>The context that is set while the one selected entity of the scene is a surface.</summary>
     public const string TerrainContext = "selection.terrain";
@@ -28,12 +28,85 @@ public sealed partial class LandscapeSession(EditorShell shell)
     const double Spacing = 0.25;
 
     readonly Dictionary<string, LandscapeMap> _maps = [];
-    Stroking? _stroke;
+    // The stroke under way, or null. Only Begin sets it, and only End and Cancel clear it.
+    Painting? _painting;
     Wire.LandscapeOverlay _overlay = new(false, [0, 0, 0], [0, 1, 0], 0, 0);
 
-    // A stroke under way: its map, the surface and pose it paints, its revision, the last hit, and the field that names
-    // the map that its first dab made, which the release sets in the surface, or null.
-    sealed record Stroking(LandscapeStroke Stroke, LandscapeMap Map, LandscapeSurface Surface, Pose Pose, int Before, int Revision, LandscapeHit Last, string? NewField);
+    /// <summary>
+    /// A stroke under way, as the viewport's drag: the brush and the layer that it began with, and what it paints. It is
+    /// its own token, so a drag that the session has ended does nothing.
+    /// </summary>
+    abstract class Painting(LandscapeSession session, LandscapeBrush brush, int layer) : IViewportDrag
+    {
+        public LandscapeBrush Brush { get; } = brush;
+
+        public int Layer { get; } = layer;
+
+        bool Live => session._painting == this;
+
+        public void Move(Vec2 pixel, DragKeys keys)
+        {
+            if (Live)
+            {
+                session.DragStroke(pixel);
+            }
+        }
+
+        public void End(DragKeys keys)
+        {
+            if (Live)
+            {
+                session.EndStroke();
+            }
+        }
+
+        public void Cancel()
+        {
+            if (Live)
+            {
+                session.CancelStroke();
+            }
+        }
+
+        // A map stroke: its map, the surface and pose it paints, the map's revision before it and its own, the last hit,
+        // and the field that names the map that its first dab made, which the release sets in the surface, or null.
+        public sealed class OnMap(LandscapeSession session, LandscapeBrush brush, int layer, LandscapeStroke stroke, LandscapeMap map, LandscapeSurface surface,
+            Pose pose, int before, int revision, LandscapeHit last, string? newField) : Painting(session, brush, layer)
+        {
+            public LandscapeStroke Stroke { get; } = stroke;
+            public LandscapeMap Map { get; } = map;
+            public LandscapeSurface Surface { get; } = surface;
+            public Pose Pose { get; } = pose;
+            public int Before { get; } = before;
+            public int Revision { get; } = revision;
+            public LandscapeHit Last { get; set; } = last;
+            public string? NewField { get; } = newField;
+        }
+
+        // A foliage stroke (see LandscapeSession.Foliage.cs).
+        public sealed class OnFoliage(LandscapeSession session, LandscapeBrush brush, int layer, FoliageStroking stroking) : Painting(session, brush, layer)
+        {
+            public FoliageStroking Stroking { get; } = stroking;
+        }
+    }
+
+    /// <summary>What a brush paints.</summary>
+    public enum BrushTarget
+    {
+        Height,
+        Mask,
+        Layers,
+        Foliage,
+    }
+
+    /// <summary>What a brush paints: the hole mask, the layer map, a foliage layer's instances, or else the height map.</summary>
+    public static BrushTarget TargetOf(LandscapeBrush brush) => brush switch
+    {
+        LandscapeBrush.Hole or LandscapeBrush.Fill => BrushTarget.Mask,
+        LandscapeBrush.Paint => BrushTarget.Layers,
+        LandscapeBrush.Scatter or LandscapeBrush.Erase => BrushTarget.Foliage,
+        _ => BrushTarget.Height,
+    };
 
     /// <summary>The layers that Paint can paint: the four channels of a layer map.</summary>
     public const int Layers = 4;
@@ -55,7 +128,7 @@ public sealed partial class LandscapeSession(EditorShell shell)
 
     public bool AnyDirty => _maps.Values.Any(m => m.IsDirty) || _sets.Values.Any(s => s.IsDirty);
 
-    public bool IsStroking => _stroke != null || _foliage != null;
+    public bool IsStroking => _painting != null;
 
     /// <summary>The brush, a map, or its dirty state changed.</summary>
     public event Action? Changed;
@@ -103,47 +176,49 @@ public sealed partial class LandscapeSession(EditorShell shell)
     /// Starts a stroke at a pixel of the frame, on the selected terrain under it. Returns false when the tool does not
     /// paint or the terrain is not under the pixel, so the click selects instead.
     /// </summary>
-    public bool BeginStroke(Vec2 pixel)
+    public bool BeginStroke(Vec2 pixel) => Begin(pixel) != null;
+
+    IViewportDrag? IViewportTool.TryBegin(Vec2 pixel, DragKeys keys) => Begin(pixel);
+
+    Painting? Begin(Vec2 pixel)
     {
         if (IsStroking || !IsActive || Surface is not { } surface || PoseOf(surface) is not { } pose || Pick(surface, pose, pixel) is not { } hit)
         {
-            return false;
-        }
-        if (Brush is LandscapeBrush.Scatter or LandscapeBrush.Erase)
-        {
-            return BeginFoliage(surface, pose, hit);
+            return null;
         }
         string? newField = null;
         LandscapeMap? map;
-        if (Brush is LandscapeBrush.Hole or LandscapeBrush.Fill)
+        switch (TargetOf(Brush))
         {
-            map = MaskOf(surface);
-            if (map == null && surface.HoleMask == "")
-            {
-                map = NewMap(surface, LandscapeMapKind.Mask);
-                newField = map != null ? "hole_mask" : null;
-            }
-        }
-        else if (Brush == LandscapeBrush.Paint)
-        {
-            map = LayersOf(surface);
-            if (map == null && surface.LayerMap == "")
-            {
-                map = NewMap(surface, LandscapeMapKind.Layers);
-                newField = map != null ? "layer_map" : null;
-            }
-        }
-        else
-        {
-            map = HeightOf(surface);
-            if (map == null && surface.HeightMap == "")
-            {
-                shell.Console.Add(LogLevel.Warning, "landscape: the surface has no height_map to sculpt. Name a height texture in its Surface_Renderer.");
-            }
+            case BrushTarget.Foliage:
+                return BeginFoliage(surface, pose, hit);
+            case BrushTarget.Mask:
+                map = MaskOf(surface);
+                if (map == null && surface.HoleMask == "")
+                {
+                    map = NewMap(surface, LandscapeMapKind.Mask);
+                    newField = map != null ? "hole_mask" : null;
+                }
+                break;
+            case BrushTarget.Layers:
+                map = LayersOf(surface);
+                if (map == null && surface.LayerMap == "")
+                {
+                    map = NewMap(surface, LandscapeMapKind.Layers);
+                    newField = map != null ? "layer_map" : null;
+                }
+                break;
+            default:
+                map = HeightOf(surface);
+                if (map == null && surface.HeightMap == "")
+                {
+                    shell.Console.Add(LogLevel.Warning, "landscape: the surface has no height_map to sculpt. Name a height texture in its Surface_Renderer.");
+                }
+                break;
         }
         if (map == null)
         {
-            return false;
+            return null;
         }
         if (!map.IsLive)
         {
@@ -151,20 +226,21 @@ public sealed partial class LandscapeSession(EditorShell shell)
         }
         var dab = DabAt(hit, map, surface);
         var stroke = new LandscapeStroke(map.Grid, Brush, dab, Layer);
-        _stroke = new Stroking(stroke, map, surface, pose, map.Revision, LandscapeMap.NextRevision(), hit, newField);
-        map.Touched(stroke.Apply(dab), _stroke.Revision);
-        return true;
+        var painting = new Painting.OnMap(this, Brush, Layer, stroke, map, surface, pose, map.Revision, LandscapeMap.NextRevision(), hit, newField);
+        _painting = painting;
+        map.Touched(stroke.Apply(dab), painting.Revision);
+        return painting;
     }
 
     /// <summary>Paints the stroke on to a pixel: dabs a quarter of the radius apart from the last hit, or none off the terrain.</summary>
     public void DragStroke(Vec2 pixel)
     {
-        if (_foliage != null)
+        if (_painting is Painting.OnFoliage foliage)
         {
-            DragFoliage(pixel);
+            DragFoliage(foliage, pixel);
             return;
         }
-        if (_stroke is not { } s || Pick(s.Surface, s.Pose, pixel) is not { } hit)
+        if (_painting is not Painting.OnMap s || Pick(s.Surface, s.Pose, pixel) is not { } hit)
         {
             return;
         }
@@ -172,14 +248,14 @@ public sealed partial class LandscapeSession(EditorShell shell)
         var from = DabAt(s.Last, map, s.Surface);
         var to = DabAt(hit, map, s.Surface);
         // A ramp is drawn whole at each step, so it needs only the last dab.
-        var dabs = Brush == LandscapeBrush.Ramp ? 1 : Math.Max(1, (int)Math.Ceiling(Distance(from, to) / Spacing));
+        var dabs = s.Brush == LandscapeBrush.Ramp ? 1 : Math.Max(1, (int)Math.Ceiling(Distance(from, to) / Spacing));
         var changed = TexelRect.Empty;
         for (var i = 1; i <= dabs; i++)
         {
             var t = (double)i / dabs;
             changed = changed.Union(s.Stroke.Apply(to with { X = from.X + (to.X - from.X) * t, Y = from.Y + (to.Y - from.Y) * t }));
         }
-        _stroke = s with { Last = hit };
+        s.Last = hit;
         map.Touched(changed, s.Revision);
         Hover(pixel);
     }
@@ -187,12 +263,12 @@ public sealed partial class LandscapeSession(EditorShell shell)
     /// <summary>Ends the stroke as one undo entry on the scene's stack, with the hole mask that it made.</summary>
     public void EndStroke()
     {
-        if (_foliage != null)
+        if (_painting is Painting.OnFoliage foliage)
         {
-            EndFoliage();
+            EndFoliage(foliage);
             return;
         }
-        if (_stroke is not { } s)
+        if (_painting is not Painting.OnMap s)
         {
             return;
         }
@@ -206,30 +282,34 @@ public sealed partial class LandscapeSession(EditorShell shell)
         {
             ops.Add(new LandscapeOperation(s.Map, patches, s.Before, s.Revision));
         }
-        var label = Brush switch
+        var label = TargetOf(s.Brush) switch
         {
-            LandscapeBrush.Hole or LandscapeBrush.Fill => "Paint Holes",
-            LandscapeBrush.Paint => $"Paint Layer {Layer + 1}",
-            _ => $"Sculpt ({Brush})",
+            BrushTarget.Mask => "Paint Holes",
+            BrushTarget.Layers => $"Paint Layer {s.Layer + 1}",
+            _ => $"Sculpt ({s.Brush})",
         };
         if (ops.Count == 0 || !shell.Edit(label, [.. ops]))
         {
             CancelStroke();
             return;
         }
-        _stroke = null;
+        _painting = null;
         Changed?.Invoke();
     }
 
     /// <summary>Ends the stroke by putting back what it painted, as Escape or a lost capture does.</summary>
     public void CancelStroke()
     {
-        CancelFoliage();
-        if (_stroke is not { } s)
+        if (_painting is Painting.OnFoliage foliage)
+        {
+            CancelFoliage(foliage);
+            return;
+        }
+        if (_painting is not Painting.OnMap s)
         {
             return;
         }
-        _stroke = null;
+        _painting = null;
         s.Map.Touched(s.Stroke.Restore(), s.Before);
         if (s.NewField != null)
         {
