@@ -94,8 +94,11 @@ encode :: proc(
 	return type, bytes, true
 }
 
-// decode is the value of a type in bytes.
-decode :: proc(type: format.Blackboard_Type, bytes: []byte) -> Value {
+// decode is the value of a type in bytes, and the one reader of a blackboard's bytes: every other reader switches on
+// the Value that it gives, through read_key and the value_ projections. Thinks and plans read keys for every agent in
+// every tick, so decode, read_key and the projections are inlined, which keeps them as fast as a switch over the
+// bytes.
+decode :: #force_inline proc(type: format.Blackboard_Type, bytes: []byte) -> Value {
 	switch type {
 	case .Float:
 		return (^f32)(raw_data(bytes))^
@@ -114,6 +117,123 @@ decode :: proc(type: format.Blackboard_Type, bytes: []byte) -> Value {
 	case .String:
 	}
 	return nil
+}
+
+// read_key is the value of the agent's key at a slot.
+read_key :: #force_inline proc(t: ^Think_Context, slot: u32) -> Value {
+	key := format.blackboard_keys(t.board.data, t.board.blob)[slot]
+	return decode(key.type, value_bytes(t.values, key))
+}
+
+// value_number is a float, int or bool as a number, a bool being 0 or 1, or false for a value of another type.
+value_number :: #force_inline proc(v: Value) -> (f64, bool) {
+	#partial switch x in v {
+	case f32:
+		return f64(x), true
+	case i32:
+		return f64(x), true
+	case bool:
+		return 1 if x else 0, true
+	}
+	return 0, false
+}
+
+// value_place is where a value is: a position, or an entity's place as entity_place finds it. An entity that is none,
+// dead or without a Transform, and a value of another type, is no place.
+value_place :: #force_inline proc(w: ^ecs.World, v: Value) -> (ecs.World_Position, bool) {
+	#partial switch x in v {
+	case ecs.Entity:
+		return entity_place(w, x)
+	case ecs.World_Position:
+		return x, true
+	}
+	return {}, false
+}
+
+// value_plan is a value as a planner's world state holds it: a bool is 0 or 1, an int is itself, and an enum is its
+// index. A value of another type is false.
+value_plan :: #force_inline proc(v: Value) -> (i32, bool) {
+	#partial switch x in v {
+	case bool:
+		return 1 if x else 0, true
+	case i32:
+		return x, true
+	case Enum_Index:
+		return i32(x), true
+	}
+	return 0, false
+}
+
+// plan_value is a world state's value as a key of a type holds it, value_plan's inverse, or nil for a type that is not
+// a planning key's.
+plan_value :: proc(type: format.Blackboard_Type, x: i32) -> Value {
+	#partial switch type {
+	case .Bool:
+		return x != 0
+	case .Int:
+		return x
+	case .Enum:
+		return Enum_Index(u32(x))
+	}
+	return nil
+}
+
+// store_key writes a value of the key's type into the context's values at a slot, at once. It is for a module that
+// reads its values as they would be with the key's value changed, in a copy of them that it gives the context; the
+// agent's own values change only through writes.
+store_key :: proc(t: ^Think_Context, slot: u32, v: Value) {
+	key := format.blackboard_keys(t.board.data, t.board.blob)[slot]
+	type, encoded, ok := encode(v)
+	if ok && type == key.type {
+		bytes := value_bytes(t.values, key)
+		copy(bytes, encoded[:len(bytes)])
+	}
+}
+
+// encode_name is the bytes of a write of an enum's name, by its hash, as a String: a script's write to an agent that
+// is not ready yet, whose key's type is found when the write applies.
+encode_name :: proc(name: string) -> (bytes: [format.BLACKBOARD_VALUE_SIZE]byte) {
+	(^u32)(&bytes)^ = format.animation_graph_hash(name)
+	return
+}
+
+// convertible is whether an argument of a type fits a parameter of a type: the same type, a number for a number, or a
+// vector constant for a position, in meters.
+@(private)
+convertible :: proc(from, to: format.Blackboard_Type, constant: bool) -> bool {
+	return(
+		from == to ||
+		(from == .Float && to == .Int) ||
+		(from == .Int && to == .Float) ||
+		(constant && from == .Vector && to == .Position) \
+	)
+}
+
+// convert gives an argument's bytes as a parameter's type.
+@(private)
+convert :: proc(
+	from, to: format.Blackboard_Type,
+	value: [format.BLACKBOARD_VALUE_SIZE]byte,
+) -> [format.BLACKBOARD_VALUE_SIZE]byte {
+	value := value
+	v := decode(from, value[:])
+	switch x in v {
+	case f32:
+		if to == .Int {
+			v = i32(x)
+		}
+	case i32:
+		if to == .Float {
+			v = f32(x)
+		}
+	case [3]f32:
+		if to == .Position {
+			v = ecs.position_offset({}, x)
+		}
+	case bool, Enum_Index, ecs.Entity, ecs.World_Position:
+	}
+	_, bytes, ok := encode(v)
+	return bytes if ok else value
 }
 
 // Writer is where commands are recorded: a system's job's list, which job_writer gives.

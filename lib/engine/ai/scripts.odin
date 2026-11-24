@@ -31,31 +31,25 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 			}
 			board, _ := board_of(s, slot.blackboard)
 			key := key_of(L, board, name)
-			bytes := value_bytes(ready.values, key)
-			switch key.type {
-			case .Float:
-				luau.pushnumber(L, f64((^f32)(raw_data(bytes))^))
-			case .Int:
-				luau.pushnumber(L, f64((^i32)(raw_data(bytes))^))
-			case .Bool:
-				luau.pushboolean(L, b32(bytes[0] != 0))
-			case .Enum:
+			switch v in decode(key.type, value_bytes(ready.values, key)) {
+			case f32:
+				luau.pushnumber(L, f64(v))
+			case i32:
+				luau.pushnumber(L, f64(v))
+			case bool:
+				luau.pushboolean(L, b32(v))
+			case Enum_Index:
 				luau.pushodinstring(
 					L,
-					format.blackboard_enum_name(
-						board.data,
-						board.blob,
-						key,
-						(^u32)(raw_data(bytes))^,
-					),
+					format.blackboard_enum_name(board.data, board.blob, key, u32(v)),
 				)
-			case .Entity:
-				script.push_entity(L, (^ecs.Entity)(raw_data(bytes))^)
-			case .Position:
-				script.push_position(L, (^ecs.World_Position)(raw_data(bytes))^)
-			case .Vector:
-				script.push_vector(L, (^[3]f32)(raw_data(bytes))^)
-			case .String:
+			case ecs.Entity:
+				script.push_entity(L, v)
+			case ecs.World_Position:
+				script.push_position(L, v)
+			case [3]f32:
+				script.push_vector(L, v)
+			case:
 				luau.pushnil(L)
 			}
 			return 1
@@ -82,9 +76,7 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 				// and a string an enum's name, by its hash.
 				if luau.type(L, 3) == .STRING {
 					c.type = .String
-					(^u32)(&c.value)^ = format.animation_graph_hash(
-						string(luau.L_checkstring(L, 3)),
-					)
+					c.value = encode_name(string(luau.L_checkstring(L, 3)))
 				} else if value, ok := value_arg(L, 3); ok {
 					c.type, c.value, _ = encode(value)
 				} else {
@@ -97,45 +89,44 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 				return 0
 			}
 			key := key_of(L, board, name)
-			bytes: [format.BLACKBOARD_VALUE_SIZE]byte
-			put :: proc(bytes: ^[format.BLACKBOARD_VALUE_SIZE]byte, v: $T) {
-				(^T)(bytes)^ = v
-			}
+			value: Value
 			switch key.type {
 			case .Float:
-				put(&bytes, f32(luau.L_checknumber(L, 3)))
+				value = f32(luau.L_checknumber(L, 3))
 			case .Int:
-				put(&bytes, i32(luau.L_checknumber(L, 3)))
+				value = i32(luau.L_checknumber(L, 3))
 			case .Bool:
-				put(&bytes, u8(luau.L_checkboolean(L, 3)))
+				value = bool(luau.L_checkboolean(L, 3))
 			case .Enum:
-				value := string(luau.L_checkstring(L, 3))
+				text := string(luau.L_checkstring(L, 3))
 				found := false
 				names := format.blackboard_enum_names(
 					board.data,
 					board.blob,
 				)[key.first_enum:][:key.enum_count]
 				for n, i in names {
-					if format.blob_string(board.data, n) == value {
-						put(&bytes, u32(i))
+					if format.blob_string(board.data, n) == text {
+						value = Enum_Index(i)
 						found = true
 					}
 				}
 				if !found {
 					script.raise(
 						L,
-						fmt.tprintf("%s is not one of the enum %s's values", value, name),
+						fmt.tprintf("%s is not one of the enum %s's values", text, name),
 					)
 				}
 			case .Entity:
-				put(&bytes, luau.isnil(L, 3) ? ecs.Entity(0) : script.check_entity(L, 3))
+				value = luau.isnil(L, 3) ? ecs.Entity(0) : script.check_entity(L, 3)
 			case .Position:
-				put(&bytes, script.check_position(L, 3))
+				value = script.check_position(L, 3)
 			case .Vector:
-				put(&bytes, script.check_vector(L, 3))
+				value = script.check_vector(L, 3)
 			case .String:
+				// Never a key's type.
+				return 0
 			}
-			c.type, c.value = key.type, bytes
+			c.type, c.value, _ = encode(value)
 			apply_write(s, slot, ready, board, c)
 			return 0
 		},

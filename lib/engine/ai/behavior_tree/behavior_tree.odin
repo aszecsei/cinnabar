@@ -115,15 +115,7 @@ timer :: proc(b: ^Tree, i: u32, which: format.Tree_Timer) -> ^u64 {
 ticks :: proc(b: ^Tree, time: format.Tree_Time) -> u64 {
 	seconds := f64(time.seconds)
 	if time.source == .Key {
-		keys := format.blackboard_keys(b.t.board.data, b.t.board.blob)
-		key := keys[time.key]
-		bytes := b.t.values[key.offset:]
-		#partial switch key.type {
-		case .Float:
-			seconds = f64((^f32)(raw_data(bytes))^)
-		case .Int:
-			seconds = f64((^i32)(raw_data(bytes))^)
-		}
+		seconds = ai.key_number(b.t, time.key)
 	}
 	if !(seconds > 0) {
 		return 0

@@ -142,7 +142,7 @@ write :: proc(t: ^Think_Context, index: u32) {
 	case .Key:
 		copy(c.value[:], value_bytes(t.values, keys[w.index]))
 	case .Self:
-		(^ecs.Entity)(&c.value)^ = t.entity
+		_, c.value, _ = encode(t.entity)
 	}
 	append(t.out, c)
 }
@@ -156,18 +156,8 @@ node_writes :: proc(t: ^Think_Context, node: format.Decision_Node) {
 
 // key_number is a float, int or bool key's value as a number, a bool being 0 or 1, and 0 for a key of another type.
 key_number :: proc(t: ^Think_Context, slot: u32) -> f64 {
-	keys := format.blackboard_keys(t.board.data, t.board.blob)
-	key := keys[slot]
-	bytes := value_bytes(t.values, key)
-	#partial switch key.type {
-	case .Float:
-		return f64((^f32)(raw_data(bytes))^)
-	case .Int:
-		return f64((^i32)(raw_data(bytes))^)
-	case .Bool:
-		return 1 if bytes[0] != 0 else 0
-	}
-	return 0
+	n, _ := value_number(read_key(t, slot))
+	return n
 }
 
 // entity_place is where an entity is: its Transform's position, if it is alive and has one.
@@ -188,16 +178,7 @@ place_of :: proc(t: ^Think_Context, slot: u32) -> (ecs.World_Position, bool) {
 	if slot == format.UTILITY_SELF {
 		return entity_place(t.world, t.entity)
 	}
-	keys := format.blackboard_keys(t.board.data, t.board.blob)
-	key := keys[slot]
-	bytes := value_bytes(t.values, key)
-	#partial switch key.type {
-	case .Entity:
-		return entity_place(t.world, (^ecs.Entity)(raw_data(bytes))^)
-	case .Position:
-		return (^ecs.World_Position)(raw_data(bytes))^, true
-	}
-	return {}, false
+	return value_place(t.world, read_key(t, slot))
 }
 
 // distance is the meters between two places, as place_of finds them, or infinity when either is no place.
@@ -236,7 +217,7 @@ write_entity :: proc(t: ^Think_Context, slot: u32, e: ecs.Entity) {
 		key    = slot,
 		type   = .Entity,
 	}
-	(^ecs.Entity)(&c.value)^ = e
+	_, c.value, _ = encode(e)
 	append(t.out, c)
 }
 
@@ -271,49 +252,39 @@ condition_holds :: proc(t: ^Think_Context, index: u32) -> bool {
 		t.decision.blob,
 	)[condition.first_op:][:condition.op_count]
 	constants := format.decision_constants(t.decision.data, t.decision.blob)
-	keys := format.blackboard_keys(t.board.data, t.board.blob)
 	stack: [format.MAX_DECISION_STACK]Stack_Value
 	top := 0
-	push_bytes :: proc(
-		t: ^Think_Context,
-		type: format.Blackboard_Type,
-		bytes: []byte,
-	) -> (
-		v: Stack_Value,
-	) {
-		switch type {
-		case .Float:
-			v.number = f64((^f32)(raw_data(bytes))^)
-		case .Int:
-			v.number = f64((^i32)(raw_data(bytes))^)
-		case .Bool:
-			v.bits = u64(bytes[0])
-		case .Enum:
-			v.bits = u64((^u32)(raw_data(bytes))^)
-		case .Entity:
-			e := (^ecs.Entity)(raw_data(bytes))^
-			v.bits = u64(e)
-			v.position, v.place = entity_place(t.world, e)
-		case .Position:
-			v.position, v.place = (^ecs.World_Position)(raw_data(bytes))^, true
-		case .Vector, .String:
+	push :: proc(t: ^Think_Context, value: Value) -> (v: Stack_Value) {
+		switch x in value {
+		case f32:
+			v.number = f64(x)
+		case i32:
+			v.number = f64(x)
+		case bool:
+			v.bits = u64(x)
+		case Enum_Index:
+			v.bits = u64(x)
+		case ecs.Entity:
+			v.bits = u64(x)
+			v.position, v.place = entity_place(t.world, x)
+		case ecs.World_Position:
+			v.position, v.place = x, true
+		case [3]f32:
 		}
 		return
 	}
 	for o in ops {
 		switch o.code {
 		case .Key:
-			key := keys[o.operand]
-			stack[top] = push_bytes(t, key.type, value_bytes(t.values, key))
+			stack[top] = push(t, read_key(t, o.operand))
 			top += 1
 		case .Constant:
 			c := constants[o.operand]
 			value := c.value
-			stack[top] = push_bytes(t, c.type, value[:])
+			stack[top] = push(t, decode(c.type, value[:]))
 			top += 1
 		case .Self:
-			self := t.entity
-			stack[top] = push_bytes(t, .Entity, mem_bytes(&self))
+			stack[top] = push(t, t.entity)
 			top += 1
 		case .Distance:
 			a, b := stack[top - 2], stack[top - 1]
@@ -368,11 +339,6 @@ condition_holds :: proc(t: ^Think_Context, index: u32) -> bool {
 		}
 	}
 	return top == 1 && stack[0].bits != 0
-}
-
-@(private)
-mem_bytes :: proc(e: ^ecs.Entity) -> []byte {
-	return ([^]byte)(e)[:size_of(ecs.Entity)]
 }
 
 // Think_Job is a batch of agents that one job thinks for.

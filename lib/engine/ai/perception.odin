@@ -310,7 +310,7 @@ noise_command :: proc(
 		key    = format.animation_graph_hash(tag),
 		amount = loudness,
 	}
-	(^ecs.World_Position)(&c.value)^ = position
+	_, c.value, _ = encode(position)
 	return c
 }
 
@@ -326,7 +326,7 @@ apply_noise :: proc(s: ^State, c: Command) {
 	append(
 		&s.noises_pending,
 		Noise {
-			position = (^ecs.World_Position)(&value)^,
+			position = decode(.Position, value[:]).(ecs.World_Position),
 			loudness = c.amount,
 			tag = u8(tag),
 			source = c.entity,
