@@ -1014,6 +1014,10 @@ public sealed class ViewportView : Grid
         }
         // The tools', mesh mode's and the texture tools' keys are the view's scoped shortcuts (see KeysFree), which come
         // before this. What is left is Esc, Enter and Backspace, which the gestures and the mesh tools' points have.
+        if (e.KeyModifiers != KeyModifiers.None)
+        {
+            return;
+        }
         if (e.Key == Key.Escape && _gesture == Gesture.Gizmo)
         {
             _shell.CancelGizmo();

@@ -16,6 +16,9 @@ public static class ShortcutScopes
     /// <summary>The content browser.</summary>
     public const string ContentBrowser = "contentBrowser";
 
+    /// <summary>Every scope, in no order that matters.</summary>
+    public static readonly IReadOnlyList<string> All = [Viewport, Canvas, ContentBrowser];
+
     /// <summary>Where a scope's keys work, for tooltips, as in "W in the viewport".</summary>
     public static string Label(string scope) => scope switch
     {

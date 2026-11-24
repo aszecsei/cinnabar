@@ -383,6 +383,24 @@ public sealed class ShellTests : IDisposable
         Assert.DoesNotContain(shell.KeyBindings.All, b => b.CommandId == command);
     }
 
+    // A scope's key comes before the window's, so a window shortcut with the same key does not run while the scope has the
+    // keyboard. Only the cutscene timeline's keys may share one, since they run only while the timeline has the keyboard.
+    [Fact]
+    public void AScopedKeyShadowsOnlyTheTimelinesWindowKeys()
+    {
+        using var shell = NewShell();
+        var window = shell.KeyBindings.All.ToLookup(b => Commands.KeyBindings.Normalize(b.Shortcut), b => b.CommandId);
+
+        var shadowed = Commands.ShortcutScopes.All
+            .SelectMany(scope => shell.KeyBindings.InScope(scope))
+            .SelectMany(b => window[Commands.KeyBindings.Normalize(b.Shortcut)])
+            .Distinct()
+            .Where(id => !id.StartsWith("cutscene.", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.Empty(shadowed);
+    }
+
     [Fact]
     public void AUserBindingMovesAViewportKey()
     {

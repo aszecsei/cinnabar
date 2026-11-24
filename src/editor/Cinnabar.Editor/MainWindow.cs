@@ -141,6 +141,17 @@ public sealed class MainWindow : Window
                 shell.Console.Add(LogLevel.Warning, $"key bindings: {shortcut} for {id} is not a key gesture");
             }
         }
+        // A scope's controls attach its keys themselves (see ScopeShortcuts), and skip one that is not a gesture: say so once.
+        if (window is MainWindow)
+        {
+            foreach (var scope in Commands.ShortcutScopes.All)
+            {
+                foreach (var (id, shortcut) in shell.KeyBindings.InScope(scope).Where(b => CommandViews.ParseGesture(b.Shortcut) == null))
+                {
+                    shell.Console.Add(LogLevel.Warning, $"key bindings: {shortcut} for {id} {Commands.ShortcutScopes.Label(scope)} is not a key gesture");
+                }
+            }
+        }
     }
 
     // Draws the controls of a panel's window, or of this window, into a PNG (see docs/editor/capture.md#automation). The
