@@ -2,51 +2,25 @@ using System.Text;
 
 namespace Cinnabar.Editor.Document;
 
-/// <summary>Whole lines of a decision that belong together. Together, a file's blocks hold every line that it has.</summary>
-public abstract class DecisionBlock : LineBlock;
-
-/// <summary>Comments, blank lines, the header, and lines that the cooker has no place for and reports.</summary>
-public sealed class DecisionOther : DecisionBlock;
-
-/// <summary>A <c>&lt;setting&gt; = &lt;value&gt;</c> line outside of a node, such as <c>technique</c> or <c>blackboard</c>.</summary>
-public sealed class DecisionSetting(string key) : DecisionBlock
-{
-    public string Key { get; } = key;
-
-    public string Value => Lines[0].Value;
-}
-
 /// <summary>A <c>node &lt;id&gt; &lt;kind&gt;</c> line and the lines of its fields and its writes.</summary>
-public sealed class DecisionNode(int id, string kind) : DecisionBlock
+public sealed class DecisionNode(int id, string kind) : GraphNodeBlock(id)
 {
-    public int Id { get; } = id;
-
     /// <summary>The node's kind, a word that its technique reads, such as <c>sequence</c> or <c>action</c>.</summary>
     public string Kind { get; } = kind;
 
-    IEnumerable<TextLine> Content => Lines.Skip(1).Where(l => !l.IsBlank);
+    // A write is not a field.
+    private protected override bool IsField(TextLine line) => !DecisionFile.IsWrite(line.Code);
 
-    IEnumerable<TextLine> FieldLines => Content.Where(l => !DecisionFile.IsWrite(l.Code));
-
-    IEnumerable<TextLine> WriteLines => Content.Where(l => DecisionFile.IsWrite(l.Code));
-
-    /// <summary>The fields in the file's order, without the writes. A field that the cooker reports as set twice is here twice.</summary>
-    public IEnumerable<(string Key, string Value)> Fields => FieldLines.Select(l => (l.Key, l.Value));
+    IEnumerable<TextLine> WriteLines => ContentLines.Where(l => DecisionFile.IsWrite(l.Code));
 
     /// <summary>The <c>set &lt;key&gt; = &lt;value&gt;</c> lines, in their order, which is the order that they apply in.</summary>
     public IReadOnlyList<(string Key, string Value)> Writes => [.. WriteLines.Select(l => (l.Key["set".Length..].Trim(), l.Value))];
-
-    /// <summary>A field's value as the file writes it, or null without it. The first line counts, as in the cooker.</summary>
-    public string? Get(string key) => NodeFields.Get(FieldLines, key);
-
-    /// <summary>Sets a field on its own line, keeping the line's comment, or with null, removes it. A new field comes before the writes.</summary>
-    public void Set(string key, string? value) => NodeFields.Set(Lines, l => !DecisionFile.IsWrite(l.Code), key, value, Indent);
 
     /// <summary>Replaces the node's writes, keeping the lines of those that stay where they are.</summary>
     public void SetWrites(IReadOnlyList<(string Key, string Value)> writes)
     {
         var old = WriteLines.ToList();
-        var at = old.Count > 0 ? Lines.IndexOf(old[0]) : Lines.IndexOf(Content.LastOrDefault() ?? Lines[0]) + 1;
+        var at = old.Count > 0 ? Lines.IndexOf(old[0]) : Lines.IndexOf(ContentLines.LastOrDefault() ?? Lines[0]) + 1;
         for (var i = 0; i < writes.Count; i++)
         {
             var code = $"set {writes[i].Key} = {writes[i].Value.ReplaceLineEndings(" ")}";
@@ -59,21 +33,13 @@ public sealed class DecisionNode(int id, string kind) : DecisionBlock
                 at = Lines.IndexOf(old[i]) + 1;
                 continue;
             }
-            Lines.Insert(at++, new TextLine($"{Indent}{code}", ""));
+            Lines.Insert(at++, new TextLine($"{NewLineIndent}{code}", ""));
         }
         foreach (var line in old.Skip(writes.Count))
         {
             Lines.Remove(line);
         }
     }
-
-    // A new field's or write's indent: the node's first line under its keyword line, a field or a write, or a tab.
-    string Indent => Content.FirstOrDefault()?.Indent ?? "\t";
-
-    /// <summary>Where the file puts the node, or null when it does not, or its position is not two numbers.</summary>
-    public (double X, double Y)? Position => NodeFields.Position(Get("position"));
-
-    public void SetPosition(double x, double y) => Set("position", NodeFields.PositionValue(x, y));
 
     /// <summary>The IDs that a list field, such as <c>children</c>, names, in their order. A word that is not an ID is left out.</summary>
     public IReadOnlyList<int> Ids(string key) => [.. IdWords(key).Select(w => w.Id).OfType<int>()];
@@ -107,7 +73,7 @@ public sealed class DecisionNode(int id, string kind) : DecisionBlock
     internal bool RenameKey(string name, string newName, bool apply = true)
     {
         var changed = false;
-        foreach (var line in Content.ToList())
+        foreach (var line in ContentLines.ToList())
         {
             if (DecisionFile.IsWrite(line.Code))
             {
@@ -142,7 +108,7 @@ public sealed class DecisionNode(int id, string kind) : DecisionBlock
 /// lines. It reads only the structure, the same for every technique. What a block's lines mean, and whether they are
 /// right, is the cooker's to say, so a decision with problems still opens, with its problems on its nodes.
 /// </summary>
-public sealed class DecisionFile : IndentedLineFile<DecisionBlock, DecisionOther>, ITextFile<DecisionFile>
+public sealed class DecisionFile : IndentedLineFile, ITextFile<DecisionFile>
 {
     public const string Header = "a decision starts with `decision 1`";
 
@@ -152,14 +118,9 @@ public sealed class DecisionFile : IndentedLineFile<DecisionBlock, DecisionOther
 
     public IEnumerable<DecisionNode> Nodes => _blocks.OfType<DecisionNode>();
 
-    public IEnumerable<DecisionSetting> Settings => _blocks.OfType<DecisionSetting>();
-
     private protected override string HeaderWord => "decision";
 
     private protected override string HeaderProblem => Header;
-
-    // A new setting goes after the settings that the file has.
-    private protected override SettingPlace NewSettingPlace => SettingPlace.AfterLastSetting;
 
     /// <summary>Whether a line's code is a write, <c>set &lt;key&gt; = &lt;value&gt;</c>, as the cooker tells them from fields.</summary>
     internal static bool IsWrite(string code) => code.StartsWith("set ", StringComparison.Ordinal) || code.StartsWith("set\t", StringComparison.Ordinal);
@@ -174,10 +135,10 @@ public sealed class DecisionFile : IndentedLineFile<DecisionBlock, DecisionOther
         return file.Read(text) is { } problem ? (null, problem) : (file, null);
     }
 
-    private protected override DecisionBlock? ReadBlock(TextLine line, string[] fields, HashSet<int> ids) =>
+    private protected override LineBlock? ReadBlock(TextLine line, string[] fields, HashSet<int> ids) =>
         fields[0] == "node" ? ReadNode(fields, ids) : ReadSetting(line);
 
-    private protected override bool HasIndentedLines(DecisionBlock block) => block is DecisionNode;
+    private protected override bool HasIndentedLines(LineBlock block) => block is DecisionNode;
 
     // A node's line, or null for one that the cooker reports, whose indented lines then have no node either.
     static DecisionNode? ReadNode(string[] fields, HashSet<int> ids) =>
@@ -185,16 +146,10 @@ public sealed class DecisionFile : IndentedLineFile<DecisionBlock, DecisionOther
             ? new DecisionNode(id, fields[2])
             : null;
 
-    static DecisionSetting? ReadSetting(TextLine line) =>
-        line.Code.Contains('=') && MaterialFile.IsIdentifier(line.Key) && line.Value.Length > 0 ? new DecisionSetting(line.Key) : null;
-
-    /// <summary>The node whose lines hold a line, from 1, or null for a line of no node.</summary>
-    public int? NodeAt(int line) => (BlockAt(line) as DecisionNode)?.Id;
+    static SettingBlock? ReadSetting(TextLine line) =>
+        line.Code.Contains('=') && MaterialFile.IsIdentifier(line.Key) && line.Value.Length > 0 ? new SettingBlock(line.Key) : null;
 
     public DecisionNode? Find(int id) => Nodes.FirstOrDefault(n => n.Id == id);
-
-    /// <summary>The ID after the highest.</summary>
-    public int NextId() => Nodes.Select(n => n.Id).DefaultIfEmpty(0).Max() + 1;
 
     /// <summary>A setting's value, or null without it. The first line counts, as in the cooker.</summary>
     public string? Setting(string key) => Settings.FirstOrDefault(s => s.Key == key)?.Value;
@@ -204,28 +159,6 @@ public sealed class DecisionFile : IndentedLineFile<DecisionBlock, DecisionOther
 
     /// <summary>The GUID of the blackboard that the decision names, in lower case and without its <c>$</c>, or null without one.</summary>
     public string? Blackboard => GraphValue.Parse(Setting("blackboard") ?? "") is GraphAsset asset ? asset.Guid : null;
-
-    /// <summary>Sets a setting on its line, or adds its line under the header and the settings, or with null, removes it.</summary>
-    public void SetSetting(string key, string? value)
-    {
-        var setting = Settings.FirstOrDefault(s => s.Key == key);
-        if (value == null)
-        {
-            if (setting != null)
-            {
-                Remove(setting);
-            }
-            return;
-        }
-        if (setting != null)
-        {
-            setting.Lines[0].SetValue(value);
-            return;
-        }
-        var block = new DecisionSetting(key);
-        block.Lines.Add(new TextLine($"{key} = {value}", ""));
-        InsertSetting(block, Settings.LastOrDefault());
-    }
 
     public void SetBlackboard(string guid) => SetSetting("blackboard", $"${guid.ToLowerInvariant()}");
 
@@ -237,9 +170,6 @@ public sealed class DecisionFile : IndentedLineFile<DecisionBlock, DecisionOther
         InsertInGroup(block, Nodes.LastOrDefault(), null);
         return block;
     }
-
-    /// <summary>Removes a block. A node takes the comment right above it, and leaves one blank line where it had one on each side.</summary>
-    public void Remove(DecisionBlock block) => Remove(block, takeComment: block is DecisionNode);
 
     /// <summary>
     /// Renames a blackboard key wherever the decision reads or writes it: conditions, times, action arguments' values,

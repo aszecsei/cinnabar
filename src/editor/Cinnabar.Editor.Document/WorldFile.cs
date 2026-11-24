@@ -2,24 +2,18 @@ using System.Globalization;
 
 namespace Cinnabar.Editor.Document;
 
-/// <summary>A line of a world and the comments and blank lines around its scenes.</summary>
-public abstract class WorldBlock : LineBlock;
-
-/// <summary>Comments, blank lines, the header, and lines that belong to no scene.</summary>
-public sealed class WorldOther : WorldBlock;
-
 /// <summary>
 /// A scene of a world: its <c>scene $&lt;guid&gt;</c> line and the setting lines after it. Its settings are read from
 /// those lines each time, so the scene has no state of its own that an edit could leave behind.
 /// </summary>
-public sealed class WorldScene : WorldBlock
+public sealed class WorldScene : FieldBlock
 {
     internal WorldScene(string guid) => Guid = guid;
 
     /// <summary>The scene asset's GUID, as 32 lowercase hex digits.</summary>
     public string Guid { get; }
 
-    public bool Persistent => Setting("persistent")?.Value == "true";
+    public bool Persistent => Get("persistent") == "true";
 
     /// <summary>The corner of the bounds with the lowest coordinates in meters, or null when the line is missing or is not three numbers.</summary>
     public double[]? Min => Vector("min");
@@ -38,18 +32,15 @@ public sealed class WorldScene : WorldBlock
     /// <summary><see cref="Max"/> as World_Position units, as the cooker makes them, or null when it has none or it is out of range.</summary>
     public long[]? RawMax => WorldFile.Raw(Max);
 
-    internal TextLine? Setting(string name) => Lines.Skip(1).FirstOrDefault(l => l.Code.Contains('=') && l.Key == name);
-
     double? Number(string name) =>
-        Setting(name) is { } line && double.TryParse(line.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) ? number : null;
+        Get(name) is { } value && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) ? number : null;
 
     double[]? Vector(string name)
     {
-        if (Setting(name) is not { } line)
+        if (Get(name)?.Trim() is not { } value)
         {
             return null;
         }
-        var value = line.Value.Trim();
         if (!value.StartsWith('[') || !value.EndsWith(']'))
         {
             return null;
@@ -69,7 +60,7 @@ public sealed class WorldScene : WorldBlock
 /// only its own lines. It reads the scenes as the cooker does, and a line that the cooker would refuse is kept as it
 /// is, so a world with problems still opens.
 /// </summary>
-public sealed class WorldFile : BlockListFile<WorldBlock, WorldOther>, ITextFile<WorldFile>
+public sealed class WorldFile : BlockListFile, ITextFile<WorldFile>
 {
     public const string Header = "a world starts with `world 1`";
 
@@ -192,36 +183,12 @@ public sealed class WorldFile : BlockListFile<WorldBlock, WorldOther>, ITextFile
     /// <summary>Three numbers of meters as the file writes them, such as <c>[0, 1.5, -2]</c>.</summary>
     public static string Format(double[] vector) => $"[{string.Join(", ", vector.Select(Format))}]";
 
-    // A new setting's indent: a tab, whatever the indent of the scene's other lines.
-    const string NewSettingIndent = "\t";
-
-    // Changes a setting's line, keeping its comment, or adds the line at the end of the scene.
-    static void Set(WorldScene scene, string name, string value)
-    {
-        if (scene.Setting(name) is { } line)
-        {
-            line.SetValue(value);
-        }
-        else
-        {
-            scene.Lines.Add(new TextLine($"{NewSettingIndent}{name} = {value}", ""));
-        }
-    }
-
-    static void Unset(WorldScene scene, string name)
-    {
-        if (scene.Setting(name) is { } line)
-        {
-            scene.Lines.Remove(line);
-        }
-    }
-
-    /// <summary>Adds a scene that is not persistent, at the end of the file.</summary>
+    /// <summary>Adds a scene that is not persistent, after the last scene.</summary>
     public WorldScene AddScene(string guid, double[] min, double[] max, double loadDistance)
     {
         var scene = new WorldScene(guid.ToLowerInvariant());
         scene.Lines.Add(new TextLine($"scene ${scene.Guid}", ""));
-        _blocks.Add(scene);
+        InsertInGroup(scene, Scenes.LastOrDefault(), null);
         SetBounds(scene, min, max);
         SetDistances(scene, loadDistance, null);
         return scene;
@@ -229,21 +196,21 @@ public sealed class WorldFile : BlockListFile<WorldBlock, WorldOther>, ITextFile
 
     public void SetBounds(WorldScene scene, double[] min, double[] max)
     {
-        Set(scene, "min", Format(min));
-        Set(scene, "max", Format(max));
+        scene.Set("min", Format(min));
+        scene.Set("max", Format(max));
     }
 
     /// <summary>Sets the distances in meters. A null unload distance removes its line, so the cooker uses the load distance times <see cref="DefaultUnloadFactor"/>.</summary>
     public void SetDistances(WorldScene scene, double loadDistance, double? unloadDistance)
     {
-        Set(scene, "load_distance", Format(loadDistance));
+        scene.Set("load_distance", Format(loadDistance));
         if (unloadDistance is { } unload)
         {
-            Set(scene, "unload_distance", Format(unload));
+            scene.Set("unload_distance", Format(unload));
         }
         else
         {
-            Unset(scene, "unload_distance");
+            scene.Set("unload_distance", null);
         }
     }
 
@@ -255,16 +222,13 @@ public sealed class WorldFile : BlockListFile<WorldBlock, WorldOther>, ITextFile
     {
         if (persistent)
         {
-            Set(scene, "persistent", "true");
+            scene.Set("persistent", "true");
         }
         else
         {
-            Unset(scene, "persistent");
+            scene.Set("persistent", null);
         }
     }
-
-    /// <summary>Removes a scene's lines, and not the comments after them.</summary>
-    public void Remove(WorldScene scene) => _blocks.Remove(scene);
 
     /// <summary>The scene that has a line, from 1, or null for a line of no scene.</summary>
     public WorldScene? SceneAt(int line) => BlockAt(line) as WorldScene;

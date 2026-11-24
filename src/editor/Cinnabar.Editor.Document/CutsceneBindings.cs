@@ -201,7 +201,7 @@ public static class CutsceneBindings
         {
             removed.Add(own);
         }
-        return [.. file.Root.Descendants().Where(b => !removed.Contains(b) && b.Settings.Any(s => Names(s.Key, s.Value, binding)))];
+        return [.. file.Root.Descendants().Where(b => !removed.Contains(b) && b.Fields.Any(s => Names(s.Key, s.Value, binding)))];
     }
 
     static bool Names(string key, string value, int binding)

@@ -69,7 +69,7 @@ sealed class AnimationGraphPanel : ScrollViewer
         _content.Children.Add(Heading("Graph"));
         _content.Children.Add(Row("Entry", Choice(_editor.StateNames, Graph.Entry, _editor.SetEntry)));
         _content.Children.Add(Row("Root motion", ValueBox(Graph.RootMotion ?? "", "no joint", _editor.SetRootMotion)));
-        AddProblems(_editor.Problems.Where(p => p.Node == null && Graph.BlockAt(p.Line) is AnimationGraphSetting));
+        AddProblems(_editor.Problems.Where(p => p.Node == null && Graph.BlockAt(p.Line) is SettingBlock));
 
         var add = new Button { Content = "Add", Classes = { "field-button" } };
         var menu = new MenuFlyout();
@@ -97,7 +97,7 @@ sealed class AnimationGraphPanel : ScrollViewer
         }
 
         // What is on no node and on no row here.
-        var general = _editor.Problems.Where(p => p.Node == null && Graph.BlockAt(p.Line) is null or AnimationGraphOther).ToList();
+        var general = _editor.Problems.Where(p => p.Node == null && Graph.BlockAt(p.Line) is null or OtherBlock).ToList();
         if (general.Count > 0)
         {
             _content.Children.Add(Heading("Problems"));

@@ -1,13 +1,7 @@
 namespace Cinnabar.Editor.Document;
 
-/// <summary>A line of a blackboard and the comments and blank lines around its keys.</summary>
-public abstract class BlackboardBlock : LineBlock;
-
-/// <summary>Comments, blank lines, the header, and lines that the cooker reports.</summary>
-public sealed class BlackboardOther : BlackboardBlock;
-
 /// <summary>A key's line: <c>&lt;type&gt; &lt;name&gt; [= &lt;default&gt;]</c>, or <c>enum &lt;name&gt; (&lt;value&gt;, ...) [= &lt;default&gt;]</c>.</summary>
-public sealed class BlackboardKey : BlackboardBlock
+public sealed class BlackboardKey : LineBlock
 {
     internal BlackboardKey(string type, string name, IReadOnlyList<string> values, string? @default)
     {
@@ -40,7 +34,7 @@ public sealed class BlackboardKey : BlackboardBlock
 /// and an edit changes only its own lines. It reads the keys' lines as the cooker does, and a line that the cooker would
 /// refuse is kept as it is, so a blackboard with problems still opens.
 /// </summary>
-public sealed class BlackboardFile : BlockListFile<BlackboardBlock, BlackboardOther>, ITextFile<BlackboardFile>
+public sealed class BlackboardFile : BlockListFile, ITextFile<BlackboardFile>
 {
     public const string Header = "a blackboard starts with `blackboard 1`";
 
@@ -128,20 +122,17 @@ public sealed class BlackboardFile : BlockListFile<BlackboardBlock, BlackboardOt
     /// <summary>The key on a line, from 1, or null for a line of no key.</summary>
     public BlackboardKey? KeyAt(int line) => BlockAt(line) as BlackboardKey;
 
-    /// <summary>Adds a key after the last key, or at the end of a blackboard without keys.</summary>
+    /// <summary>Adds a key after the last key, or at the end of a blackboard without keys, with a blank line before it.</summary>
     public BlackboardKey AddKey(string type, string name, IReadOnlyList<string> values, string? @default)
     {
         var key = new BlackboardKey(type, name, type == "enum" ? values : [], @default);
         key.Lines.Add(new TextLine(Code(type, name, key.Values, @default), ""));
-        _blocks.Insert(Keys.LastOrDefault() is { } last ? _blocks.IndexOf(last) + 1 : _blocks.Count, key);
+        InsertInGroup(key, Keys.LastOrDefault(), null);
         return key;
     }
 
     /// <summary>Changes a key's line, keeping its comment.</summary>
     public static void SetKey(BlackboardKey key, string type, string name, IReadOnlyList<string> values, string? @default) => key.Set(type, name, values, @default);
-
-    /// <summary>Removes a key's line.</summary>
-    public void Remove(BlackboardKey key) => _blocks.Remove(key);
 
     /// <summary>Moves a key one slot up or down, past the key before or after it, with what lies between them.</summary>
     public void Move(BlackboardKey key, int by)

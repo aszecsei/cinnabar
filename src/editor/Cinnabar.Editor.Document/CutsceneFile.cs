@@ -22,7 +22,7 @@ public enum CutsceneBlockKind
 /// and its settings, and the blocks under it. Together, a file's blocks hold every line that it has, in order: a block's
 /// own lines, then its children's.
 /// </summary>
-public sealed class CutsceneBlock : LineBlock
+public sealed class CutsceneBlock : FieldBlock
 {
     internal CutsceneBlock(CutsceneBlockKind kind, CutsceneBlock? parent)
     {
@@ -46,17 +46,11 @@ public sealed class CutsceneBlock : LineBlock
 
     public IReadOnlyList<CutsceneBlock> Children => ChildList;
 
-    // The keyword line: the first that is not blank or a comment. Only the cutscene's block has none before its header.
-    internal TextLine? Head => Lines.FirstOrDefault(l => !l.IsBlank);
-
-    // A block keeps the comments and blank lines above its keyword line, which the file's LineOf gives.
-    internal override int HeadIndex => Head is { } head ? Lines.IndexOf(head) : 0;
-
     // The words of the keyword line after the keyword.
     string[] Words => Head?.Code.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries) is [_, .. var rest] ? rest : [];
 
-    // The setting lines, after the keyword line.
-    IEnumerable<TextLine> SettingLines => Lines.SkipWhile(l => l != Head).Skip(1).Where(l => !l.IsBlank);
+    // The cutscene's settings are not indented. Every other block's are, as the base says.
+    internal override string NewLineIndent => Kind == CutsceneBlockKind.Cutscene ? "" : base.NewLineIndent;
 
     /// <summary>The ID of a binding, track, section, trigger, range or marker, or null for another block or a bad ID.</summary>
     public int? Id => Kind is CutsceneBlockKind.Binding or CutsceneBlockKind.Track or CutsceneBlockKind.Section
@@ -129,54 +123,13 @@ public sealed class CutsceneBlock : LineBlock
     /// <summary>A key's interpolation and what follows it, such as <c>bezier 0.5 -0.25</c>, or null for another block.</summary>
     public string? KeyInterpolation => Kind == CutsceneBlockKind.Key && Words.Length > 2 ? string.Join(' ', Words[2..]) : null;
 
-    /// <summary>The settings in the file's order, with a sub-sequence's <c>bind &lt;child&gt;</c> as its key.</summary>
-    public IEnumerable<(string Key, string Value)> Settings => SettingLines.Select(l => (l.Key, l.Value));
-
-    /// <summary>A setting's value as the file writes it, or null without it. The first line counts.</summary>
-    public string? Get(string key) => SettingLines.FirstOrDefault(l => l.Key == key)?.Value;
-
-    /// <summary>
-    /// Sets a setting on its own line, keeping the line's comment, or with null, removes it. A new setting goes after
-    /// the block's last one, so it comes before the blocks under it, as the cooker reads it.
-    /// </summary>
-    public void Set(string key, string? value)
-    {
-        if (value == null)
-        {
-            foreach (var setting in SettingLines.Where(l => l.Key == key).ToList())
-            {
-                Lines.Remove(setting);
-            }
-            return;
-        }
-        value = value.ReplaceLineEndings(" ");
-        if (SettingLines.FirstOrDefault(l => l.Key == key) is { } line)
-        {
-            line.SetValue(value);
-            return;
-        }
-        var last = SettingLines.LastOrDefault();
-        string indent;
-        if (last != null)
-        {
-            indent = last.Indent;
-        }
-        else
-        {
-            // The cutscene's settings are not indented. Every other block's are, a level under its keyword line.
-            indent = Kind == CutsceneBlockKind.Cutscene || Head == null ? "" : Head.Indent + "\t";
-        }
-        var at = last != null ? Lines.IndexOf(last) + 1 : Head != null ? Lines.IndexOf(Head) + 1 : Lines.Count;
-        Lines.Insert(at, new TextLine($"{indent}{key} = {value}", "", hashInWord: true));
-    }
-
     /// <summary>
     /// Puts another setting on a setting's line, keeping its indent and its comment, so every line stays where it was.
     /// False without the setting.
     /// </summary>
     public bool ReplaceSetting(string key, string newKey, string value)
     {
-        if (SettingLines.FirstOrDefault(l => l.Key == key) is not { } line)
+        if (FieldLines.FirstOrDefault(l => l.Key == key) is not { } line)
         {
             return false;
         }
@@ -187,7 +140,7 @@ public sealed class CutsceneBlock : LineBlock
     /// <summary>Makes a setting's lines comments, so the cooker skips them and every line stays where it was.</summary>
     public void CommentOut(string key)
     {
-        foreach (var line in SettingLines.Where(l => l.Key == key).ToList())
+        foreach (var line in FieldLines.Where(l => l.Key == key).ToList())
         {
             line.Text = $"{line.Indent}# {line.Text.TrimStart()}";
         }
