@@ -567,6 +567,17 @@ a_reference_to_a_draft_names_no_other_scene :: proc(t: ^testing.T) {
 	id, other := encode_entity_ref(w, target, ids, &f.scenes, gate_scene)
 	testing.expect_value(t, id, 0x99)
 	testing.expect_value(t, other, format.Guid{})
+	// The gate's Probe holds the target, so its component's fields name the draft by its new ID alone.
+	gate := find(&f.scenes, w, gate_scene, 0xa1)
+	encoded := false
+	for field in encode_fields(w, ecs.registry_find(&w.registry, PROBE_ID), ecs.get_raw(w, gate, PROBE_ID), nil, ids, context.temp_allocator, scenes = &f.scenes, holder = gate_scene) {
+		if field.name == "target" {
+			encoded = true
+			testing.expect_value(t, field.value.entity, 0x99)
+			testing.expect_value(t, field.value.scene, format.Guid{})
+		}
+	}
+	testing.expect(t, encoded)
 	delete_key(&ids, target)
 	id, other = encode_entity_ref(w, target, ids, &f.scenes, gate_scene)
 	testing.expect_value(t, id, 0xd1)

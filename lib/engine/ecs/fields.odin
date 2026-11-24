@@ -68,10 +68,16 @@ FIELD_TRAITS :: [Field_Kind]Field_Traits {
 	.Vector2 = {size = 8, align = 4, continuous = true},
 }
 
-// field_size is the size in bytes of a field of the kind. enum_base is the integer kind of an enum.
-field_size :: proc(kind: Field_Kind, enum_base: Field_Kind = .Bool) -> int {
+// field_traits is the kind's row of FIELD_TRAITS.
+field_traits :: proc(kind: Field_Kind) -> Field_Traits {
 	traits := FIELD_TRAITS
-	return int(traits[enum_base if kind == .Enum else kind].size)
+	return traits[kind]
+}
+
+// field_size is the size in bytes of a field of the kind. enum_base is the integer kind of an enum, and is ignored for
+// the other kinds.
+field_size :: proc(kind, enum_base: Field_Kind) -> int {
+	return int(field_traits(enum_base if kind == .Enum else kind).size)
 }
 
 // Overflow is what an integer access does with a value outside the field kind's range. Each caller passes its own:

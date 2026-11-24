@@ -83,10 +83,10 @@ field_traits_match_the_types :: proc(t: ^testing.T) {
 	for e in ([?]Expected{{.Bool, size_of(bool), align_of(bool)}, {.I8, size_of(i8), align_of(i8)}, {.I16, size_of(i16), align_of(i16)}, {.I32, size_of(i32), align_of(i32)}, {.I64, size_of(i64), align_of(i64)}, {.U8, size_of(u8), align_of(u8)}, {.U16, size_of(u16), align_of(u16)}, {.U32, size_of(u32), align_of(u32)}, {.U64, size_of(u64), align_of(u64)}, {.F32, size_of(f32), align_of(f32)}, {.F64, size_of(f64), align_of(f64)}, {.Vector3, size_of([3]f32), align_of([3]f32)}, {.Quaternion, size_of(quaternion128), 4}, {.Position, size_of(World_Position), align_of(World_Position)}, {.Entity, size_of(Entity), align_of(Entity)}, {.Asset, size_of(format.Guid), align_of(format.Guid)}, {.Vector2, size_of([2]f32), align_of([2]f32)}}) {
 		testing.expectf(
 			t,
-			field_size(e.kind) == e.size,
+			field_size(e.kind, .Bool) == e.size,
 			"%v is %d bytes",
 			e.kind,
-			field_size(e.kind),
+			field_size(e.kind, .Bool),
 		)
 		testing.expectf(
 			t,

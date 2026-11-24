@@ -179,8 +179,7 @@ stepped_key_problem :: proc(field: scene.Field, value: f32) -> string {
 		}
 		return "an enum's keys are the values of its names"
 	case:
-		traits := ecs.FIELD_TRAITS
-		if traits[field.kind].integer && value != math.floor(value) {
+		if ecs.field_traits(field.kind).integer && value != math.floor(value) {
 			return "an integer's keys are whole numbers"
 		}
 	}
@@ -297,8 +296,7 @@ put_stepped :: proc(ctx: ^Track_Context, target: Property_Field, out: []byte, v:
 // continuous is whether a field's kind blends between keys.
 @(private)
 continuous :: proc(kind: ecs.Field_Kind) -> bool {
-	traits := ecs.FIELD_TRAITS
-	return traits[kind].continuous
+	return ecs.field_traits(kind).continuous
 }
 
 // channel_component is which of a field's numbers a channel keys: value for a number and for every stepped kind, and
