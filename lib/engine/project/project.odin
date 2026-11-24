@@ -243,12 +243,10 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 	line := 0
 	for raw in strings.split_lines_iterator(&rest) {
 		line += 1
-		s := strings.trim_space(raw)
-		if s == "" || s[0] == '#' {
+		key, value, is_setting := format.settings_line(raw)
+		if !is_setting {
 			continue
 		}
-		key, _, value := strings.partition(s, "=")
-		key, value = strings.trim_space(key), strings.trim_space(value)
 		if key == "output" {
 			if output, ok := reflect.enum_from_name(gpu.Output_Request, value); ok {
 				settings.output = output
@@ -868,12 +866,8 @@ quality_values :: proc(q: render.Quality, caps: render.Caps) -> (values: [Qualit
 // editor's ProjectSettings.Set keeps them.
 set_value :: proc(text, key, value: string, allocator := context.temp_allocator) -> string {
 	line_key :: proc(line: string) -> string {
-		s := strings.trim_space(line)
-		if s == "" || s[0] == '#' {
-			return ""
-		}
-		k, _, _ := strings.partition(s, "=")
-		return strings.trim_space(k)
+		key, _, _ := format.settings_line(line)
+		return key
 	}
 	lines := make([dynamic]string, context.temp_allocator)
 	rest := text

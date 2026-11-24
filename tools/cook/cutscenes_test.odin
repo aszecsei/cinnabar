@@ -257,13 +257,6 @@ a_possess_names_an_instances_entity_by_its_path_and_comments_still_end_lines :: 
 		return
 	}
 	testing.expect_value(t, parsed.contents.bindings[0].entity, format.scene_path_id(0xb2, 0xc3))
-	testing.expect_value(t, strip_cutscene_comment("a#b # c"), "a#b ")
-	testing.expect_value(
-		t,
-		strip_cutscene_comment("text = \"#ff8800\"\t#c"),
-		"text = \"#ff8800\"\t",
-	)
-	testing.expect_value(t, strip_cutscene_comment("#all"), "")
 }
 
 @(test)

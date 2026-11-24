@@ -112,38 +112,53 @@ public static class ProjectSettings
             }
             foreach (var line in File.ReadAllLines(file))
             {
-                if (Parse(line) is not { } entry || !entry.Key.StartsWith(SublevelPrefix, StringComparison.Ordinal)
-                    || entry.Value is not ("active" or "inactive"))
-                {
-                    continue;
-                }
-                var name = entry.Key[SublevelPrefix.Length..];
-                if (!SceneFile.IsSublevelName(name))
+                if (!TryParseLine(line, out var key, out var value) || !TryParseSublevel(key, value, out var name, out var active))
                 {
                     continue;
                 }
                 var at = sublevels.FindIndex(s => s.Name == name);
                 if (at < 0)
                 {
-                    sublevels.Add((name, entry.Value == "active"));
+                    sublevels.Add((name, active));
                 }
                 else
                 {
-                    sublevels[at] = (name, entry.Value == "active");
+                    sublevels[at] = (name, active);
                 }
             }
         }
         return sublevels;
     }
 
-    static (string Key, string Value)? Parse(string line)
+    /// <summary>
+    /// Splits a <c>key = value</c> line as the engine's <c>format.settings_line</c> does, and is false for a blank line or
+    /// a comment. A line without <c>=</c> is a key with an empty value. <c>lib/engine/asset/format/testdata/lexemes.json</c>
+    /// pins the two together.
+    /// </summary>
+    public static bool TryParseLine(string line, out string key, out string value)
     {
         var trimmed = line.Trim();
-        var equals = trimmed.IndexOf('=');
-        if (trimmed.Length == 0 || trimmed[0] == '#' || equals <= 0)
+        if (trimmed.Length == 0 || trimmed[0] == '#')
         {
-            return null;
+            key = value = "";
+            return false;
         }
-        return (trimmed[..equals].Trim(), trimmed[(equals + 1)..].Trim());
+        var equals = trimmed.IndexOf('=');
+        (key, value) = equals < 0 ? (trimmed, "") : (trimmed[..equals].Trim(), trimmed[(equals + 1)..].Trim());
+        return true;
     }
+
+    /// <summary>
+    /// Reads a line <c>sublevel.&lt;name&gt; = active|inactive</c> as the engine's <c>format.sublevel_parse_setting</c>
+    /// does, and is false for another key, a name that <see cref="SceneFile.IsSublevelName"/> refuses or another value.
+    /// </summary>
+    public static bool TryParseSublevel(string key, string value, out string name, out bool active)
+    {
+        name = key.StartsWith(SublevelPrefix, StringComparison.Ordinal) ? key[SublevelPrefix.Length..] : "";
+        active = value == "active";
+        return name != "" && SceneFile.IsSublevelName(name) && value is "active" or "inactive";
+    }
+
+    static (string Key, string Value)? Parse(string line) =>
+        TryParseLine(line, out var key, out var value) ? (key, value) : null;
 }

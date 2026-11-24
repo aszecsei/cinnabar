@@ -163,7 +163,7 @@ check_ui_assets :: proc(
 		case:
 			continue
 		}
-		guid, valid := format.ui_parse_guid(p.value)
+		guid, valid := format.guid_ref(p.value)
 		if !valid {
 			continue
 		}

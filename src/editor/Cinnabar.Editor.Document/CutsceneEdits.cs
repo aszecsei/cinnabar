@@ -653,7 +653,7 @@ public static class CutsceneEdits
     public static HashSet<int> CutCameras(CutsceneFile file) =>
         [.. file.Tracks.Where(t => t.TrackKind == "camera_cut")
             .SelectMany(t => t.Children.Where(c => c.Kind == CutsceneBlockKind.Section))
-            .Select(s => s.Get("camera") is { } text && CutsceneFile.TryParseTicks(text.Trim(), out var id) ? id : (int?)null)
+            .Select(s => s.Get("camera") is { } text && CutsceneFile.TryParseId(text.Trim(), out var id) ? id : (int?)null)
             .OfType<int>()];
 
     /// <summary>
@@ -700,7 +700,7 @@ public static class CutsceneEdits
 
     /// <summary>The ID of the binding that a track is for, or null for a track of the cutscene's own, such as camera cuts.</summary>
     public static int? BindingOf(CutsceneBlock? track) =>
-        track?.Get("binding") is { } text && CutsceneFile.TryParseTicks(text.Trim(), out var id) ? id : null;
+        track?.Get("binding") is { } text && CutsceneFile.TryParseId(text.Trim(), out var id) ? id : null;
 
     // The kinds of track that the cooker wants with a binding, and those that it wants without one. The others, audio
     // and event tracks, may have one or not.

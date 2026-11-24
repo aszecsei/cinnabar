@@ -146,7 +146,7 @@ public sealed class WorldFile : BlockListFile, ITextFile<WorldFile>
     static string? ReadScene(string code)
     {
         var parts = code.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        return parts is ["scene", ['$', ..] word] && word.Length == 33 && word.Skip(1).All(Uri.IsHexDigit) ? word[1..].ToLowerInvariant() : null;
+        return parts is ["scene", var word] && AssetGuid.TryParseRef(word, out var scene) ? scene.Text : null;
     }
 
     /// <summary>

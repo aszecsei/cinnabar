@@ -25,7 +25,7 @@ public sealed partial class CutsceneEditor
 
     /// <summary>The binding that a camera binding's own focus constraint names, or null.</summary>
     public int? FocusOn(int binding) =>
-        File.Bindings.FirstOrDefault(b => b.Id == binding)?.Get("focus") is { } text && CutsceneFile.TryParseTicks(text.Trim(), out var id) ? id : null;
+        File.Bindings.FirstOrDefault(b => b.Id == binding)?.Get("focus") is { } text && CutsceneFile.TryParseId(text.Trim(), out var id) ? id : null;
 
     /// <summary>
     /// The binding that a camera focuses on at the playhead: its own focus constraint, or that of the camera cut section
@@ -39,8 +39,8 @@ public sealed partial class CutsceneEditor
         }
         var section = File.Tracks.Where(t => t.TrackKind == "camera_cut").SelectMany(t => t.Children)
             .FirstOrDefault(s => s.Kind == CutsceneBlockKind.Section && s.Start <= Playhead && Playhead < s.End
-                && s.Get("camera") is { } camera && CutsceneFile.TryParseTicks(camera.Trim(), out var id) && id == binding);
-        return section?.Get("focus") is { } text && CutsceneFile.TryParseTicks(text.Trim(), out var on) ? on : null;
+                && s.Get("camera") is { } camera && CutsceneFile.TryParseId(camera.Trim(), out var id) && id == binding);
+        return section?.Get("focus") is { } text && CutsceneFile.TryParseId(text.Trim(), out var on) ? on : null;
     }
 
     /// <summary>

@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
+using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Tools;
 
@@ -213,11 +214,7 @@ public static class MeshFile
             {
                 return "";
             }
-            if (text.Length != 33 || text[0] != '$' || !text.Skip(1).All(Uri.IsHexDigit))
-            {
-                return null;
-            }
-            return text[1..].ToLowerInvariant();
+            return AssetGuid.TryParseRef(text, out var asset) ? asset.Text : null;
         }
 
         void ParseVertex(string[] fields)

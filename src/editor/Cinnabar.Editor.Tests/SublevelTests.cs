@@ -142,4 +142,17 @@ public sealed class SublevelTests : IDisposable
         Assert.Equal([("night", true), ("day", true), ("quest_3_after", false)], ProjectSettings.Sublevels(project));
         Assert.Empty(ProjectSettings.Sublevels(_temp.Combine("missing.settings")));
     }
+
+    [Fact]
+    public void ALineWithoutAnEqualsSignSetsItsKeyToNothing()
+    {
+        // As format.settings_line reads it, so the game and the editor agree on what the file gives.
+        Directory.CreateDirectory(_temp.Path);
+        var path = _temp.Combine("bare.settings");
+        File.WriteAllText(path, "game.name = Demo\nui.scale\n");
+        Assert.Equal("", ProjectSettings.Get(path, "ui.scale"));
+        Assert.Equal(["game.name", "ui.scale"], ProjectSettings.Keys(path));
+        ProjectSettings.Set(path, "ui.scale", "2");
+        Assert.Equal("game.name = Demo\nui.scale = 2\n", File.ReadAllText(path));
+    }
 }

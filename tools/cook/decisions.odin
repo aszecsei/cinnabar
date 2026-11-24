@@ -133,7 +133,7 @@ decision_header :: proc(text: string) -> (header: Decision_Header) {
 			continue
 		}
 		key, has_value, value := strings.partition(
-			strings.trim_space(strip_line_comment(raw)),
+			strings.trim_space(format.strip_comment(raw)),
 			"=",
 		)
 		if has_value != "" && strings.trim_space(key) == "blackboard" {
@@ -278,7 +278,7 @@ decision_parse :: proc(
 	current := -1
 	for raw, index in strings.split_lines(text) {
 		line := index + 1
-		trimmed := strings.trim_space(strip_line_comment(raw))
+		trimmed := strings.trim_space(format.strip_comment(raw))
 		if trimmed == "" {
 			continue
 		}

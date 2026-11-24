@@ -206,12 +206,12 @@ public static partial class SceneFile
                     _entity.RemovedComponents.Add(id);
                     break;
                 case "behaviour":
-                    if (target.Length != 33 || target[0] != '$' || !target.Skip(1).All(Uri.IsHexDigit))
+                    if (!AssetGuid.TryParseRef(target, out var removed))
                     {
                         Error($"remove behaviour takes the script's GUID, such as $9d2e41c0b7a35f6e81c4d2a90b3e7f15, not \"{target}\"");
                         return;
                     }
-                    _entity.RemovedBehaviours.Add(target[1..].ToLowerInvariant());
+                    _entity.RemovedBehaviours.Add(removed.Text);
                     break;
                 default:
                     Error($"remove takes component <id> or behaviour $<guid>, not \"{argument}\"");
@@ -250,11 +250,12 @@ public static partial class SceneFile
                 Error("a behaviour needs an entity line before it");
                 return;
             }
-            if (argument.Length != 32 || !argument.All(Uri.IsHexDigit))
+            var parsed = AssetGuid.TryParse(argument, out var guid);
+            if (!parsed)
             {
                 Error($"a behaviour needs its script's GUID of 32 hex digits, not \"{argument}\"");
             }
-            var script = argument.ToLowerInvariant();
+            var script = parsed ? guid.Text : argument.ToLowerInvariant();
             if (_entity.Behaviours.Any(b => b.Script == script))
             {
                 Error($"the entity has the behaviour {argument} twice");
@@ -404,12 +405,12 @@ public static partial class SceneFile
                     {
                         return SceneValue.AssetRef("");
                     }
-                    if (text.Length != 33 || !text.Skip(1).All(Uri.IsHexDigit))
+                    if (!AssetGuid.TryParseRef(text, out var asset))
                     {
                         Error($"an asset is 32 hex digits after $, or $0 for none, not \"{text}\"");
                         return null;
                     }
-                    return SceneValue.AssetRef(text[1..]);
+                    return SceneValue.AssetRef(asset.Text);
                 case '[':
                     if (text[^1] != ']')
                     {
@@ -451,12 +452,12 @@ public static partial class SceneFile
             var scene = "";
             if (rest.IndexOf('/') is var slash and >= 0)
             {
-                scene = rest[..slash];
-                if (scene.Length != 32 || !scene.All(Uri.IsHexDigit) || scene.All(c => c == '0'))
+                if (!AssetGuid.TryParse(rest.AsSpan(0, slash), out var sceneGuid) || sceneGuid.IsZero)
                 {
                     Error($"a reference to another scene starts with its nonzero GUID of 32 hex digits and a slash after @, not \"{text}\"");
                     return null;
                 }
+                scene = sceneGuid.Text;
                 rest = rest[(slash + 1)..];
             }
             if (rest.Contains('#'))

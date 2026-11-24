@@ -27,7 +27,7 @@ public static class SceneSnapshot
 
     /// <summary>A GUID as hex as the wire has it: 16 zero bytes for "" or anything that is not 32 hex digits.</summary>
     public static byte[] GuidBytes(string guid) =>
-        guid.Length == 32 && guid.All(Uri.IsHexDigit) ? Convert.FromHexString(guid) : new byte[16];
+        AssetGuid.TryParse(guid, out var parsed) ? Convert.FromHexString(parsed.Text) : new byte[16];
 
     public static Wire.SceneEntity Entity(SceneEntity e) => new(
         e.Id,

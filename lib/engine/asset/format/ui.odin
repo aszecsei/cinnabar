@@ -453,14 +453,6 @@ ui_parse_color :: proc(text: string) -> (color: Ui_Color, ok: bool) {
 	return color, true
 }
 
-// ui_parse_guid parses $ and 32 hex digits.
-ui_parse_guid :: proc(text: string) -> (Guid, bool) {
-	if len(text) != 33 || text[0] != '$' {
-		return {}, false
-	}
-	return guid_parse(text[1:])
-}
-
 // ui_check_bindings checks a text's braces: {name} is a binding, and {{ and }} are a brace each. It gives what is wrong,
 // or "".
 ui_check_bindings :: proc(text: string) -> string {
@@ -547,7 +539,7 @@ ui_parse_value :: proc(attr: Ui_Attr, text: string) -> (value: Ui_Value, message
 		}
 		return t, ""
 	case .Guid:
-		guid, ok := ui_parse_guid(t)
+		guid, ok := guid_ref(t)
 		if !ok {
 			return nil, fmt.tprintf("is %q, not an asset: $ and 32 hex digits", t)
 		}

@@ -207,7 +207,7 @@ world_parse :: proc(
 	open, header := false, false
 	for raw, index in strings.split_lines(text) {
 		line := index + 1
-		trimmed := strings.trim_space(strip_line_comment(raw))
+		trimmed := strings.trim_space(format.strip_comment(raw))
 		if trimmed == "" {
 			continue
 		}

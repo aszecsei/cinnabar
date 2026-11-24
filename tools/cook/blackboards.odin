@@ -81,22 +81,6 @@ blackboard_check :: proc(path, text: string) -> (problems: Problems) {
 	return
 }
 
-// strip_line_comment is a line without a # and what follows it, outside of quotes.
-strip_line_comment :: proc(line: string) -> string {
-	quoted := false
-	for i := 0; i < len(line); i += 1 {
-		switch {
-		case quoted && line[i] == '\\':
-			i += 1
-		case line[i] == '"':
-			quoted = !quoted
-		case line[i] == '#' && !quoted:
-			return line[:i]
-		}
-	}
-	return line
-}
-
 // blackboard_parse parses a blackboard's text into the contents of its blob, without its GUID, key or path. It gives
 // every problem that it finds, and the blackboard is good only without any.
 blackboard_parse :: proc(
@@ -115,7 +99,7 @@ blackboard_parse :: proc(
 	header := false
 	for raw, index in strings.split_lines(text) {
 		line := index + 1
-		trimmed := strings.trim_space(strip_line_comment(raw))
+		trimmed := strings.trim_space(format.strip_comment(raw))
 		if trimmed == "" {
 			continue
 		}
