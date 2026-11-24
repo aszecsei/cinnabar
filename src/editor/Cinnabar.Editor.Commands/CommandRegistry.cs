@@ -93,11 +93,18 @@ public sealed class CommandRegistry
         }
     }
 
-    /// <summary>The owner closed: a refresh that waits does nothing, and no request posts another.</summary>
+    /// <summary>
+    /// The owner closed: a refresh that waits does nothing, no request posts another, and a change of scope refreshes
+    /// nothing, since the commands read an owner that is gone.
+    /// </summary>
     public void Close() => _refresh = RefreshState.Closed;
 
     void InvalidateAll()
     {
+        if (_refresh == RefreshState.Closed)
+        {
+            return;
+        }
         foreach (var command in _commands.Values)
         {
             command.Invalidate();

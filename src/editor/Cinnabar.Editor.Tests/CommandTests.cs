@@ -233,6 +233,10 @@ public class CommandTests
         commands.Close();
         posted[0]();
         commands.RequestInvalidate();
+        // A scope that the keyboard leaves after the close refreshes nothing either.
+        var canvas = new TableScope([]);
+        commands.Focus(canvas);
+        commands.Leave(canvas);
 
         Assert.Single(posted);
         Assert.Equal(0, changes);
