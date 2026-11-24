@@ -28,7 +28,7 @@ public sealed partial class LandscapeSession(EditorShell shell) : IViewportTool
     const double Spacing = 0.25;
 
     readonly Dictionary<string, LandscapeMap> _maps = [];
-    // The stroke under way, or null. Only Begin sets it, and only End and Cancel clear it.
+    // The stroke under way, or null. Only Begin sets it, and only the End and Cancel paths clear it.
     Painting? _painting;
     Wire.LandscapeOverlay _overlay = new(false, [0, 0, 0], [0, 1, 0], 0, 0);
 
@@ -186,12 +186,17 @@ public sealed partial class LandscapeSession(EditorShell shell) : IViewportTool
         {
             return null;
         }
+        _painting = TargetOf(Brush) == BrushTarget.Foliage ? BeginFoliage(surface, pose, hit) : BeginMap(surface, pose, hit);
+        return _painting;
+    }
+
+    // A map stroke and its first dab, or null when the surface has no map that the brush can paint.
+    Painting.OnMap? BeginMap(LandscapeSurface surface, Pose pose, LandscapeHit hit)
+    {
         string? newField = null;
         LandscapeMap? map;
         switch (TargetOf(Brush))
         {
-            case BrushTarget.Foliage:
-                return BeginFoliage(surface, pose, hit);
             case BrushTarget.Mask:
                 map = MaskOf(surface);
                 if (map == null && surface.HoleMask == "")
@@ -227,7 +232,6 @@ public sealed partial class LandscapeSession(EditorShell shell) : IViewportTool
         var dab = DabAt(hit, map, surface);
         var stroke = new LandscapeStroke(map.Grid, Brush, dab, Layer);
         var painting = new Painting.OnMap(this, Brush, Layer, stroke, map, surface, pose, map.Revision, LandscapeMap.NextRevision(), hit, newField);
-        _painting = painting;
         map.Touched(stroke.Apply(dab), painting.Revision);
         return painting;
     }

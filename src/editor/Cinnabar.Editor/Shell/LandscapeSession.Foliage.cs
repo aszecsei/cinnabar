@@ -57,7 +57,8 @@ public sealed partial class LandscapeSession
     static string InstancesOf(SceneEntity layer) =>
         layer.Components.First(c => c.Id == InstancedMeshRendererId).Fields.FirstOrDefault(f => f.Name == "instances")?.Value is { Kind: SceneValueKind.Asset } v ? v.Asset : "";
 
-    Painting? BeginFoliage(LandscapeSurface surface, Pose pose, LandscapeHit hit)
+    // A foliage stroke and its first dab, or null when the terrain has no foliage layer whose set the brush can paint.
+    Painting.OnFoliage? BeginFoliage(LandscapeSurface surface, Pose pose, LandscapeHit hit)
     {
         if (FoliageLayer(surface) is not { } layer)
         {
@@ -90,7 +91,6 @@ public sealed partial class LandscapeSession
         }
         var painting = new Painting.OnFoliage(this, Brush, Layer,
             new FoliageStroking(set, surface, pose, layer.Id, layerPose, set.Instances, [.. set.Instances], new Random(_foliageSeed++), newSet));
-        _painting = painting;
         Dab(painting, hit);
         return painting;
     }
