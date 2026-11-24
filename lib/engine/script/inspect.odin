@@ -34,6 +34,27 @@ Behaviour_Field :: struct {
 	asset_kind: string,
 }
 
+// field_value is the member of a field that its kind sets, or nil.
+field_value :: proc(f: Behaviour_Field) -> Value {
+	switch f.kind {
+	case .Nil:
+		return nil
+	case .Number:
+		return f.number
+	case .Boolean:
+		return f.boolean
+	case .String:
+		return f.text
+	case .Vector:
+		return f.vector
+	case .Entity:
+		return f.entity
+	case .Asset:
+		return f.asset
+	}
+	return nil
+}
+
 Behaviour_Snapshot :: struct {
 	class:   string,
 	// The script asset whose module returns the class, or zero for a class that no module returns.

@@ -29,15 +29,9 @@ Action_Status :: enum u8 {
 	Failed,
 }
 
-// Action_Value is an action's argument: a number, a boolean, a string, a vector, an entity or a position.
-Action_Value :: union {
-	f64,
-	bool,
-	string,
-	[3]f32,
-	ecs.Entity,
-	ecs.World_Position,
-}
+// Action_Value is an action's argument: a number, a boolean, a string, a vector, an entity or a position, as its
+// parameter's kind takes it.
+Action_Value :: Value
 
 Action_Arg :: struct {
 	name:  string,
@@ -121,42 +115,29 @@ action_of :: proc(r: ^Runtime, L: ^luau.State, idx: c.int) -> (Action_Handle, bo
 }
 
 // push_action_value pushes an argument as its parameter's kind takes it, or gives false for one of another kind.
-@(private = "file")
+@(private)
 push_action_value :: proc(r: ^Runtime, L: ^luau.State, kind: string, value: Action_Value) -> bool {
-	switch v in value {
-	case f64:
-		if kind != "number" {
-			return false
-		}
-		luau.pushnumber(L, v)
-	case bool:
-		if kind != "boolean" {
-			return false
-		}
-		luau.pushboolean(L, b32(v))
-	case string:
-		if kind != "string" {
-			return false
-		}
-		luau.pushlstring(L, raw_data(v), c.size_t(len(v)))
-	case [3]f32:
-		if kind != "vector" {
-			return false
-		}
-		push_vector(L, v)
-	case ecs.Entity:
-		if kind != "entity" {
-			return false
-		}
-		push_entity(L, v)
-	case ecs.World_Position:
-		if kind != "position" {
-			return false
-		}
-		push_position(L, v)
+	takes: Value_Kind
+	switch kind {
+	case "number":
+		takes = .Number
+	case "boolean":
+		takes = .Boolean
+	case "string":
+		takes = .String
+	case "vector":
+		takes = .Vector
+	case "entity":
+		takes = .Entity
+	case "position":
+		takes = .Position
 	case:
 		return false
 	}
+	if value_kind(value) != takes {
+		return false
+	}
+	push_value(r, L, value)
 	return true
 }
 

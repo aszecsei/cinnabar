@@ -827,7 +827,7 @@ attach_fields :: proc(
 		luau.newtable(L)
 		values = luau.gettop(L)
 		for f in fields {
-			push_behaviour_field(r, L, f)
+			push_value(r, L, field_value(f))
 			if problem := field_problem(r, L, class, schema, f.name, -1); problem != "" {
 				log.warnf(
 					"script: Entity(%s): %s, so the value is not set",
@@ -843,24 +843,4 @@ attach_fields :: proc(
 		}
 	}
 	attach(r, L, e, class, values, immediate)
-}
-
-@(private)
-push_behaviour_field :: proc(r: ^Runtime, L: ^luau.State, f: Behaviour_Field) {
-	switch f.kind {
-	case .Nil:
-		luau.pushnil(L)
-	case .Number:
-		luau.pushnumber(L, f.number)
-	case .Boolean:
-		luau.pushboolean(L, b32(f.boolean))
-	case .String:
-		luau.pushodinstring(L, f.text)
-	case .Vector:
-		luau.pushvector(L, f.vector.x, f.vector.y, f.vector.z)
-	case .Entity:
-		push_entity(L, f.entity)
-	case .Asset:
-		push_asset(r, L, f.asset)
-	}
 }

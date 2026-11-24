@@ -31,27 +31,12 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 			}
 			board, _ := board_of(s, slot.blackboard)
 			key := key_of(L, board, name)
-			switch v in decode(key.type, value_bytes(ready.values, key)) {
-			case f32:
-				luau.pushnumber(L, f64(v))
-			case i32:
-				luau.pushnumber(L, f64(v))
-			case bool:
-				luau.pushboolean(L, b32(v))
-			case Enum_Index:
-				luau.pushodinstring(
-					L,
-					format.blackboard_enum_name(board.data, board.blob, key, u32(v)),
-				)
-			case ecs.Entity:
-				script.push_entity(L, v)
-			case ecs.World_Position:
-				script.push_position(L, v)
-			case [3]f32:
-				script.push_vector(L, v)
-			case:
-				luau.pushnil(L)
+			v := decode(key.type, value_bytes(ready.values, key))
+			text: string
+			if index, is_enum := v.(Enum_Index); is_enum {
+				text = format.blackboard_enum_name(board.data, board.blob, key, u32(index))
 			}
+			script.push_value(script.runtime_of(L), L, script_value(v, text))
 			return 1
 		}, "(entity: Entity, key: string) -> any")
 	script.define(
@@ -344,25 +329,51 @@ key_of :: proc(L: ^luau.State, board: Board, name: string) -> format.Blackboard_
 	return format.blackboard_keys(board.data, board.blob)[slot]
 }
 
+// script_value is a blackboard value as scripts see it: a number for a float or an int, and text, an enum's name, for
+// an enum's index. nil stays nil.
+@(private)
+script_value :: proc(v: Value, text: string) -> script.Value {
+	switch x in v {
+	case f32:
+		return f64(x)
+	case i32:
+		return f64(x)
+	case bool:
+		return x
+	case Enum_Index:
+		return text
+	case ecs.Entity:
+		return x
+	case ecs.World_Position:
+		return x
+	case [3]f32:
+		return x
+	}
+	return nil
+}
+
 // value_arg reads a value whose key's type is not known yet, other than a string: a number is a float, and nil an
 // entity that is none.
 @(private = "file")
-value_arg :: proc(L: ^luau.State, idx: c.int) -> (Value, bool) {
-	#partial switch luau.type(L, idx) {
-	case .NUMBER:
-		return f32(luau.tonumber(L, idx)), true
-	case .BOOLEAN:
-		return bool(luau.toboolean(L, idx)), true
-	case .VECTOR:
-		return script.check_vector(L, idx), true
-	case .NIL:
-		return ecs.Entity(0), true
-	case .LIGHTUSERDATA:
-		return script.check_entity(L, idx), true
-	case .USERDATA:
-		if p, ok := script.to_position(L, idx); ok {
-			return p, true
-		}
+value_arg :: proc(L: ^luau.State, idx: c.int) -> (value: Value, ok: bool) {
+	v := script.check_value(
+		script.runtime_of(L),
+		L,
+		idx,
+		{.Nil, .Number, .Boolean, .Vector, .Entity, .Position},
+	) or_return
+	// check_value gives no other kind.
+	#partial switch x in v {
+	case f64:
+		return f32(x), true
+	case bool:
+		return x, true
+	case [3]f32:
+		return x, true
+	case ecs.Entity:
+		return x, true
+	case ecs.World_Position:
+		return x, true
 	}
-	return nil, false
+	return ecs.Entity(0), true
 }

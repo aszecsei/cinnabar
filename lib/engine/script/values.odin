@@ -40,6 +40,139 @@ Light_Value :: struct {
 	payload: u64,
 }
 
+// Value is a value that native code gives to Luau or reads back from it: an event's argument, an action's argument, a
+// behaviour's field, a blackboard's value or a save's entry. nil is Luau's nil. A string is a view, into the VM after
+// check_value or into whatever the caller made it from, so a caller that keeps one clones it.
+Value :: union {
+	f64,
+	bool,
+	string,
+	[3]f32,
+	ecs.Entity,
+	ecs.World_Position,
+	format.Guid,
+	Light_Value,
+}
+
+// Value_Kind is a Value's member, and Nil for none.
+Value_Kind :: enum u8 {
+	Nil,
+	Number,
+	Boolean,
+	String,
+	Vector,
+	Entity,
+	Position,
+	Asset,
+	Light,
+}
+
+Value_Kinds :: bit_set[Value_Kind]
+
+value_kind :: proc(v: Value) -> Value_Kind {
+	switch _ in v {
+	case f64:
+		return .Number
+	case bool:
+		return .Boolean
+	case string:
+		return .String
+	case [3]f32:
+		return .Vector
+	case ecs.Entity:
+		return .Entity
+	case ecs.World_Position:
+		return .Position
+	case format.Guid:
+		return .Asset
+	case Light_Value:
+		return .Light
+	}
+	return .Nil
+}
+
+// push_value pushes one value: nil for nil, the nil entity and the zero GUID.
+push_value :: proc(r: ^Runtime, L: ^luau.State, v: Value) {
+	switch x in v {
+	case f64:
+		luau.pushnumber(L, x)
+	case bool:
+		luau.pushboolean(L, b32(x))
+	case string:
+		luau.pushlstring(L, raw_data(x), c.size_t(len(x)))
+	case [3]f32:
+		push_vector(L, x)
+	case ecs.Entity:
+		push_entity(L, x)
+	case ecs.World_Position:
+		push_position(L, x)
+	case format.Guid:
+		push_asset(r, L, x)
+	case Light_Value:
+		push_light(L, x)
+	case:
+		luau.pushnil(L)
+	}
+}
+
+// check_value reads the value at idx if its kind is one of accepts, and is false otherwise. Unlike the other check
+// procs it raises no error, so that each caller raises its own. nil is read only when Nil is accepted. A light
+// userdata is an entity, then an asset, then any other tag's Light_Value, as far as each is accepted. A string is a
+// view into the VM.
+check_value :: proc(
+	r: ^Runtime,
+	L: ^luau.State,
+	idx: c.int,
+	accepts: Value_Kinds,
+) -> (
+	Value,
+	bool,
+) {
+	#partial switch luau.type(L, idx) {
+	case .NIL:
+		return nil, .Nil in accepts
+	case .NUMBER:
+		if .Number in accepts {
+			return luau.tonumber(L, idx), true
+		}
+	case .BOOLEAN:
+		if .Boolean in accepts {
+			return bool(luau.toboolean(L, idx)), true
+		}
+	case .STRING:
+		if .String in accepts {
+			return luau.toodinstring(L, idx), true
+		}
+	case .VECTOR:
+		if .Vector in accepts {
+			v := luau.tovector(L, idx)
+			return [3]f32{v[0], v[1], v[2]}, true
+		}
+	case .LIGHTUSERDATA:
+		tag := Light_Tag(luau.lightuserdatatag(L, idx))
+		if tag == .Entity && .Entity in accepts {
+			return to_entity(L, idx), true
+		}
+		if tag == .Asset && .Asset in accepts {
+			if guid := to_asset(r, L, idx); guid != {} {
+				return guid, true
+			}
+			return nil, false
+		}
+		if tag != .Entity && tag != .Asset && .Light in accepts {
+			payload, _ := to_light(L, idx, tag)
+			return Light_Value{tag, payload}, true
+		}
+	case .USERDATA:
+		if .Position in accepts {
+			if p, ok := to_position(L, idx); ok {
+				return p, true
+			}
+		}
+	}
+	return nil, false
+}
+
 // The most assets that scripts can refer to at once. A GUID keeps its place for the runtime's life.
 MAX_ASSET_REFS :: 4096
 

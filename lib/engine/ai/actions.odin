@@ -444,25 +444,10 @@ script_args :: proc(
 	result := make([]script.Action_Arg, len(args), allocator)
 	for x, i in args {
 		bytes, text := arg_value(decision, board, values, e, x)
-		value: script.Action_Value
-		switch v in decode(x.type, bytes[:]) {
-		case f32:
-			value = f64(v)
-		case i32:
-			value = f64(v)
-		case bool:
-			value = v
-		case Enum_Index:
-			value = text
-		case ecs.Entity:
-			value = v
-		case ecs.World_Position:
-			value = v
-		case [3]f32:
-			value = v
-		case:
-			// A String.
-			value = text
+		// A String decodes to nil, and its text is the value.
+		value: script.Value = text
+		if x.type != .String {
+			value = script_value(decode(x.type, bytes[:]), text)
 		}
 		result[i] = {format.blob_string(decision.data, x.name), value}
 	}
