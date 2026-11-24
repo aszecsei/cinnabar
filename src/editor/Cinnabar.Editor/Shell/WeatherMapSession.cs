@@ -264,7 +264,7 @@ public sealed class WeatherMapSession(EditorShell shell)
         }
         var guid = WeatherMapFile.NewGuid();
         var path = WeatherMapFile.PathFor(ContentRootFor(scene.Path), scene.Path);
-        if (File.Exists(path) || File.Exists(path + ".meta"))
+        if (File.Exists(path) || File.Exists(path + MetaFile.Extension))
         {
             shell.Console.Add(LogLevel.Error, $"weather: {path} exists already; name it in the clouds' weather map to paint it, or move it away");
             return false;
@@ -273,7 +273,7 @@ public sealed class WeatherMapSession(EditorShell shell)
         {
             // A new map's .meta file, with its GUID and its import settings, is the editor's to write, so the scene's
             // reference resolves at the daemon's next pass. The daemon owns it from then on.
-            SceneDocument.WriteAtomically(path + ".meta", WeatherMapFile.MetaText(guid));
+            SceneDocument.WriteAtomically(path + MetaFile.Extension, WeatherMapFile.MetaText(guid));
             WeatherMapFile.WriteAtomically(path, generated.EncodePng());
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
