@@ -463,44 +463,58 @@ blob_header :: proc "contextless" (data: []byte) -> (^Blob_Header, bool) {
 	return header, header.magic == BLOB_MAGIC
 }
 
+// blob_open checks the start of a blob of a kind: its header, its kind, its layout hash and that it holds a B. Each
+// <kind>_view starts with it, then checks its slices with slice_fits and its records with its own rules.
+blob_open :: proc "contextless" (
+	data: []byte,
+	kind: Asset_Kind,
+	layout: u64,
+	$B: typeid,
+) -> (
+	blob: ^B,
+	ok: bool,
+) {
+	header := blob_header(data) or_return
+	if header.kind != kind || header.layout != layout || len(data) < size_of(B) {
+		return nil, false
+	}
+	return (^B)(raw_data(data)), true
+}
+
+// slice_fits is whether a slice is inside a blob, its size a whole number of size-byte records, and its offset a
+// multiple of align. The alignment is its own argument because some slices of records are packed tighter than their
+// type's alignment, such as the GUIDs of a cutscene.
+slice_fits :: proc "contextless" (data: []byte, s: Slice, size, align: int) -> bool {
+	return(
+		u64(s.offset) + u64(s.size) <= u64(len(data)) &&
+		int(s.size) % size == 0 &&
+		int(s.offset) % align == 0 	)
+}
+
+// blob_records is a slice of a blob as records of T. The blob's view has checked the slice with slice_fits.
+blob_records :: proc "contextless" (data: []byte, s: Slice, $T: typeid) -> []T {
+	bytes := blob_bytes(data, s)
+	return ([^]T)(raw_data(bytes))[:len(bytes) / size_of(T)]
+}
+
 // script_view checks a script blob: its header, its layout and that every slice is inside it.
 script_view :: proc(data: []byte) -> (blob: ^Script_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Script ||
-	   header.layout != script_layout() ||
-	   len(data) < size_of(Script_Blob) {
-		return
-	}
-	blob = (^Script_Blob)(raw_data(data))
-	slices := [?]Slice {
-		blob.bytecode,
-		blob.requires,
-		blob.source_path,
-		blob.class_name,
-		blob.fields,
-		blob.category,
-	}
-	for s in slices {
-		if u64(s.offset) + u64(s.size) > u64(len(data)) {
-			return nil, false
-		}
-	}
-	if blob.requires.size % size_of(Script_Require) != 0 ||
-	   blob.requires.offset % align_of(Script_Require) != 0 {
+	blob = blob_open(data, .Script, script_layout(), Script_Blob) or_return
+	if !slice_fits(data, blob.bytecode, 1, 1) ||
+	   !slice_fits(data, blob.requires, size_of(Script_Require), align_of(Script_Require)) ||
+	   !slice_fits(data, blob.source_path, 1, 1) ||
+	   !slice_fits(data, blob.class_name, 1, 1) ||
+	   !slice_fits(data, blob.fields, size_of(Script_Field), align_of(Script_Field)) ||
+	   !slice_fits(data, blob.category, 1, 1) {
 		return nil, false
 	}
 	for r in script_requires(data, blob) {
-		if u64(r.path.offset) + u64(r.path.size) > u64(len(data)) {
+		if !slice_fits(data, r.path, 1, 1) {
 			return nil, false
 		}
 	}
-	if blob.fields.size % size_of(Script_Field) != 0 ||
-	   blob.fields.offset % align_of(Script_Field) != 0 {
-		return nil, false
-	}
 	for f in script_fields(data, blob) {
-		if u64(f.name.offset) + u64(f.name.size) > u64(len(data)) ||
-		   u64(f.text.offset) + u64(f.text.size) > u64(len(data)) {
+		if !slice_fits(data, f.name, 1, 1) || !slice_fits(data, f.text, 1, 1) {
 			return nil, false
 		}
 	}
@@ -508,13 +522,11 @@ script_view :: proc(data: []byte) -> (blob: ^Script_Blob, ok: bool) {
 }
 
 script_fields :: proc "contextless" (data: []byte, blob: ^Script_Blob) -> []Script_Field {
-	bytes := blob_bytes(data, blob.fields)
-	return ([^]Script_Field)(raw_data(bytes))[:len(bytes) / size_of(Script_Field)]
+	return blob_records(data, blob.fields, Script_Field)
 }
 
 script_requires :: proc "contextless" (data: []byte, blob: ^Script_Blob) -> []Script_Require {
-	bytes := blob_bytes(data, blob.requires)
-	return ([^]Script_Require)(raw_data(bytes))[:len(bytes) / size_of(Script_Require)]
+	return blob_records(data, blob.requires, Script_Require)
 }
 
 // script_find_require is the module that a require string resolves to.
@@ -630,6 +642,18 @@ reserve_bytes :: proc(buffer: ^[dynamic]byte, size, align: int) -> Slice {
 	offset := mem.align_forward_int(len(buffer), align)
 	resize(buffer, offset + size)
 	return {u32(offset), u32(size)}
+}
+
+// reserve_records reserves room for count records of T, aligned for T.
+@(private)
+reserve_records :: proc(buffer: ^[dynamic]byte, $T: typeid, count: int) -> Slice {
+	return reserve_bytes(buffer, count * size_of(T), align_of(T))
+}
+
+// put_record copies a record into the index-th place of a slice that reserve_records made.
+@(private)
+put_record :: proc(buffer: ^[dynamic]byte, s: Slice, index: int, record: ^$T) {
+	mem.copy(&buffer[int(s.offset) + index * size_of(T)], record, size_of(T))
 }
 
 @(private)

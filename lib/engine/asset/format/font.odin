@@ -60,22 +60,11 @@ font_layout :: proc() -> u64 {
 // font_view checks a font blob: its header, its layout, that its slices are inside it, that its glyphs are sorted, and
 // that each glyph's cell is inside the atlas.
 font_view :: proc(data: []byte) -> (blob: ^Font_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Font || header.layout != font_layout() || len(data) < size_of(Font_Blob) {
-		return
-	}
-	blob = (^Font_Blob)(raw_data(data))
-	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return(
-			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
-			int(s.size) % size == 0 &&
-			int(s.offset) % align == 0 \
-		)
-	}
-	if !inside(data, blob.glyphs, size_of(Font_Glyph), align_of(Font_Glyph)) ||
-	   !inside(data, blob.font_data, 1, BLOB_ALIGN) ||
-	   !inside(data, blob.family, 1, 1) ||
-	   !inside(data, blob.source_path, 1, 1) {
+	blob = blob_open(data, .Font, font_layout(), Font_Blob) or_return
+	if !slice_fits(data, blob.glyphs, size_of(Font_Glyph), align_of(Font_Glyph)) ||
+	   !slice_fits(data, blob.font_data, 1, BLOB_ALIGN) ||
+	   !slice_fits(data, blob.family, 1, 1) ||
+	   !slice_fits(data, blob.source_path, 1, 1) {
 		return nil, false
 	}
 	if blob.units_per_em == 0 || blob.em_size <= 0 || blob.range <= 0 {
@@ -94,8 +83,7 @@ font_view :: proc(data: []byte) -> (blob: ^Font_Blob, ok: bool) {
 }
 
 font_glyphs :: proc "contextless" (data: []byte, blob: ^Font_Blob) -> []Font_Glyph {
-	bytes := blob_bytes(data, blob.glyphs)
-	return ([^]Font_Glyph)(raw_data(bytes))[:len(bytes) / size_of(Font_Glyph)]
+	return blob_records(data, blob.glyphs, Font_Glyph)
 }
 
 // font_find_glyph is the glyph of an id in the atlas, if the atlas has it.

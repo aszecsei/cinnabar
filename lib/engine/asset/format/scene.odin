@@ -523,18 +523,15 @@ read_fields :: proc(
 // records is a slice of a blob as records of T, if it is inside the blob and aligned for T.
 @(private = "file")
 records :: proc(data: []byte, s: Slice, $T: typeid) -> ([]T, bool) {
-	if u64(s.offset) + u64(s.size) > u64(len(data)) ||
-	   s.size % size_of(T) != 0 ||
-	   s.offset % align_of(T) != 0 {
+	if !slice_fits(data, s, size_of(T), align_of(T)) {
 		return nil, false
 	}
-	bytes := blob_bytes(data, s)
-	return ([^]T)(raw_data(bytes))[:len(bytes) / size_of(T)], true
+	return blob_records(data, s, T), true
 }
 
 @(private = "file")
 text :: proc(data: []byte, s: Slice) -> (string, bool) {
-	if u64(s.offset) + u64(s.size) > u64(len(data)) {
+	if !slice_fits(data, s, 1, 1) {
 		return "", false
 	}
 	return blob_string(data, s), true

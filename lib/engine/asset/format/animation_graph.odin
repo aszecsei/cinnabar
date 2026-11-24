@@ -194,60 +194,47 @@ animation_graph_layout :: proc() -> u64 {
 // animation_graph_view checks an animation graph blob: its header, its layout, that its slices and records are inside
 // it, and that every index between its records is in range.
 animation_graph_view :: proc(data: []byte) -> (blob: ^Animation_Graph_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Animation_Graph ||
-	   header.layout != animation_graph_layout() ||
-	   len(data) < size_of(Animation_Graph_Blob) {
-		return
-	}
-	blob = (^Animation_Graph_Blob)(raw_data(data))
-	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return(
-			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
-			int(s.size) % size == 0 &&
-			int(s.offset) % align == 0 \
-		)
-	}
-	if !inside(data, blob.root_motion, 1, 1) ||
-	   !inside(data, blob.source_path, 1, 1) ||
-	   !inside(
+	blob = blob_open(data, .Animation_Graph, animation_graph_layout(), Animation_Graph_Blob) or_return
+	if !slice_fits(data, blob.root_motion, 1, 1) ||
+	   !slice_fits(data, blob.source_path, 1, 1) ||
+	   !slice_fits(
 			   data,
 			   blob.parameters,
 			   size_of(Animation_Graph_Parameter),
 			   align_of(Animation_Graph_Parameter),
 		   ) ||
-	   !inside(data, blob.clips, size_of(Animation_Graph_Clip), align_of(Animation_Graph_Clip)) ||
-	   !inside(
+	   !slice_fits(data, blob.clips, size_of(Animation_Graph_Clip), align_of(Animation_Graph_Clip)) ||
+	   !slice_fits(
 			   data,
 			   blob.markers,
 			   size_of(Animation_Graph_Marker),
 			   align_of(Animation_Graph_Marker),
 		   ) ||
-	   !inside(
+	   !slice_fits(
 			   data,
 			   blob.events,
 			   size_of(Animation_Graph_Event),
 			   align_of(Animation_Graph_Event),
 		   ) ||
-	   !inside(
+	   !slice_fits(
 			   data,
 			   blob.points,
 			   size_of(Animation_Graph_Point),
 			   align_of(Animation_Graph_Point),
 		   ) ||
-	   !inside(
+	   !slice_fits(
 			   data,
 			   blob.states,
 			   size_of(Animation_Graph_State),
 			   align_of(Animation_Graph_State),
 		   ) ||
-	   !inside(
+	   !slice_fits(
 			   data,
 			   blob.transitions,
 			   size_of(Animation_Graph_Transition),
 			   align_of(Animation_Graph_Transition),
 		   ) ||
-	   !inside(
+	   !slice_fits(
 			   data,
 			   blob.conditions,
 			   size_of(Animation_Graph_Condition),
@@ -276,12 +263,12 @@ animation_graph_view :: proc(data: []byte) -> (blob: ^Animation_Graph_Blob, ok: 
 		return nil, false
 	}
 	for p in parameters {
-		if !inside(data, p.name, 1, 1) || p.kind > max(Animation_Graph_Parameter_Kind) {
+		if !slice_fits(data, p.name, 1, 1) || p.kind > max(Animation_Graph_Parameter_Kind) {
 			return nil, false
 		}
 	}
 	for c in clips {
-		if !inside(data, c.name, 1, 1) || !range(c.first_marker, c.marker_count, len(markers)) {
+		if !slice_fits(data, c.name, 1, 1) || !range(c.first_marker, c.marker_count, len(markers)) {
 			return nil, false
 		}
 	}
@@ -291,11 +278,11 @@ animation_graph_view :: proc(data: []byte) -> (blob: ^Animation_Graph_Blob, ok: 
 		}
 	}
 	for e in events {
-		if !inside(data, e.name, 1, 1) {
+		if !slice_fits(data, e.name, 1, 1) {
 			return nil, false
 		}
 		for a in e.args {
-			if a.kind > max(Animation_Graph_Value_Kind) || !inside(data, a.text, 1, 1) {
+			if a.kind > max(Animation_Graph_Value_Kind) || !slice_fits(data, a.text, 1, 1) {
 				return nil, false
 			}
 		}
@@ -306,7 +293,7 @@ animation_graph_view :: proc(data: []byte) -> (blob: ^Animation_Graph_Blob, ok: 
 		}
 	}
 	for s in states {
-		if !inside(data, s.name, 1, 1) ||
+		if !slice_fits(data, s.name, 1, 1) ||
 		   s.motion > max(Animation_Graph_Motion) ||
 		   s.point_count == 0 ||
 		   !range(s.first_point, s.point_count, len(points)) ||
@@ -346,85 +333,56 @@ animation_graph_parameters :: proc "contextless" (
 	data: []byte,
 	blob: ^Animation_Graph_Blob,
 ) -> []Animation_Graph_Parameter {
-	bytes := blob_bytes(data, blob.parameters)
-	return(
-		([^]Animation_Graph_Parameter)(raw_data(bytes))[:len(bytes) /
-		size_of(Animation_Graph_Parameter)] \
-	)
+	return blob_records(data, blob.parameters, Animation_Graph_Parameter)
 }
 
 animation_graph_clips :: proc "contextless" (
 	data: []byte,
 	blob: ^Animation_Graph_Blob,
 ) -> []Animation_Graph_Clip {
-	bytes := blob_bytes(data, blob.clips)
-	return ([^]Animation_Graph_Clip)(raw_data(bytes))[:len(bytes) / size_of(Animation_Graph_Clip)]
+	return blob_records(data, blob.clips, Animation_Graph_Clip)
 }
 
 animation_graph_markers :: proc "contextless" (
 	data: []byte,
 	blob: ^Animation_Graph_Blob,
 ) -> []Animation_Graph_Marker {
-	bytes := blob_bytes(data, blob.markers)
-	return(
-		([^]Animation_Graph_Marker)(raw_data(bytes))[:len(bytes) /
-		size_of(Animation_Graph_Marker)] \
-	)
+	return blob_records(data, blob.markers, Animation_Graph_Marker)
 }
 
 animation_graph_events :: proc "contextless" (
 	data: []byte,
 	blob: ^Animation_Graph_Blob,
 ) -> []Animation_Graph_Event {
-	bytes := blob_bytes(data, blob.events)
-	return(
-		([^]Animation_Graph_Event)(raw_data(bytes))[:len(bytes) /
-		size_of(Animation_Graph_Event)] \
-	)
+	return blob_records(data, blob.events, Animation_Graph_Event)
 }
 
 animation_graph_points :: proc "contextless" (
 	data: []byte,
 	blob: ^Animation_Graph_Blob,
 ) -> []Animation_Graph_Point {
-	bytes := blob_bytes(data, blob.points)
-	return(
-		([^]Animation_Graph_Point)(raw_data(bytes))[:len(bytes) /
-		size_of(Animation_Graph_Point)] \
-	)
+	return blob_records(data, blob.points, Animation_Graph_Point)
 }
 
 animation_graph_states :: proc "contextless" (
 	data: []byte,
 	blob: ^Animation_Graph_Blob,
 ) -> []Animation_Graph_State {
-	bytes := blob_bytes(data, blob.states)
-	return(
-		([^]Animation_Graph_State)(raw_data(bytes))[:len(bytes) /
-		size_of(Animation_Graph_State)] \
-	)
+	return blob_records(data, blob.states, Animation_Graph_State)
 }
 
 animation_graph_transitions :: proc "contextless" (
 	data: []byte,
 	blob: ^Animation_Graph_Blob,
 ) -> []Animation_Graph_Transition {
-	bytes := blob_bytes(data, blob.transitions)
-	return(
-		([^]Animation_Graph_Transition)(raw_data(bytes))[:len(bytes) /
-		size_of(Animation_Graph_Transition)] \
-	)
+	return blob_records(data, blob.transitions, Animation_Graph_Transition)
 }
 
 animation_graph_conditions :: proc "contextless" (
 	data: []byte,
 	blob: ^Animation_Graph_Blob,
 ) -> []Animation_Graph_Condition {
-	bytes := blob_bytes(data, blob.conditions)
-	return(
-		([^]Animation_Graph_Condition)(raw_data(bytes))[:len(bytes) /
-		size_of(Animation_Graph_Condition)] \
-	)
+	return blob_records(data, blob.conditions, Animation_Graph_Condition)
 }
 
 Animation_Graph_Parameter_Contents :: struct {
@@ -496,12 +454,6 @@ animation_graph_write :: proc(
 	allocator := context.allocator,
 ) -> []byte {
 	buffer := make([dynamic]byte, size_of(Animation_Graph_Blob), allocator)
-	records :: proc(buffer: ^[dynamic]byte, $T: typeid, count: int) -> Slice {
-		return reserve_bytes(buffer, count * size_of(T), align_of(T))
-	}
-	put :: proc(buffer: ^[dynamic]byte, s: Slice, index: int, record: ^$T) {
-		mem.copy(&buffer[int(s.offset) + index * size_of(T)], record, size_of(T))
-	}
 	marker_count, point_count, condition_count := 0, 0, 0
 	for c in contents.clips {
 		marker_count += len(c.markers)
@@ -512,14 +464,14 @@ animation_graph_write :: proc(
 	for t in contents.transitions {
 		condition_count += len(t.conditions)
 	}
-	parameters := records(&buffer, Animation_Graph_Parameter, len(contents.parameters))
-	clips := records(&buffer, Animation_Graph_Clip, len(contents.clips))
-	markers := records(&buffer, Animation_Graph_Marker, marker_count)
-	events := records(&buffer, Animation_Graph_Event, len(contents.events))
-	points := records(&buffer, Animation_Graph_Point, point_count)
-	states := records(&buffer, Animation_Graph_State, len(contents.states))
-	transitions := records(&buffer, Animation_Graph_Transition, len(contents.transitions))
-	conditions := records(&buffer, Animation_Graph_Condition, condition_count)
+	parameters := reserve_records(&buffer, Animation_Graph_Parameter, len(contents.parameters))
+	clips := reserve_records(&buffer, Animation_Graph_Clip, len(contents.clips))
+	markers := reserve_records(&buffer, Animation_Graph_Marker, marker_count)
+	events := reserve_records(&buffer, Animation_Graph_Event, len(contents.events))
+	points := reserve_records(&buffer, Animation_Graph_Point, point_count)
+	states := reserve_records(&buffer, Animation_Graph_State, len(contents.states))
+	transitions := reserve_records(&buffer, Animation_Graph_Transition, len(contents.transitions))
+	conditions := reserve_records(&buffer, Animation_Graph_Condition, condition_count)
 	text :: proc(buffer: ^[dynamic]byte, s: string) -> Slice {
 		return append_bytes(buffer, transmute([]byte)s)
 	}
@@ -531,7 +483,7 @@ animation_graph_write :: proc(
 			kind    = p.kind,
 			default = p.default,
 		}
-		put(&buffer, parameters, i, &record)
+		put_record(&buffer, parameters, i, &record)
 	}
 	next_marker := 0
 	for c, i in contents.clips {
@@ -541,10 +493,10 @@ animation_graph_write :: proc(
 			first_marker = u32(next_marker),
 			marker_count = u32(len(c.markers)),
 		}
-		put(&buffer, clips, i, &record)
+		put_record(&buffer, clips, i, &record)
 		for m in c.markers {
 			m := m
-			put(&buffer, markers, next_marker, &m)
+			put_record(&buffer, markers, next_marker, &m)
 			next_marker += 1
 		}
 	}
@@ -560,7 +512,7 @@ animation_graph_write :: proc(
 				text   = text(&buffer, a.text),
 			}
 		}
-		put(&buffer, events, i, &record)
+		put_record(&buffer, events, i, &record)
 	}
 
 	// The transitions in their groups, and the first of each state's group.
@@ -594,10 +546,10 @@ animation_graph_write :: proc(
 			duration        = t.duration,
 			node            = t.node,
 		}
-		put(&buffer, transitions, i, &record)
+		put_record(&buffer, transitions, i, &record)
 		for c in t.conditions {
 			c := c
-			put(&buffer, conditions, next_condition, &c)
+			put_record(&buffer, conditions, next_condition, &c)
 			next_condition += 1
 		}
 	}
@@ -619,10 +571,10 @@ animation_graph_write :: proc(
 			transition_count = count[i],
 			node             = s.node,
 		}
-		put(&buffer, states, i, &record)
+		put_record(&buffer, states, i, &record)
 		for p in s.points {
 			p := p
-			put(&buffer, points, next_point, &p)
+			put_record(&buffer, points, next_point, &p)
 			next_point += 1
 		}
 	}

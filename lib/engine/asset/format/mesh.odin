@@ -460,11 +460,7 @@ mesh_layout :: proc() -> u64 {
 // counts give. data is the whole blob or, for a paged mesh, at least its head: the pages past the head are checked
 // against the blob's file_size, and each page's contents by mesh_page_view when it is read.
 mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Mesh || header.layout != mesh_layout() || len(data) < size_of(Mesh_Blob) {
-		return
-	}
-	blob = (^Mesh_Blob)(raw_data(data))
+	blob = blob_open(data, .Mesh, mesh_layout(), Mesh_Blob) or_return
 	slices := [?]Slice {
 		blob.submeshes,
 		blob.positions,
@@ -485,7 +481,7 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 		blob.page_dependencies,
 	}
 	for s in slices {
-		if u64(s.offset) + u64(s.size) > u64(len(data)) {
+		if !slice_fits(data, s, 1, 1) {
 			return nil, false
 		}
 	}
@@ -582,7 +578,7 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 		return nil, false
 	}
 	for s in mesh_submeshes(data, blob) {
-		if u64(s.name.offset) + u64(s.name.size) > u64(len(data)) ||
+		if !slice_fits(data, s.name, 1, 1) ||
 		   u64(s.first_index) + u64(s.index_count) > u64(blob.index_count) ||
 		   u64(s.first_meshlet) + u64(s.meshlet_count) > u64(meshlet_count) ||
 		   u64(s.first_node) + u64(s.node_count) > u64(len(nodes)) ||
@@ -650,14 +646,12 @@ mesh_head_size :: proc(start: []byte) -> int {
 
 // mesh_pages is a paged mesh's page table, empty for a mesh without pages.
 mesh_pages :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []Mesh_Page {
-	bytes := blob_bytes(data, blob.pages)
-	return ([^]Mesh_Page)(raw_data(bytes))[:len(bytes) / size_of(Mesh_Page)]
+	return blob_records(data, blob.pages, Mesh_Page)
 }
 
 // mesh_page_dependencies is what the pages' first_dependency and dependency_count are ranges of.
 mesh_page_dependencies :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []u32 {
-	bytes := blob_bytes(data, blob.page_dependencies)
-	return ([^]u32)(raw_data(bytes))[:len(bytes) / 4]
+	return blob_records(data, blob.page_dependencies, u32)
 }
 
 // mesh_page_view checks an uncompressed page against its record in the table and the mesh's attribute stride: its
@@ -824,8 +818,7 @@ mesh_level_buckets :: proc "contextless" (
 }
 
 mesh_submeshes :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []Mesh_Submesh {
-	bytes := blob_bytes(data, blob.submeshes)
-	return ([^]Mesh_Submesh)(raw_data(bytes))[:len(bytes) / size_of(Mesh_Submesh)]
+	return blob_records(data, blob.submeshes, Mesh_Submesh)
 }
 
 // mesh_face_area is the sum of a mesh's triangles' areas as vectors: it points the way that its faces look, and is
@@ -834,8 +827,7 @@ mesh_face_area :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> (area: 
 	if .Paged in blob.flags {
 		return blob.face_area
 	}
-	position_bytes := blob_bytes(data, blob.positions)
-	positions := ([^][3]f32)(raw_data(position_bytes))[:len(position_bytes) / 12]
+	positions := blob_records(data, blob.positions, [3]f32)
 	index_bytes := blob_bytes(data, blob.indices)
 	wide := .Index32 in blob.flags
 	count := len(index_bytes) / (wide ? 4 : 2)
@@ -859,18 +851,15 @@ mesh_face_area :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> (area: 
 // mesh_collision_positions, mesh_collision_triangles and mesh_collision_submeshes are a mesh's collision data. A mesh
 // cooked without it has none.
 mesh_collision_positions :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> [][3]f32 {
-	bytes := blob_bytes(data, blob.collision_positions)
-	return ([^][3]f32)(raw_data(bytes))[:len(bytes) / 12]
+	return blob_records(data, blob.collision_positions, [3]f32)
 }
 
 mesh_collision_triangles :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> [][3]u32 {
-	bytes := blob_bytes(data, blob.collision_triangles)
-	return ([^][3]u32)(raw_data(bytes))[:len(bytes) / 12]
+	return blob_records(data, blob.collision_triangles, [3]u32)
 }
 
 mesh_collision_submeshes :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []u16 {
-	bytes := blob_bytes(data, blob.collision_submeshes)
-	return ([^]u16)(raw_data(bytes))[:len(bytes) / 2]
+	return blob_records(data, blob.collision_submeshes, u16)
 }
 
 // impostor_texels is how many texels an impostor's atlas has, for a frame's side.
@@ -880,24 +869,20 @@ impostor_texels :: proc "contextless" (size: u32) -> u32 {
 
 // mesh_impostor is a mesh's impostor atlas, empty for a mesh cooked without one.
 mesh_impostor :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []Impostor_Texel {
-	bytes := blob_bytes(data, blob.impostor)
-	return ([^]Impostor_Texel)(raw_data(bytes))[:len(bytes) / size_of(Impostor_Texel)]
+	return blob_records(data, blob.impostor, Impostor_Texel)
 }
 
 // mesh_skin is a mesh's skin stream, empty for a mesh without the Skinned flag.
 mesh_skin :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []Mesh_Skin_Vertex {
-	bytes := blob_bytes(data, blob.skin)
-	return ([^]Mesh_Skin_Vertex)(raw_data(bytes))[:len(bytes) / size_of(Mesh_Skin_Vertex)]
+	return blob_records(data, blob.skin, Mesh_Skin_Vertex)
 }
 
 mesh_meshlets :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []Meshlet {
-	bytes := blob_bytes(data, blob.meshlets)
-	return ([^]Meshlet)(raw_data(bytes))[:len(bytes) / size_of(Meshlet)]
+	return blob_records(data, blob.meshlets, Meshlet)
 }
 
 mesh_meshlet_nodes :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []Meshlet_Node {
-	bytes := blob_bytes(data, blob.meshlet_nodes)
-	return ([^]Meshlet_Node)(raw_data(bytes))[:len(bytes) / size_of(Meshlet_Node)]
+	return blob_records(data, blob.meshlet_nodes, Meshlet_Node)
 }
 
 Submesh_Entry :: struct {

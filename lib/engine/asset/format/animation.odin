@@ -70,24 +70,12 @@ animation_layout :: proc() -> u64 {
 // animation_view checks an animation blob: its header, its layout, its slices, and that each channel's joint is one
 // of the skin's and its keys are in the blob.
 animation_view :: proc(data: []byte) -> (blob: ^Animation_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Animation ||
-	   header.layout != animation_layout() ||
-	   len(data) < size_of(Animation_Blob) {
-		return
-	}
-	blob = (^Animation_Blob)(raw_data(data))
-	for s in ([?]Slice{blob.channels, blob.times, blob.values, blob.name, blob.source_path}) {
-		if u64(s.offset) + u64(s.size) > u64(len(data)) {
-			return nil, false
-		}
-	}
-	if blob.channels.size % size_of(Animation_Channel) != 0 ||
-	   blob.channels.offset % align_of(Animation_Channel) != 0 ||
-	   blob.times.size % 4 != 0 ||
-	   blob.times.offset % 4 != 0 ||
-	   blob.values.size % 4 != 0 ||
-	   blob.values.offset % 4 != 0 {
+	blob = blob_open(data, .Animation, animation_layout(), Animation_Blob) or_return
+	if !slice_fits(data, blob.channels, size_of(Animation_Channel), align_of(Animation_Channel)) ||
+	   !slice_fits(data, blob.times, size_of(f32), align_of(f32)) ||
+	   !slice_fits(data, blob.values, size_of(f32), align_of(f32)) ||
+	   !slice_fits(data, blob.name, 1, 1) ||
+	   !slice_fits(data, blob.source_path, 1, 1) {
 		return nil, false
 	}
 	times := u64(blob.times.size / 4)
@@ -109,18 +97,15 @@ animation_channels :: proc "contextless" (
 	data: []byte,
 	blob: ^Animation_Blob,
 ) -> []Animation_Channel {
-	bytes := blob_bytes(data, blob.channels)
-	return ([^]Animation_Channel)(raw_data(bytes))[:len(bytes) / size_of(Animation_Channel)]
+	return blob_records(data, blob.channels, Animation_Channel)
 }
 
 animation_times :: proc "contextless" (data: []byte, blob: ^Animation_Blob) -> []f32 {
-	bytes := blob_bytes(data, blob.times)
-	return ([^]f32)(raw_data(bytes))[:len(bytes) / 4]
+	return blob_records(data, blob.times, f32)
 }
 
 animation_values :: proc "contextless" (data: []byte, blob: ^Animation_Blob) -> []f32 {
-	bytes := blob_bytes(data, blob.values)
-	return ([^]f32)(raw_data(bytes))[:len(bytes) / 4]
+	return blob_records(data, blob.values, f32)
 }
 
 // Animation_Contents is what animation_write builds a blob from: channels whose ranges index times and values.

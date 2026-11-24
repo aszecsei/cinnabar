@@ -623,61 +623,48 @@ cutscene_layout :: proc() -> u64 {
 // cutscene_view checks a cutscene blob: its header, its layout, that its slices are inside it, and every record, so
 // that a reader can index the tables without checks of its own.
 cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Cutscene ||
-	   header.layout != cutscene_layout() ||
-	   len(data) < size_of(Cutscene_Blob) {
-		return
-	}
-	blob = (^Cutscene_Blob)(raw_data(data))
-	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return(
-			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
-			int(s.size) % size == 0 &&
-			int(s.offset) % align == 0 \
-		)
-	}
-	if !inside(data, blob.bindings, size_of(Cutscene_Binding), align_of(Cutscene_Binding)) ||
-	   !inside(data, blob.tracks, size_of(Cutscene_Track), align_of(Cutscene_Track)) ||
-	   !inside(data, blob.sections, size_of(Cutscene_Section), align_of(Cutscene_Section)) ||
-	   !inside(data, blob.channels, size_of(Cutscene_Channel), align_of(Cutscene_Channel)) ||
-	   !inside(data, blob.keys, size_of(Cutscene_Key), align_of(Cutscene_Key)) ||
-	   !inside(data, blob.source_path, 1, 1) ||
-	   !inside(data, blob.input_context, 1, 1) ||
-	   !inside(data, blob.hide_ui, size_of(Guid), 1) ||
-	   !inside(data, blob.guids, size_of(Guid), 1) ||
-	   !inside(
+	blob = blob_open(data, .Cutscene, cutscene_layout(), Cutscene_Blob) or_return
+	if !slice_fits(data, blob.bindings, size_of(Cutscene_Binding), align_of(Cutscene_Binding)) ||
+	   !slice_fits(data, blob.tracks, size_of(Cutscene_Track), align_of(Cutscene_Track)) ||
+	   !slice_fits(data, blob.sections, size_of(Cutscene_Section), align_of(Cutscene_Section)) ||
+	   !slice_fits(data, blob.channels, size_of(Cutscene_Channel), align_of(Cutscene_Channel)) ||
+	   !slice_fits(data, blob.keys, size_of(Cutscene_Key), align_of(Cutscene_Key)) ||
+	   !slice_fits(data, blob.source_path, 1, 1) ||
+	   !slice_fits(data, blob.input_context, 1, 1) ||
+	   !slice_fits(data, blob.hide_ui, size_of(Guid), 1) ||
+	   !slice_fits(data, blob.guids, size_of(Guid), 1) ||
+	   !slice_fits(
 			   data,
 			   blob.constraints,
 			   size_of(Cutscene_Constraint),
 			   align_of(Cutscene_Constraint),
 		   ) ||
-	   !inside(
+	   !slice_fits(
 			   data,
 			   blob.skip_ranges,
 			   size_of(Cutscene_Skip_Range),
 			   align_of(Cutscene_Skip_Range),
 		   ) ||
-	   !inside(data, blob.events, size_of(Cutscene_Event), align_of(Cutscene_Event)) ||
-	   !inside(
+	   !slice_fits(data, blob.events, size_of(Cutscene_Event), align_of(Cutscene_Event)) ||
+	   !slice_fits(
 			   data,
 			   blob.event_values,
 			   size_of(Cutscene_Event_Value),
 			   align_of(Cutscene_Event_Value),
 		   ) ||
-	   !inside(
+	   !slice_fits(
 			   data,
 			   blob.binding_maps,
 			   size_of(Cutscene_Binding_Map),
 			   align_of(Cutscene_Binding_Map),
 		   ) ||
-	   !inside(
+	   !slice_fits(
 			   data,
 			   blob.presentations,
 			   size_of(Cutscene_Presentation),
 			   align_of(Cutscene_Presentation),
 		   ) ||
-	   !inside(data, blob.markers, size_of(Cutscene_Marker), align_of(Cutscene_Marker)) ||
+	   !slice_fits(data, blob.markers, size_of(Cutscene_Marker), align_of(Cutscene_Marker)) ||
 	   blob.reserved2 != 0 {
 		return nil, false
 	}
@@ -730,7 +717,7 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 		if m.time < 0 ||
 		   m.time > blob.length ||
 		   m.name.size == 0 ||
-		   !inside(data, m.name, 1, 1) ||
+		   !slice_fits(data, m.name, 1, 1) ||
 		   m.color.a != 255 ||
 		   (i > 0 &&
 				   (m.time < markers[i - 1].time ||
@@ -743,7 +730,7 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 		   b.policy > .Optional ||
 		   transmute(u8)b.suspend & ~transmute(u8)CUTSCENE_SUSPEND_ALL != 0 ||
 		   b.flags - {.Keep_Velocity} != {} ||
-		   !inside(data, b.name, 1, 1) ||
+		   !slice_fits(data, b.name, 1, 1) ||
 		   (b.kind != .Provided && b.asset == {}) {
 			return nil, false
 		}
@@ -776,8 +763,8 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 		   tr.finish > .Keep ||
 		   tr.flags - {.Muted, .Follow_Camera} != {} ||
 		   (.Follow_Camera in tr.flags && tr.kind != .Presentation) ||
-		   !inside(data, tr.name, 1, 1) ||
-		   !inside(data, tr.field, 1, 1) ||
+		   !slice_fits(data, tr.name, 1, 1) ||
+		   !slice_fits(data, tr.field, 1, 1) ||
 		   (tr.kind == .Property) !=
 			   (tr.component != 0 && tr.field.size > 0 && tr.field_hash != 0) ||
 		   (tr.kind != .Property && (tr.component != 0 || tr.field_hash != 0)) ||
@@ -922,7 +909,7 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 			}
 			next_channel += s.channel_count
 			for c in channels[s.first_channel:][:s.channel_count] {
-				if !inside(data, c.name, 1, 1) ||
+				if !slice_fits(data, c.name, 1, 1) ||
 				   c.key_count == 0 ||
 				   c.flags - {.Guids} != {} ||
 				   (.Guids in c.flags && tr.kind != .Property) ||
@@ -1054,9 +1041,6 @@ cutscene_presentations_valid :: proc(
 	tracks: []Cutscene_Track,
 	sections: []Cutscene_Section,
 ) -> bool {
-	inside :: proc(data: []byte, s: Slice) -> bool {
-		return u64(s.offset) + u64(s.size) <= u64(len(data))
-	}
 	next := 0
 	for tr in tracks {
 		if tr.kind != .Presentation {
@@ -1070,9 +1054,9 @@ cutscene_presentations_valid :: proc(
 			next += 1
 			if p.section != tr.first_section + j ||
 			   p.kind > .Subtitle ||
-			   !inside(data, p.speaker) ||
-			   !inside(data, p.text) ||
-			   !inside(data, p.key) {
+			   !slice_fits(data, p.speaker, 1, 1) ||
+			   !slice_fits(data, p.text, 1, 1) ||
+			   !slice_fits(data, p.key, 1, 1) {
 				return false
 			}
 			switch p.kind {
@@ -1148,7 +1132,7 @@ cutscene_events_valid :: proc(
 			   ev.end < ev.start ||
 			   (j > 0 && ev.start < track_events[j - 1].start) ||
 			   ev.name.size == 0 ||
-			   u64(ev.name.offset) + u64(ev.name.size) > u64(len(data)) ||
+			   !slice_fits(data, ev.name, 1, 1) ||
 			   ev.value_count > MAX_CUTSCENE_EVENT_VALUES ||
 			   ev.first_value != next_value ||
 			   u64(ev.first_value) + u64(ev.value_count) > u64(len(values)) {
@@ -1192,7 +1176,7 @@ cutscene_event_value_valid :: proc "contextless" (
 	case .Bool:
 		return v.index <= 1
 	case .String:
-		return u64(v.text.offset) + u64(v.text.size) <= u64(len(data))
+		return slice_fits(data, v.text, 1, 1)
 	case .Vector:
 		for axis in v.vector {
 			if !finite(f64(axis)) {
@@ -1300,40 +1284,34 @@ cutscene_bindings :: proc "contextless" (
 	data: []byte,
 	blob: ^Cutscene_Blob,
 ) -> []Cutscene_Binding {
-	bytes := blob_bytes(data, blob.bindings)
-	return ([^]Cutscene_Binding)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Binding)]
+	return blob_records(data, blob.bindings, Cutscene_Binding)
 }
 
 cutscene_tracks :: proc "contextless" (data: []byte, blob: ^Cutscene_Blob) -> []Cutscene_Track {
-	bytes := blob_bytes(data, blob.tracks)
-	return ([^]Cutscene_Track)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Track)]
+	return blob_records(data, blob.tracks, Cutscene_Track)
 }
 
 cutscene_sections :: proc "contextless" (
 	data: []byte,
 	blob: ^Cutscene_Blob,
 ) -> []Cutscene_Section {
-	bytes := blob_bytes(data, blob.sections)
-	return ([^]Cutscene_Section)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Section)]
+	return blob_records(data, blob.sections, Cutscene_Section)
 }
 
 cutscene_channels :: proc "contextless" (
 	data: []byte,
 	blob: ^Cutscene_Blob,
 ) -> []Cutscene_Channel {
-	bytes := blob_bytes(data, blob.channels)
-	return ([^]Cutscene_Channel)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Channel)]
+	return blob_records(data, blob.channels, Cutscene_Channel)
 }
 
 cutscene_keys :: proc "contextless" (data: []byte, blob: ^Cutscene_Blob) -> []Cutscene_Key {
-	bytes := blob_bytes(data, blob.keys)
-	return ([^]Cutscene_Key)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Key)]
+	return blob_records(data, blob.keys, Cutscene_Key)
 }
 
 // cutscene_guids is the assets that GUID keys name, by index.
 cutscene_guids :: proc "contextless" (data: []byte, blob: ^Cutscene_Blob) -> []Guid {
-	bytes := blob_bytes(data, blob.guids)
-	return ([^]Guid)(raw_data(bytes))[:len(bytes) / size_of(Guid)]
+	return blob_records(data, blob.guids, Guid)
 }
 
 // cutscene_constraints is the camera constraints of sections and of bindings.
@@ -1341,8 +1319,7 @@ cutscene_constraints :: proc "contextless" (
 	data: []byte,
 	blob: ^Cutscene_Blob,
 ) -> []Cutscene_Constraint {
-	bytes := blob_bytes(data, blob.constraints)
-	return ([^]Cutscene_Constraint)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Constraint)]
+	return blob_records(data, blob.constraints, Cutscene_Constraint)
 }
 
 // cutscene_binding_maps is the sub-sequence sections' maps of their children's bindings, in section order.
@@ -1350,8 +1327,7 @@ cutscene_binding_maps :: proc "contextless" (
 	data: []byte,
 	blob: ^Cutscene_Blob,
 ) -> []Cutscene_Binding_Map {
-	bytes := blob_bytes(data, blob.binding_maps)
-	return ([^]Cutscene_Binding_Map)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Binding_Map)]
+	return blob_records(data, blob.binding_maps, Cutscene_Binding_Map)
 }
 
 // cutscene_section_maps is the maps of one sub-sequence section's child's bindings, by the section's index, in a blob
@@ -1380,8 +1356,7 @@ cutscene_section_maps :: proc "contextless" (
 // cutscene_markers is the cutscene's markers, in time order and then ID order. Nothing at run time reads them yet: they
 // are where a later seek to a named time would look.
 cutscene_markers :: proc "contextless" (data: []byte, blob: ^Cutscene_Blob) -> []Cutscene_Marker {
-	bytes := blob_bytes(data, blob.markers)
-	return ([^]Cutscene_Marker)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Marker)]
+	return blob_records(data, blob.markers, Cutscene_Marker)
 }
 
 // cutscene_presentations is the presentation rows, one for each section of a presentation track, in section order.
@@ -1389,11 +1364,7 @@ cutscene_presentations :: proc "contextless" (
 	data: []byte,
 	blob: ^Cutscene_Blob,
 ) -> []Cutscene_Presentation {
-	bytes := blob_bytes(data, blob.presentations)
-	return(
-		([^]Cutscene_Presentation)(raw_data(bytes))[:len(bytes) /
-		size_of(Cutscene_Presentation)] \
-	)
+	return blob_records(data, blob.presentations, Cutscene_Presentation)
 }
 
 // cutscene_presentation_of is the presentation row of a section of a presentation track, by the section's index, in a
@@ -1423,8 +1394,7 @@ cutscene_presentation_of :: proc "contextless" (
 }
 
 cutscene_events :: proc "contextless" (data: []byte, blob: ^Cutscene_Blob) -> []Cutscene_Event {
-	bytes := blob_bytes(data, blob.events)
-	return ([^]Cutscene_Event)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Event)]
+	return blob_records(data, blob.events, Cutscene_Event)
 }
 
 // cutscene_event_values is the events' values, each event's after those of the events before it.
@@ -1432,8 +1402,7 @@ cutscene_event_values :: proc "contextless" (
 	data: []byte,
 	blob: ^Cutscene_Blob,
 ) -> []Cutscene_Event_Value {
-	bytes := blob_bytes(data, blob.event_values)
-	return ([^]Cutscene_Event_Value)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Event_Value)]
+	return blob_records(data, blob.event_values, Cutscene_Event_Value)
 }
 
 // cutscene_track_events is an event track's events, in a blob that cutscene_view checked.
@@ -1473,8 +1442,7 @@ cutscene_cut_track :: proc "contextless" (
 
 // cutscene_hide_ui is the GUIDs of the UI documents that a cutscene hides while it plays.
 cutscene_hide_ui :: proc "contextless" (data: []byte, blob: ^Cutscene_Blob) -> []Guid {
-	bytes := blob_bytes(data, blob.hide_ui)
-	return ([^]Guid)(raw_data(bytes))[:len(bytes) / size_of(Guid)]
+	return blob_records(data, blob.hide_ui, Guid)
 }
 
 // cutscene_skip_ranges is the parts of a cutscene that a player can skip, in time order, when its skip is Ranges.
@@ -1482,8 +1450,7 @@ cutscene_skip_ranges :: proc "contextless" (
 	data: []byte,
 	blob: ^Cutscene_Blob,
 ) -> []Cutscene_Skip_Range {
-	bytes := blob_bytes(data, blob.skip_ranges)
-	return ([^]Cutscene_Skip_Range)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Skip_Range)]
+	return blob_records(data, blob.skip_ranges, Cutscene_Skip_Range)
 }
 
 // cutscene_skip_target is where a skip at a time goes: the end of the cutscene's range when it skips anywhere, the end

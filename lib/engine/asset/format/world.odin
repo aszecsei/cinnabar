@@ -67,22 +67,9 @@ world_layout :: proc() -> u64 {
 
 // world_view checks a world blob: its header, its layout, and that its slices are inside it.
 world_view :: proc(data: []byte) -> (blob: ^World_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .World ||
-	   header.layout != world_layout() ||
-	   len(data) < size_of(World_Blob) {
-		return
-	}
-	blob = (^World_Blob)(raw_data(data))
-	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return(
-			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
-			int(s.size) % size == 0 &&
-			int(s.offset) % align == 0 \
-		)
-	}
-	if !inside(data, blob.scenes, size_of(World_Scene_Record), align_of(World_Scene_Record)) ||
-	   !inside(data, blob.source_path, 1, 1) ||
+	blob = blob_open(data, .World, world_layout(), World_Blob) or_return
+	if !slice_fits(data, blob.scenes, size_of(World_Scene_Record), align_of(World_Scene_Record)) ||
+	   !slice_fits(data, blob.source_path, 1, 1) ||
 	   int(blob.scenes.size) / size_of(World_Scene_Record) > MAX_WORLD_SCENES {
 		return nil, false
 	}
@@ -90,8 +77,7 @@ world_view :: proc(data: []byte) -> (blob: ^World_Blob, ok: bool) {
 }
 
 world_scenes :: proc "contextless" (data: []byte, blob: ^World_Blob) -> []World_Scene_Record {
-	bytes := blob_bytes(data, blob.scenes)
-	return ([^]World_Scene_Record)(raw_data(bytes))[:len(bytes) / size_of(World_Scene_Record)]
+	return blob_records(data, blob.scenes, World_Scene_Record)
 }
 
 World_Contents :: struct {

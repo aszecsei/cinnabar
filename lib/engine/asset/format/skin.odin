@@ -50,24 +50,17 @@ skin_layout :: proc() -> u64 {
 
 // skin_view checks a skin blob: its header, its layout, its slices, and that each joint's parent comes before it.
 skin_view :: proc(data: []byte) -> (blob: ^Skin_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Skin || header.layout != skin_layout() || len(data) < size_of(Skin_Blob) {
-		return
-	}
-	blob = (^Skin_Blob)(raw_data(data))
-	for s in ([?]Slice{blob.joints, blob.name, blob.source_path}) {
-		if u64(s.offset) + u64(s.size) > u64(len(data)) {
-			return nil, false
-		}
-	}
-	if blob.joints.size != blob.joint_count * size_of(Skin_Joint) ||
-	   blob.joints.offset % align_of(Skin_Joint) != 0 {
+	blob = blob_open(data, .Skin, skin_layout(), Skin_Blob) or_return
+	if !slice_fits(data, blob.joints, size_of(Skin_Joint), align_of(Skin_Joint)) ||
+	   !slice_fits(data, blob.name, 1, 1) ||
+	   !slice_fits(data, blob.source_path, 1, 1) ||
+	   blob.joints.size != blob.joint_count * size_of(Skin_Joint) {
 		return nil, false
 	}
 	for j, i in skin_joints(data, blob) {
 		if j.parent < -1 ||
 		   int(j.parent) >= i ||
-		   u64(j.name.offset) + u64(j.name.size) > u64(len(data)) {
+		   !slice_fits(data, j.name, 1, 1) {
 			return nil, false
 		}
 	}
@@ -75,8 +68,7 @@ skin_view :: proc(data: []byte) -> (blob: ^Skin_Blob, ok: bool) {
 }
 
 skin_joints :: proc "contextless" (data: []byte, blob: ^Skin_Blob) -> []Skin_Joint {
-	bytes := blob_bytes(data, blob.joints)
-	return ([^]Skin_Joint)(raw_data(bytes))[:len(bytes) / size_of(Skin_Joint)]
+	return blob_records(data, blob.joints, Skin_Joint)
 }
 
 Skin_Joint_Entry :: struct {

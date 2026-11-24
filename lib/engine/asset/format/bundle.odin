@@ -130,14 +130,8 @@ bundle_view :: proc(
 	if header.file_size != u64(file_size) || u64(header.head_size) > header.file_size {
 		return nil, nil, false
 	}
-	inside :: proc(head: []byte, s: Slice, $T: typeid) -> bool {
-		return(
-			u64(s.offset) + u64(s.size) <= u64(len(head)) &&
-			s.size % size_of(T) == 0 &&
-			s.offset % align_of(T) == 0 \
-		)
-	}
-	if !inside(head, header.entries, Bundle_Entry) || !inside(head, header.dependencies, Slice) {
+	if !slice_fits(head, header.entries, size_of(Bundle_Entry), align_of(Bundle_Entry)) ||
+	   !slice_fits(head, header.dependencies, size_of(Slice), align_of(Slice)) {
 		return nil, nil, false
 	}
 	entries = bundle_entries(head, header)
@@ -155,7 +149,7 @@ bundle_view :: proc(
 		}
 	}
 	for d in bundle_dependency_slices(head, header) {
-		if u64(d.offset) + u64(d.size) > u64(len(head)) ||
+		if !slice_fits(head, d, 1, 1) ||
 		   d.size == 0 ||
 		   d.size > BUNDLE_MAX_NAME {
 			return nil, nil, false
@@ -165,14 +159,12 @@ bundle_view :: proc(
 }
 
 bundle_entries :: proc "contextless" (head: []byte, header: ^Bundle_Header) -> []Bundle_Entry {
-	bytes := blob_bytes(head, header.entries)
-	return ([^]Bundle_Entry)(raw_data(bytes))[:len(bytes) / size_of(Bundle_Entry)]
+	return blob_records(head, header.entries, Bundle_Entry)
 }
 
 @(private = "file")
 bundle_dependency_slices :: proc "contextless" (head: []byte, header: ^Bundle_Header) -> []Slice {
-	bytes := blob_bytes(head, header.dependencies)
-	return ([^]Slice)(raw_data(bytes))[:len(bytes) / size_of(Slice)]
+	return blob_records(head, header.dependencies, Slice)
 }
 
 // bundle_dependency is the name of a bundle's dependency, which points into its head.

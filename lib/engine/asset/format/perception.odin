@@ -89,23 +89,10 @@ perception_layout :: proc() -> u64 {
 // perception_view checks a perception blob: its header, its layout, that its slices are inside it, and that each row's
 // source is known and reads only a row before it that chooses an entity.
 perception_view :: proc(data: []byte) -> (blob: ^Perception_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Perception ||
-	   header.layout != perception_layout() ||
-	   len(data) < size_of(Perception_Blob) {
-		return
-	}
-	blob = (^Perception_Blob)(raw_data(data))
-	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return(
-			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
-			int(s.size) % size == 0 &&
-			int(s.offset) % align == 0 \
-		)
-	}
-	if !inside(data, blob.notices, size_of(Slice), align_of(Slice)) ||
-	   !inside(data, blob.rows, size_of(Perception_Row), align_of(Perception_Row)) ||
-	   !inside(data, blob.source_path, 1, 1) {
+	blob = blob_open(data, .Perception, perception_layout(), Perception_Blob) or_return
+	if !slice_fits(data, blob.notices, size_of(Slice), align_of(Slice)) ||
+	   !slice_fits(data, blob.rows, size_of(Perception_Row), align_of(Perception_Row)) ||
+	   !slice_fits(data, blob.source_path, 1, 1) {
 		return nil, false
 	}
 	notices := perception_notices(data, blob)
@@ -114,12 +101,12 @@ perception_view :: proc(data: []byte) -> (blob: ^Perception_Blob, ok: bool) {
 		return nil, false
 	}
 	for n in notices {
-		if !inside(data, n, 1, 1) {
+		if !slice_fits(data, n, 1, 1) {
 			return nil, false
 		}
 	}
 	for r, i in rows {
-		if r.source > .Loudest_Noise || !inside(data, r.key, 1, 1) || !inside(data, r.tag, 1, 1) {
+		if r.source > .Loudest_Noise || !slice_fits(data, r.key, 1, 1) || !slice_fits(data, r.tag, 1, 1) {
 			return nil, false
 		}
 		if perception_source_reads_row(r.source) {
@@ -134,13 +121,11 @@ perception_view :: proc(data: []byte) -> (blob: ^Perception_Blob, ok: bool) {
 }
 
 perception_notices :: proc "contextless" (data: []byte, blob: ^Perception_Blob) -> []Slice {
-	bytes := blob_bytes(data, blob.notices)
-	return ([^]Slice)(raw_data(bytes))[:len(bytes) / size_of(Slice)]
+	return blob_records(data, blob.notices, Slice)
 }
 
 perception_rows :: proc "contextless" (data: []byte, blob: ^Perception_Blob) -> []Perception_Row {
-	bytes := blob_bytes(data, blob.rows)
-	return ([^]Perception_Row)(raw_data(bytes))[:len(bytes) / size_of(Perception_Row)]
+	return blob_records(data, blob.rows, Perception_Row)
 }
 
 // Perception_Row_Contents is a row as perception_write takes it. tag is "" for any, and of is PERCEPTION_NONE for a
