@@ -44,12 +44,13 @@ sealed record DecisionField(string Key, DecisionEditorKind Editor, string Hint =
     public Func<DecisionNode, bool>? Shown { get; init; }
 
     /// <summary>The row's name: the key, with a capital and spaces.</summary>
-    public string Label => char.ToUpperInvariant(Key[0]) + Key[1..].Replace('_', ' ');
+    public string Label => Key.Length == 0 ? "" : char.ToUpperInvariant(Key[0]) + Key[1..].Replace('_', ' ');
 }
 
 /// <summary>
-/// The fields of each kind of decision node that the details know, in the order that they show them, as
-/// docs/content/kinds/decisions.md lists them, and the behavior tree's decorators, which every kind of its nodes takes.
+/// The fields of each kind of decision node that the details know, which are those that
+/// docs/content/kinds/decisions.md lists, in the order that the details show them, and the behavior tree's decorators,
+/// which every kind of its nodes takes.
 /// <c>set</c> stands for the node's writes. To add a field, add its row here.
 /// </summary>
 static class DecisionFields

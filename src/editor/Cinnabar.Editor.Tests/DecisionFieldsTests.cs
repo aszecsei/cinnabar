@@ -98,6 +98,7 @@ public sealed partial class DecisionFieldsTests : IDisposable
             node 1 wait
             	seconds = 2
             	speed = 3
+            	= 4
             	when = tired
             	abort = self
 
@@ -107,7 +108,7 @@ public sealed partial class DecisionFieldsTests : IDisposable
         panel.Subscriptions.Attach();
         editor.Select([1]);
         var rows = (Panel)panel.Content!;
-        Assert.Equal(["Wait", "node 1 · wait", "Seconds", "Speed", "Decorators", "When", "Abort", "Cooldown", "Time limit", "Repeat", "Invert", "Force"], Labels(rows));
+        Assert.Equal(["Wait", "node 1 · wait", "Seconds", "Speed", "", "Decorators", "When", "Abort", "Cooldown", "Time limit", "Repeat", "Invert", "Force"], Labels(rows));
 
         // A choice shows its fallback when the file does not write it, and picking the fallback removes the field.
         var abort = rows.Children.OfType<Grid>().Single(g => g.Children.OfType<TextBlock>().First().Text == "Abort").Children.OfType<ComboBox>().Single();
