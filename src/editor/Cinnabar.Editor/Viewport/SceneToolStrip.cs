@@ -41,7 +41,7 @@ static class ToolButton
         {
             button.Content = icon ?? (object)name;
         }
-        var shortcut = shell.KeyBindings.ShortcutOf(id);
+        var shortcut = shell.KeyBindings.Describe(id);
         var title = shortcut == null ? command.Label : $"{command.Label} ({shortcut})";
         ToolTip.SetTip(button, command.Description is { } description ? $"{title}\n{description}" : title);
         Avalonia.Automation.AutomationProperties.SetName(button, command.Label);

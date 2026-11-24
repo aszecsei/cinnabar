@@ -27,6 +27,8 @@ sealed class UiElementScope(UiEditor editor) : ICommandScope
     {
         EditorCommands.DeleteEntity => new(() => Run(editor.Delete), () => editor.SelectedNode != null),
         EditorCommands.DuplicateEntity => new(() => Run(editor.Duplicate), () => editor.SelectedNode != null),
+        // F fits the document in the canvas, as it frames a graph.
+        EditorCommands.FrameSelected => new(editor.Fit),
         _ => null,
     };
 

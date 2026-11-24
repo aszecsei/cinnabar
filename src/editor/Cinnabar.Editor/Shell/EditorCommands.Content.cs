@@ -29,7 +29,9 @@ static partial class EditorCommands
         NewAssetCommand(shell, NewFolder, null, "New Folder", "folder", "Add a folder to the content browser's folder.");
         commands.Register(new Command(RenameAsset, "Rename Asset", shell.Content.RequestRenameSelected)
         {
-            Description = "Rename the asset selected in the content browser, with its .meta file. F2 in the content browser.",
+            Description = "Rename the asset selected in the content browser, with its .meta file.",
+            Shortcut = "F2",
+            ShortcutScopes = [ShortcutScopes.ContentBrowser],
             CanExecuteWhen = () => shell.Content.CanChangeContent && shell.Content.SelectedAssets.Count == 1 && !shell.Content.SelectionHasSubassets,
         });
         commands.Register(new Command(DuplicateAsset, "Duplicate Asset", () => _ = shell.Content.DuplicateSelectedAssets())

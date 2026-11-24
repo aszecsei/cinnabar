@@ -132,12 +132,7 @@ public sealed class ContentBrowserView : DockPanel, ICommandScope
         };
         FocusFollower.Scope(this, shell.Commands, this);
         // Rename has no command of the scene's to take, so its key is the panel's own.
-        KeyBindings.Add(new KeyBinding
-        {
-            Gesture = new KeyGesture(Key.F2),
-            Command = new RelayCommand(() => _shell.Commands.Get(EditorCommands.RenameAsset).Execute(),
-                () => TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not TextBox),
-        });
+        ScopeShortcuts.Attach(this, Commands.ShortcutScopes.ContentBrowser, shell);
         _search.TextChanged += (_, _) =>
         {
             if (!_syncing)
@@ -185,15 +180,11 @@ public sealed class ContentBrowserView : DockPanel, ICommandScope
         return AssetCommands.TryGetValue(commandId, out var asset) ? ScopedCommand.Of(_shell.Commands.Get(asset)) : null;
     }
 
-    // The key of an asset command in the browser: the key of the scene's command that runs it here, or F2 for Rename.
+    // The key of an asset command in the browser: the key of the scene's command that runs it here, or its own.
     KeyGesture? AssetGesture(string id)
     {
-        if (id == EditorCommands.RenameAsset)
-        {
-            return new KeyGesture(Key.F2);
-        }
         var verb = AssetCommands.FirstOrDefault(p => p.Value == id).Key;
-        return verb == null ? null : CommandViews.ParseGesture(_shell.KeyBindings.ShortcutOf(verb));
+        return CommandViews.ParseGesture(_shell.KeyBindings.ShortcutOf(verb ?? id));
     }
 
     void OnContextChanged()

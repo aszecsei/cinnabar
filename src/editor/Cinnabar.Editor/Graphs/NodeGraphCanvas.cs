@@ -5,6 +5,7 @@ using Avalonia.Media;
 using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Panels;
+using Cinnabar.Editor.Ribbon;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Tools;
 using static Cinnabar.Editor.Materials.CanvasDrawing;
@@ -90,12 +91,14 @@ public abstract class NodeGraphCanvas : Control, ICommandScope
     Dictionary<int, Vec2> _moveStarts = [];
     bool _framed;
 
-    protected NodeGraphCanvas(IGraphCanvasEditor editor, CommandRegistry commands)
+    protected NodeGraphCanvas(IGraphCanvasEditor editor, EditorShell shell)
     {
         _editor = editor;
         Focusable = true;
         ClipToBounds = true;
+        var commands = shell.Commands;
         FocusFollower.Scope(this, commands, this);
+        ScopeShortcuts.Attach(this, Commands.ShortcutScopes.Canvas, shell);
         // Whether Delete and Duplicate can run follows the selection, so the ribbon's buttons do too.
         void Refresh() => commands.Refresh(this);
         new ViewSubscriptions(this).Add(() => editor.SelectionChanged += Refresh, () => editor.SelectionChanged -= Refresh);
@@ -103,12 +106,14 @@ public abstract class NodeGraphCanvas : Control, ICommandScope
 
     /// <summary>
     /// Delete and Duplicate act on what is selected, and a graph without Duplicate takes it and does nothing, so the
-    /// key never reaches the entities.
+    /// key never reaches the entities. Frame Selected frames the graph, and Add Node opens the add menu at the mouse.
     /// </summary>
     public ScopedCommand? Handler(string commandId) => commandId switch
     {
         EditorCommands.DeleteEntity => new(_editor.DeleteSelected, () => _editor.Selection.Count > 0),
         EditorCommands.DuplicateEntity => Duplicate ?? ScopedCommand.Never,
+        EditorCommands.FrameSelected => new(Frame),
+        EditorCommands.AddNode => new(() => OpenAddMenu(ToCanvas(_last))),
         _ => null,
     };
 
@@ -415,10 +420,8 @@ public abstract class NodeGraphCanvas : Control, ICommandScope
             case Key.Back:
                 _editor.DeleteSelected();
                 break;
-            case Key.F when modifiers == KeyModifiers.None:
-                Frame();
-                break;
-            case Key.Space or Key.Tab when modifiers == KeyModifiers.None:
+            // F and Space are the canvas's scoped shortcuts, Frame Selected and Add Node. Tab is a second key for the add menu.
+            case Key.Tab when modifiers == KeyModifiers.None:
                 OpenAddMenu(ToCanvas(_last));
                 break;
             case Key.Escape when _gesture == Gesture.Move:

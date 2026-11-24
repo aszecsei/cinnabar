@@ -347,6 +347,53 @@ public sealed class ShellTests : IDisposable
         Assert.Equal("F3", shell.KeyBindings.ShortcutOf(EditorCommands.Stats));
     }
 
+    // The viewport's keys, which were a switch in its key handler, as the commands' scoped shortcuts.
+    [Theory]
+    [InlineData("Q", EditorCommands.SelectTool)]
+    [InlineData("W", EditorCommands.MoveTool)]
+    [InlineData("E", EditorCommands.RotateTool)]
+    [InlineData("R", EditorCommands.ScaleTool)]
+    [InlineData("N", EditorCommands.NavPathTool)]
+    [InlineData("L", EditorCommands.LandscapeTool)]
+    [InlineData("X", EditorCommands.LocalSpace)]
+    [InlineData("F", EditorCommands.FrameSelected)]
+    [InlineData("H", EditorCommands.HideSelected)]
+    [InlineData("Tab", EditorCommands.EditMesh)]
+    [InlineData("D1", EditorCommands.MeshVertices)]
+    [InlineData("D2", EditorCommands.MeshEdges)]
+    [InlineData("D3", EditorCommands.MeshFaces)]
+    [InlineData("OemOpenBrackets", EditorCommands.MeshGridFiner)]
+    [InlineData("OemCloseBrackets", EditorCommands.MeshGridCoarser)]
+    [InlineData("Left", EditorCommands.TextureShiftLeft)]
+    [InlineData("Shift+Left", EditorCommands.TextureShiftLeft + EditorCommands.Times10)]
+    [InlineData("Ctrl+Left", EditorCommands.TextureShiftLeft + EditorCommands.Fine)]
+    [InlineData("Right", EditorCommands.TextureShiftRight)]
+    [InlineData("Up", EditorCommands.TextureShiftUp)]
+    [InlineData("Down", EditorCommands.TextureShiftDown)]
+    [InlineData("OemComma", EditorCommands.TextureRotateLeft)]
+    [InlineData("OemPeriod", EditorCommands.TextureRotateRight)]
+    [InlineData("OemPlus", EditorCommands.TextureScaleUp)]
+    [InlineData("OemMinus", EditorCommands.TextureScaleDown)]
+    public void TheViewportsKeysAreItsScopedShortcuts(string key, string command)
+    {
+        using var shell = NewShell();
+
+        Assert.Contains((command, key), shell.KeyBindings.InScope(Commands.ShortcutScopes.Viewport));
+        // Not the window's, or W in the outliner would change the tool.
+        Assert.DoesNotContain(shell.KeyBindings.All, b => b.CommandId == command);
+    }
+
+    [Fact]
+    public void AUserBindingMovesAViewportKey()
+    {
+        new EditorSettings(_settingsDirectory).Write(EditorSettings.KeyBindingsFileName, """{ "tool.move": "G" }""");
+
+        using var shell = NewShell();
+
+        Assert.Contains((EditorCommands.MoveTool, "G"), shell.KeyBindings.InScope(Commands.ShortcutScopes.Viewport));
+        Assert.Equal("G in the viewport", shell.KeyBindings.Describe(EditorCommands.MoveTool));
+    }
+
     [Fact]
     public void TheHostStartsOnceTheViewportFindsItsAdapter()
     {

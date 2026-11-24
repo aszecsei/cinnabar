@@ -186,6 +186,8 @@ static partial class EditorCommands
     public const string LocalSpace = "tool.localSpace";
     public const string Snap = "tool.snap";
     public const string FrameSelected = "viewport.frameSelected";
+    /// <summary>Opens a graph canvas's add menu at the mouse, which only a focused canvas takes.</summary>
+    public const string AddNode = "graph.addNode";
     public const string FrameScene = "viewport.frameScene";
     public const string OrbitSelection = "viewport.orbitSelection";
     public const string DebugView = "view.debugView";

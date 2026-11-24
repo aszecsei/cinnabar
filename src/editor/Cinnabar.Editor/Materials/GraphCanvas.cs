@@ -38,7 +38,7 @@ public sealed class GraphCanvas : NodeGraphCanvas
     LinkDrag? _link;
 
     public GraphCanvas(EditorShell shell, MaterialEditor editor)
-        : base(editor, shell.Commands)
+        : base(editor, shell)
     {
         _shell = shell;
         _editor = editor;

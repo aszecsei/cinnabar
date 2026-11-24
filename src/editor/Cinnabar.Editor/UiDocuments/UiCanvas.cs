@@ -5,6 +5,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Panels;
+using Cinnabar.Editor.Ribbon;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Tools;
 using Cinnabar.Editor.Viewport;
@@ -31,6 +32,7 @@ sealed class UiCanvas : Grid
         _editor = editor;
         Background = new SolidColorBrush(Color.Parse("#141416"));
         UiElementScope.Follow(this, shell.Commands, editor);
+        ScopeShortcuts.Attach(this, Commands.ShortcutScopes.Canvas, shell);
         ClipToBounds = true;
         Children.Add(_message);
         if (editor.Preview is not { } session)
@@ -270,9 +272,6 @@ sealed class UiCanvas : Grid
             base.OnKeyDown(e);
             switch (e.Key)
             {
-                case Key.F:
-                    Editor.Fit();
-                    break;
                 case Key.Escape:
                     Editor.Select(null);
                     break;

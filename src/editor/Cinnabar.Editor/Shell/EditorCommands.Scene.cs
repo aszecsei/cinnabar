@@ -206,7 +206,9 @@ static partial class EditorCommands
         });
         commands.Register(new Command(HideSelected, "Hide", shell.ToggleHideSelected)
         {
-            Description = "Hide the selected entities and their children in the viewport, or show them again. The scene does not change. H in the viewport.",
+            Description = "Hide the selected entities and their children in the viewport, or show them again. The scene does not change.",
+            Shortcut = "H",
+            ShortcutScopes = [ShortcutScopes.Viewport],
             Icon = "hidden",
             CanExecuteWhen = () => shell.HasSceneSelection,
         });
@@ -224,20 +226,24 @@ static partial class EditorCommands
         });
         // The viewport's tools have keys of their own, which work while the viewport has focus, so typing in a box
         // does not change tools.
-        ToolCommand(shell, SelectTool, Tool.Select, "Select", "select", "Click or drag a box in the viewport to select. Q in the viewport.");
-        ToolCommand(shell, MoveTool, Tool.Move, "Move", "move", "Move the selection along an axis or a plane. W in the viewport.");
-        ToolCommand(shell, RotateTool, Tool.Rotate, "Rotate", "rotate", "Turn the selection about an axis. E in the viewport.");
-        ToolCommand(shell, ScaleTool, Tool.Scale, "Scale", "scale-tool", "Scale the selection along its own axes. R in the viewport.");
+        ToolCommand(shell, SelectTool, Tool.Select, "Select", "select", "Q", "Click or drag a box in the viewport to select.");
+        ToolCommand(shell, MoveTool, Tool.Move, "Move", "move", "W", "Move the selection along an axis or a plane.");
+        ToolCommand(shell, RotateTool, Tool.Rotate, "Rotate", "rotate", "E", "Turn the selection about an axis.");
+        ToolCommand(shell, ScaleTool, Tool.Scale, "Scale", "scale-tool", "R", "Scale the selection along its own axes.");
         commands.Register(new Command(NavPathTool, "Navigation Path", () => shell.SetTool(Tool.NavPath))
         {
-            Description = "Click two points in the viewport to draw the path between them on each agent type's navmesh. N in the viewport.",
+            Description = "Click two points in the viewport to draw the path between them on each agent type's navmesh.",
+            Shortcut = "N",
+            ShortcutScopes = [ShortcutScopes.Viewport],
             Icon = "nav-path",
             IsCheckedWhen = () => shell.Tool == Tool.NavPath,
             CanExecuteWhen = () => !shell.Mesh.InMeshMode,
         });
         commands.Register(new Command(LandscapeTool, "Landscape", () => shell.SetTool(Tool.Landscape))
         {
-            Description = "Sculpt the selected terrain's height map and paint its holes with a brush, in the viewport. L in the viewport.",
+            Description = "Sculpt the selected terrain's height map and paint its holes with a brush, in the viewport.",
+            Shortcut = "L",
+            ShortcutScopes = [ShortcutScopes.Viewport],
             Icon = "landscape",
             IsCheckedWhen = () => shell.Tool == Tool.Landscape,
             CanExecuteWhen = () => !shell.Mesh.InMeshMode,
@@ -274,7 +280,9 @@ static partial class EditorCommands
         });
         commands.Register(new Command(LocalSpace, "Local Axes", shell.ToggleSpace)
         {
-            Description = "Move and turn along the entity's axes, not the world's. X in the viewport.",
+            Description = "Move and turn along the entity's axes, not the world's.",
+            Shortcut = "X",
+            ShortcutScopes = [ShortcutScopes.Viewport],
             Icon = "local",
             IsCheckedWhen = () => shell.Space == Space.Local,
         });
@@ -286,9 +294,20 @@ static partial class EditorCommands
         });
         commands.Register(new Command(FrameSelected, "Frame Selected", shell.FrameSelected)
         {
-            Description = "Move the camera to the selected entities. F in the viewport.",
+            Description = "Move the camera to the selected entities, or in a focused graph or UI canvas, frame it.",
+            Shortcut = "F",
+            ShortcutScopes = [ShortcutScopes.Viewport, ShortcutScopes.Canvas],
             Icon = "frame",
             CanExecuteWhen = () => shell.HasSceneSelection,
+        });
+        // Only a focused graph canvas takes it (see NodeGraphCanvas), so it has nothing to do anywhere else.
+        commands.Register(new Command(AddNode, "Add Node", () => { })
+        {
+            Description = "Open the graph's add menu at the mouse, as a right click does.",
+            Shortcut = "Space",
+            ShortcutScopes = [ShortcutScopes.Canvas],
+            Icon = "add",
+            CanExecuteWhen = () => false,
         });
         commands.Register(new Command(OrbitSelection, "Orbit Selection", shell.ToggleOrbitSelection)
         {
@@ -304,10 +323,12 @@ static partial class EditorCommands
         });
     }
 
-    static void ToolCommand(EditorShell shell, string id, Tool tool, string label, string icon, string description) =>
+    static void ToolCommand(EditorShell shell, string id, Tool tool, string label, string icon, string shortcut, string description) =>
         shell.Commands.Register(new Command(id, label, () => shell.SetTool(tool))
         {
             Description = description,
+            Shortcut = shortcut,
+            ShortcutScopes = [ShortcutScopes.Viewport],
             Icon = icon,
             IsCheckedWhen = () => shell.Tool == tool,
         });

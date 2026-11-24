@@ -80,9 +80,13 @@ public sealed class MeshTextureModeTests : IDisposable
         // The other faces keep their mappings, and the selection stays.
         Assert.Equal(before.ShiftU, MeshFixtures.Mesh(shell).Faces[(front + 2) % 6].Mapping.ShiftU);
         Assert.Equal(2, shell.Mesh.MeshSelection.Count);
-        // Shift makes the step ten times, as the viewport's keys ask.
-        Assert.True(shell.Mesh.Texture.ShiftTexture(0, -1, 10));
+        // The ×10 command, which Shift runs in the viewport, makes the step ten times, and the fine one, Ctrl's, a tenth.
+        Assert.True(shell.Commands.Get(EditorCommands.TextureShiftDown + EditorCommands.Times10).Execute());
         Assert.Equal(before.ShiftV - 10 * MeshTexture.ShiftStep, MeshFixtures.Mesh(shell).Faces[front].Mapping.ShiftV, 9);
+        Assert.True(shell.Commands.Get(EditorCommands.TextureShiftUp + EditorCommands.Fine).Execute());
+        Assert.Equal(before.ShiftV - 9.9 * MeshTexture.ShiftStep, MeshFixtures.Mesh(shell).Faces[front].Mapping.ShiftV, 9);
+        Assert.Equal("Shift+Down", shell.KeyBindings.ShortcutOf(EditorCommands.TextureShiftDown + EditorCommands.Times10));
+        Assert.Equal("Ctrl+Up", shell.KeyBindings.ShortcutOf(EditorCommands.TextureShiftUp + EditorCommands.Fine));
         Assert.True(shell.Mesh.Texture.RotateTexture(1));
         Assert.Equal(15, MeshFixtures.Mesh(shell).Faces[front].Mapping.Rotation);
         Assert.True(shell.Mesh.Texture.ScaleTexture(1));
