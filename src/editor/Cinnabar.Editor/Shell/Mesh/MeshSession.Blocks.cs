@@ -15,21 +15,61 @@ namespace Cinnabar.Editor.Shell;
 /// The Create tool's drag on the grid plane: the footprint of a block, where it ends as a primitive, and the names and material
 /// of the meshes it makes.
 /// </summary>
-public sealed partial class MeshSession
+public sealed partial class MeshSession : IViewportTool
 {
+    // Each block drag's number, which its viewport drag holds as its token.
+    int _blocks;
+
     /// <summary>Starts a primitive: a drag on the grid plane from a pixel, which becomes its footprint.</summary>
-    public bool BeginBlock(Vec2 pixel)
+    public bool BeginBlock(Vec2 pixel) => BeginBlockDrag(pixel) != null;
+
+    MeshInteraction.BlockDrag? BeginBlockDrag(Vec2 pixel)
     {
         if (!_shell.IsEditing || _shell.Scene == null || MeshTool != MeshTool.Create)
         {
-            return false;
+            return null;
         }
         var (origin, axis) = GridPlane();
         if (PointOnGrid(pixel, origin, axis) is not { } start)
         {
-            return false;
+            return null;
         }
-        return Begin(() => new MeshInteraction.BlockDrag(origin, axis, start, start)) != null;
+        return Begin(() => new MeshInteraction.BlockDrag(origin, axis, start, start, ++_blocks));
+    }
+
+    IViewportDrag? IViewportTool.TryBegin(Vec2 pixel, DragKeys keys) =>
+        BeginBlockDrag(pixel) is { } drag ? new BlockDragging(this, drag.Serial) : null;
+
+    void IViewportTool.Hover(Vec2 pixel) => HoverMesh(pixel);
+
+    // The Create tool's drag. Ctrl at the release makes a new entity even in mesh mode; a lost capture drops the block.
+    sealed class BlockDragging(MeshSession mesh, int serial) : IViewportDrag
+    {
+        bool Live => mesh.Interaction is MeshInteraction.BlockDrag { Serial: var s } && s == serial;
+
+        public void Move(Vec2 pixel, DragKeys keys)
+        {
+            if (Live)
+            {
+                mesh.DragBlock(pixel);
+            }
+        }
+
+        public void End(DragKeys keys)
+        {
+            if (Live)
+            {
+                mesh.EndBlock(forceEntity: keys.Ctrl);
+            }
+        }
+
+        public void Cancel()
+        {
+            if (Live)
+            {
+                mesh.CancelBlock();
+            }
+        }
     }
 
     public void DragBlock(Vec2 pixel)
@@ -100,8 +140,6 @@ public sealed partial class MeshSession
 
     /// <summary>The engine's dev_gray material instance (see docs/editor/mesh-editing.md#dev-materials).</summary>
     public const string DevGrayMaterial = "5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d";
-
-    // The dragged block's footprint: the grid plane and the two snapped corners.
 }
 
 /// <summary>

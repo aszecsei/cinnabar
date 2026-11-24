@@ -36,13 +36,12 @@ public sealed class ViewportView : Grid
         None,
         Click,
         Box,
-        Gizmo,
+        // A drag of one of the shell's left tools, which _drag holds.
+        Drag,
         Fly,
         Orbit,
         Pan,
         Dolly,
-        Block,
-        Brush,
     }
 
     readonly EditorShell _shell;
@@ -79,6 +78,8 @@ public sealed class ViewportView : Grid
     readonly Border _compositionOverlay;
     readonly HashSet<Key> _held = [];
     Gesture _gesture;
+    // The left tool's drag while the gesture is Drag, else null.
+    IViewportDrag? _drag;
     Point _start;
     Point _last;
     long _lastFly;
@@ -678,17 +679,10 @@ public sealed class ViewportView : Grid
             {
                 _gesture = Gesture.Orbit;
             }
-            else if (_control.FramePoint(point.Position) is { } pixel && _shell.PressGizmo(pixel, extrude: e.KeyModifiers.HasFlag(KeyModifiers.Shift)))
+            else if (_control.FramePoint(point.Position) is { } pixel && BeginDrag(pixel, KeysOf(e.KeyModifiers)) is { } drag)
             {
-                _gesture = Gesture.Gizmo;
-            }
-            else if (_shell.Mesh.MeshTool == MeshTool.Create && _control.FramePoint(point.Position) is { } corner && _shell.Mesh.BeginBlock(corner))
-            {
-                _gesture = Gesture.Block;
-            }
-            else if (_control.FramePoint(point.Position) is { } dab && _shell.Landscape.BeginStroke(dab))
-            {
-                _gesture = Gesture.Brush;
+                _gesture = Gesture.Drag;
+                _drag = drag;
             }
             else
             {
@@ -726,21 +720,16 @@ public sealed class ViewportView : Grid
                 _shell.ActivateViewport(_viewport);
                 if (!Looking && _shell.ActiveViewport == _viewport && _control.FramePoint(position) is { } hover)
                 {
-                    _shell.HoverGizmo(hover);
-                    _shell.Mesh.HoverMesh(hover);
-                    _shell.Landscape.Hover(hover);
+                    foreach (var tool in _shell.LeftTools)
+                    {
+                        tool.Hover(hover);
+                    }
                 }
                 break;
-            case Gesture.Block:
-                if (_control.FramePoint(position) is { } corner)
+            case Gesture.Drag:
+                if (_control.FramePoint(position) is { } dragged)
                 {
-                    _shell.Mesh.DragBlock(corner);
-                }
-                break;
-            case Gesture.Brush:
-                if (_control.FramePoint(position) is { } dab)
-                {
-                    _shell.Landscape.DragStroke(dab);
+                    _drag?.Move(dragged, KeysOf(e.KeyModifiers));
                 }
                 break;
             case Gesture.Fly:
@@ -757,12 +746,6 @@ public sealed class ViewportView : Grid
                 break;
             case Gesture.Dolly:
                 MoveCamera(c => c.Dolly(-delta.Y * DollyPerPixel));
-                break;
-            case Gesture.Gizmo:
-                if (_control.FramePoint(position) is { } drag)
-                {
-                    _shell.DragGizmo(drag, e.KeyModifiers.HasFlag(KeyModifiers.Control));
-                }
                 break;
             case Gesture.Click when Looking:
                 break;
@@ -811,14 +794,8 @@ public sealed class ViewportView : Grid
         _shell.Looks.EndGesture(_viewport.Index, cancel: false);
         switch (_gesture)
         {
-            case Gesture.Gizmo:
-                _shell.ReleaseGizmo();
-                break;
-            case Gesture.Block:
-                _shell.Mesh.EndBlock(forceEntity: e.KeyModifiers.HasFlag(KeyModifiers.Control));
-                break;
-            case Gesture.Brush:
-                _shell.Landscape.EndStroke();
+            case Gesture.Drag:
+                _drag?.End(KeysOf(e.KeyModifiers));
                 break;
             case Gesture.Click when Looking:
                 // Ctrl, or an armed pick, picks the camera's focus there (see docs/editor/cutscene-editor.md#focus).
@@ -848,18 +825,8 @@ public sealed class ViewportView : Grid
     {
         base.OnPointerCaptureLost(e);
         _shell.Looks.EndGesture(_viewport.Index, cancel: false);
-        if (_gesture == Gesture.Gizmo)
-        {
-            _shell.ReleaseGizmo();
-        }
-        if (_gesture == Gesture.Block)
-        {
-            _shell.Mesh.CancelBlock();
-        }
-        if (_gesture == Gesture.Brush)
-        {
-            _shell.Landscape.CancelStroke();
-        }
+        // The gizmo commits what it moved; the other tools put it back.
+        _drag?.Lost();
         EndGesture();
     }
 
@@ -896,10 +863,27 @@ public sealed class ViewportView : Grid
         await DragDrop.DoDragDropAsync(e, data, DragDropEffects.Move | DragDropEffects.Link);
     }
 
+    // The first of the shell's left tools that starts a drag at a press, or null for a click.
+    IViewportDrag? BeginDrag(Vec2 pixel, DragKeys keys)
+    {
+        foreach (var tool in _shell.LeftTools)
+        {
+            if (tool.TryBegin(pixel, keys) is { } drag)
+            {
+                return drag;
+            }
+        }
+        return null;
+    }
+
+    static DragKeys KeysOf(KeyModifiers modifiers) =>
+        new(modifiers.HasFlag(KeyModifiers.Shift), modifiers.HasFlag(KeyModifiers.Control));
+
     void EndGesture()
     {
         _pressPick = null;
         _gesture = Gesture.None;
+        _drag = null;
         _box.IsVisible = false;
         _flyTimer.Stop();
     }
@@ -1018,21 +1002,9 @@ public sealed class ViewportView : Grid
         {
             return;
         }
-        if (e.Key == Key.Escape && _gesture == Gesture.Gizmo)
+        if (e.Key == Key.Escape && _drag is { } drag)
         {
-            _shell.CancelGizmo();
-            _gesture = Gesture.None;
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Escape && _gesture == Gesture.Block)
-        {
-            _shell.Mesh.CancelBlock();
-            EndGesture();
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Escape && _gesture == Gesture.Brush)
-        {
-            _shell.Landscape.CancelStroke();
+            drag.Cancel();
             EndGesture();
             e.Handled = true;
         }

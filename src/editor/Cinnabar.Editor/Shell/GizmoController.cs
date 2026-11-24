@@ -33,6 +33,9 @@ sealed class GizmoController(Func<string, SceneEdit?> begin, Action sent)
 
     public bool IsDragging => _active != null;
 
+    /// <summary>The drag under way, as a token that a viewport drag compares, or null.</summary>
+    public object? Current => _active;
+
     /// <summary>Starts a drag in a new undo entry. False when another edit is open.</summary>
     public bool Start(GizmoDrag drag, IGizmoTarget target, string label) => begin(label) is { } edit && Start(drag, target, edit);
 

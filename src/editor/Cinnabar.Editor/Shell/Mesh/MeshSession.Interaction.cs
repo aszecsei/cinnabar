@@ -40,8 +40,8 @@ internal abstract record MeshInteraction
         }
     }
 
-    /// <summary>The Create tool's drag on the grid plane, from Start to Corner.</summary>
-    public sealed record BlockDrag(long[] Origin, int Axis, long[] Start, long[] Corner) : MeshInteraction;
+    /// <summary>The Create tool's drag on the grid plane, from Start to Corner, and the drag's number, which its steps keep.</summary>
+    public sealed record BlockDrag(long[] Origin, int Axis, long[] Start, long[] Corner, int Serial) : MeshInteraction;
 
     /// <summary>A drag of the Face panel's mapping fields, in its own entry.</summary>
     public sealed record MappingScrub(SceneEdit Edit) : MeshInteraction;

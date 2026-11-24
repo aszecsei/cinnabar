@@ -308,6 +308,58 @@ public sealed class LandscapeTests : IDisposable
     }
 
     [Fact]
+    public void ALostCaptureCancelsAStrokeAndAnEndedStrokeDoesNothing()
+    {
+        using var shell = NewShell();
+        shell.SetTool(Tool.Landscape);
+        var drag = TestShell.Press(shell, Middle);
+        Assert.NotNull(drag);
+        drag.Move(new Vec2(850, 450), default);
+        drag.Lost();
+        Assert.False(shell.Landscape.IsStroking);
+        var map = Assert.Single(shell.Landscape.Maps);
+        Assert.All(map.Grid.Texels, t => Assert.Equal(32768, t));
+        Assert.False(shell.Scene!.CanUndo);
+
+        // A change of tool ends the stroke; its drag then leaves the next stroke alone.
+        var stale = TestShell.Press(shell, Middle)!;
+        shell.SetTool(Tool.Move);
+        shell.SetTool(Tool.Landscape);
+        var next = TestShell.Press(shell, Middle)!;
+        stale.End(default);
+        stale.Cancel();
+        Assert.True(shell.Landscape.IsStroking);
+        Assert.False(shell.Scene.CanUndo);
+        next.End(default);
+        Assert.Equal("Sculpt (Raise)", Assert.Single(shell.Scene.History).Label);
+    }
+
+    [Fact]
+    public void AStrokeKeepsTheBrushThatItBeganWith()
+    {
+        using var shell = NewShell();
+        shell.SetTool(Tool.Landscape);
+        Assert.True(shell.Landscape.BeginStroke(Middle));
+        shell.Landscape.SetBrush(LandscapeBrush.Hole);
+        shell.Landscape.DragStroke(new Vec2(850, 450));
+        shell.Landscape.EndStroke();
+        Assert.Equal("Sculpt (Raise)", Assert.Single(shell.Scene!.History).Label);
+        Assert.DoesNotContain(shell.Landscape.Maps, m => m.Kind == LandscapeMapKind.Mask);
+    }
+
+    [Theory]
+    [InlineData(LandscapeBrush.Raise, LandscapeSession.BrushTarget.Height)]
+    [InlineData(LandscapeBrush.Ramp, LandscapeSession.BrushTarget.Height)]
+    [InlineData(LandscapeBrush.Noise, LandscapeSession.BrushTarget.Height)]
+    [InlineData(LandscapeBrush.Hole, LandscapeSession.BrushTarget.Mask)]
+    [InlineData(LandscapeBrush.Fill, LandscapeSession.BrushTarget.Mask)]
+    [InlineData(LandscapeBrush.Paint, LandscapeSession.BrushTarget.Layers)]
+    [InlineData(LandscapeBrush.Scatter, LandscapeSession.BrushTarget.Foliage)]
+    [InlineData(LandscapeBrush.Erase, LandscapeSession.BrushTarget.Foliage)]
+    public void EachBrushPaintsOneTarget(LandscapeBrush brush, LandscapeSession.BrushTarget target) =>
+        Assert.Equal(target, LandscapeSession.TargetOf(brush));
+
+    [Fact]
     public void AHoleOnASurfaceWithoutAMaskMakesOneOfItsCellsAndNamesIt()
     {
         using var shell = NewShell();

@@ -23,7 +23,6 @@ public sealed partial class LandscapeSession
     public const double ScaleMin = 0.8, ScaleMax = 1.2;
 
     readonly Dictionary<string, FoliageSet> _sets = [];
-    FoliageStroking? _foliage;
     int _foliageSeed = 1;
 
     // A foliage stroke under way: its set, the terrain and its pose, the foliage layer's entity and pose, the instances
@@ -58,16 +57,17 @@ public sealed partial class LandscapeSession
     static string InstancesOf(SceneEntity layer) =>
         layer.Components.First(c => c.Id == InstancedMeshRendererId).Fields.FirstOrDefault(f => f.Name == "instances")?.Value is { Kind: SceneValueKind.Asset } v ? v.Asset : "";
 
-    bool BeginFoliage(LandscapeSurface surface, Pose pose, LandscapeHit hit)
+    // A foliage stroke and its first dab, or null when the terrain has no foliage layer whose set the brush can paint.
+    Painting.OnFoliage? BeginFoliage(LandscapeSurface surface, Pose pose, LandscapeHit hit)
     {
         if (FoliageLayer(surface) is not { } layer)
         {
             shell.Console.Add(LogLevel.Warning, "landscape: the terrain has no foliage layer. Add a child entity with an Instanced_Mesh_Renderer that names the foliage's mesh.");
-            return false;
+            return null;
         }
         if (shell.Scene?.Expanded.Flat is not { } flat || SceneEdits.WorldPose(flat, layer) is not { } layerPose)
         {
-            return false;
+            return null;
         }
         var guid = InstancesOf(layer);
         var newSet = false;
@@ -83,33 +83,32 @@ public sealed partial class LandscapeSession
         }
         if (set == null)
         {
-            return false;
+            return null;
         }
         if (!set.IsLive)
         {
             SendSet(set);
         }
-        _foliage = new FoliageStroking(set, surface, pose, layer.Id, layerPose, set.Instances, [.. set.Instances], new Random(_foliageSeed++), newSet);
-        Dab(_foliage, hit);
-        return true;
+        var painting = new Painting.OnFoliage(this, Brush, Layer,
+            new FoliageStroking(set, surface, pose, layer.Id, layerPose, set.Instances, [.. set.Instances], new Random(_foliageSeed++), newSet));
+        Dab(painting, hit);
+        return painting;
     }
 
-    void DragFoliage(Vec2 pixel)
+    void DragFoliage(Painting.OnFoliage painting, Vec2 pixel)
     {
-        if (_foliage is not { } f || Pick(f.Surface, f.Pose, pixel) is not { } hit)
+        var f = painting.Stroking;
+        if (Pick(f.Surface, f.Pose, pixel) is not { } hit)
         {
             return;
         }
-        Dab(f, hit);
+        Dab(painting, hit);
         Hover(pixel);
     }
 
-    void EndFoliage()
+    void EndFoliage(Painting.OnFoliage painting)
     {
-        if (_foliage is not { } f)
-        {
-            return;
-        }
+        var f = painting.Stroking;
         var ops = new List<Operation>();
         if (f.NewSet)
         {
@@ -119,22 +118,19 @@ public sealed partial class LandscapeSession
         {
             ops.Add(new FoliageOperation(f.Set, f.Before, f.Set.Instances));
         }
-        if (ops.Count == 0 || !shell.Edit(Brush == LandscapeBrush.Erase ? "Erase Foliage" : "Scatter Foliage", [.. ops]))
+        if (ops.Count == 0 || !shell.Edit(painting.Brush == LandscapeBrush.Erase ? "Erase Foliage" : "Scatter Foliage", [.. ops]))
         {
-            CancelFoliage();
+            CancelFoliage(painting);
             return;
         }
-        _foliage = null;
+        _painting = null;
         Changed?.Invoke();
     }
 
-    void CancelFoliage()
+    void CancelFoliage(Painting.OnFoliage painting)
     {
-        if (_foliage is not { } f)
-        {
-            return;
-        }
-        _foliage = null;
+        var f = painting.Stroking;
+        _painting = null;
         f.Set.Set(f.Before);
         if (f.NewSet)
         {
@@ -144,11 +140,12 @@ public sealed partial class LandscapeSession
 
     // One dab at a hit: Scatter adds instances in the brush's circle until it holds the density's share, no nearer each
     // other than half the spacing that the density gives, where the terrain has no hole; Erase takes away those in it.
-    void Dab(FoliageStroking f, LandscapeHit hit)
+    void Dab(Painting.OnFoliage painting, LandscapeHit hit)
     {
+        var f = painting.Stroking;
         var center = new Vec2(hit.Local.X, hit.Local.Z);
         bool Inside(FoliageInstance i, double radius) => (TerrainPoint(f, i.Position) is var p) && (new Vec2(p.X, p.Z) - center).Length <= radius;
-        if (Brush == LandscapeBrush.Erase)
+        if (painting.Brush == LandscapeBrush.Erase)
         {
             if (f.Now.RemoveAll(i => Inside(i, Radius)) > 0)
             {

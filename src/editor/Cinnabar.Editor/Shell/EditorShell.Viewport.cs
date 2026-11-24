@@ -286,6 +286,52 @@ public sealed partial class EditorShell
     /// <summary>Ends a drag and puts the selection back where it was.</summary>
     public void CancelGizmo() => _gizmo.Cancel();
 
+    /// <summary>
+    /// The tools that a left press in a scene view tries, in this order: the first that starts a drag has the press, and
+    /// a press that none takes is a click. The gizmo is drawn over the rest, so it comes first.
+    /// </summary>
+    public IReadOnlyList<IViewportTool> LeftTools => field ??= [new GizmoTool(this), Mesh, Landscape];
+
+    // The gizmo's and the probe handles' drags. A capture lost mid-drag commits, as a release does.
+    sealed class GizmoTool(EditorShell shell) : IViewportTool
+    {
+        public IViewportDrag? TryBegin(Vec2 pixel, DragKeys keys) =>
+            shell.PressGizmo(pixel, extrude: keys.Shift) && shell._gizmo.Current is { } token ? new Dragging(shell, token) : null;
+
+        public void Hover(Vec2 pixel) => shell.HoverGizmo(pixel);
+
+        sealed class Dragging(EditorShell shell, object token) : IViewportDrag
+        {
+            bool Live => shell._gizmo.Current == token;
+
+            public void Move(Vec2 pixel, DragKeys keys)
+            {
+                if (Live)
+                {
+                    shell.DragGizmo(pixel, keys.Ctrl);
+                }
+            }
+
+            public void End(DragKeys keys)
+            {
+                if (Live)
+                {
+                    shell.ReleaseGizmo();
+                }
+            }
+
+            public void Cancel()
+            {
+                if (Live)
+                {
+                    shell.CancelGizmo();
+                }
+            }
+
+            public void Lost() => End(default);
+        }
+    }
+
     // A drag of the selected entities: each step moves, turns or scales them about the pivot.
     sealed class PoseTarget(EditorShell shell, PoseEdit poseEdit, long[] pivot, Quat axes) : IGizmoTarget
     {

@@ -138,6 +138,39 @@ public sealed class ViewportToolsTests : IDisposable
     }
 
     [Fact]
+    public void ALostCaptureCommitsAGizmoDragAndAnEndedDragDoesNothing()
+    {
+        using var shell = NewShell();
+        shell.Selection.Set([Handle(0), Handle(1)]);
+        var (width, height) = shell.FrameSize;
+        var (pivot, _) = shell.GizmoPose()!.Value;
+        var center = shell.Camera.RelativeTo(pivot);
+        var size = Gizmo.Size(shell.Camera, center, height);
+        Vec2 Along(double meters) => shell.Camera.Project(center + Vec3.UnitX * meters, width, height)!.Value;
+
+        var drag = TestShell.Press(shell, Along(0.5 * size));
+        Assert.NotNull(drag);
+        Assert.True(shell.IsDraggingGizmo);
+        drag.Move(Along(0.5 * size + 0.5), default);
+        drag.Lost();
+        Assert.False(shell.IsDraggingGizmo);
+        Assert.Equal("Move 2 Entities", Assert.Single(shell.Scene!.History).Label);
+
+        // A drag that the shell ended leaves the next one alone.
+        var stale = TestShell.Press(shell, Along(0.5 * size + 0.5))!;
+        shell.CancelGizmo();
+        var next = TestShell.Press(shell, Along(0.5 * size + 0.5))!;
+        stale.Move(Along(0.5 * size + 2), default);
+        stale.End(default);
+        stale.Cancel();
+        Assert.True(shell.IsDraggingGizmo);
+        next.Move(Along(0.5 * size + 0.8), default);
+        next.End(default);
+        Assert.Equal(2, shell.Scene.History.Count);
+        Assert.InRange(X(shell, 2) - 16777216, (long)(0.79 * (1 << 24)), (long)(0.81 * (1 << 24)));
+    }
+
+    [Fact]
     public void AGizmoDragCanBeCancelled()
     {
         using var shell = NewShell();
