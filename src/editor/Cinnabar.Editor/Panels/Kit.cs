@@ -53,6 +53,33 @@ static class Kit
     }
 
     /// <summary>
+    /// A box over a <paramref name="value"/> that other controls change too, as a toolbar's is: a refusal, Escape and
+    /// the loss of the focus put back the value as it is then, and the box shows it again when it shows again.
+    /// </summary>
+    public static Control ValueBox<T>(Func<T> value, IValueFormat<T> format, string watermark, Action<T> set)
+    {
+        var box = new TextBox { Text = format.Format(value()), PlaceholderText = watermark, Classes = { "value-edit" }, MinHeight = 20 };
+        CommitBox.Attach(box, typed =>
+        {
+            if (!format.TryParse(typed, out var parsed, out var problem))
+            {
+                return Verdict.Refused(problem);
+            }
+            set(parsed);
+            return Verdict.Took;
+        }, () => format.Format(value()));
+        var border = new Border { Classes = { "value-box", "editable" }, Child = box };
+        border.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == Visual.IsVisibleProperty && border.IsVisible && !box.IsFocused)
+            {
+                box.Text = format.Format(value());
+            }
+        };
+        return border;
+    }
+
+    /// <summary>
     /// Makes a box commit its text on Enter and when it loses the focus, and put the text back on Escape, as
     /// <see cref="CommitBox"/> does. It commits a text once: a box that commits on Enter and then loses the focus, as it
     /// does when its view builds again without it, does not commit again. So the commit must not compare with a value

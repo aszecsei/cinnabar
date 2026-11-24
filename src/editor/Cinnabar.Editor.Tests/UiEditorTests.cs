@@ -73,6 +73,31 @@ public sealed class UiEditorTests : IDisposable
     }
 
     [Fact]
+    public void AScreenSizeBoxPutsBackTheSizeThatAPresetSet()
+    {
+        var (shell, asset, _) = Menu();
+        using var _ = shell;
+        shell.OpenAsset(asset);
+        var editor = Assert.Single(shell.UiDocuments);
+        var border = (Avalonia.Controls.Border)UiDocuments.UiEditorView.HeightBox(editor);
+        var box = (Avalonia.Controls.TextBox)border.Child!;
+        border.IsVisible = false;
+
+        // A preset changes the size while the box is hidden, and Custom shows it again.
+        editor.SetScreen(1280, 720);
+        border.IsVisible = true;
+        Assert.Equal("720", box.Text);
+
+        box.Text = "tall";
+        box.RaiseEvent(new Avalonia.Input.KeyEventArgs { RoutedEvent = Avalonia.Input.InputElement.KeyDownEvent, Key = Avalonia.Input.Key.Enter });
+        Assert.Equal("720", box.Text);
+        editor.SetScreen(1920, 1080);
+        box.Text = "8";
+        box.RaiseEvent(new Avalonia.Input.KeyEventArgs { RoutedEvent = Avalonia.Input.InputElement.KeyDownEvent, Key = Avalonia.Input.Key.Escape });
+        Assert.Equal("1080", box.Text);
+    }
+
+    [Fact]
     public void TheSamplesMenuOpensInItsEditorAndAnEditChangesOnlyItsLine()
     {
         var (shell, asset, text) = Menu();

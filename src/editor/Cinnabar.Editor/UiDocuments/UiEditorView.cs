@@ -131,18 +131,16 @@ public sealed class UiEditorView : DockPanel
 
     static readonly IValueFormat<int> ScreenSize = ValueFormats.Integer(UiEditor.MinScreen, UiEditor.MaxScreen);
 
-    // The custom screen's width and height, and the scale factor: each refuses a value that the editor would clamp.
+    // The custom screen's width and height, and the scale factor: each refuses a value that the editor would clamp,
+    // and puts back the editor's, which the screen's presets change too.
     internal static Control WidthBox(UiEditor editor) =>
-        ValueBox(ScreenSize.Format(editor.Screen.Width), ScreenSize, "width", w => editor.SetScreen(w, editor.Screen.Height));
+        ValueBox(() => editor.Screen.Width, ScreenSize, "width", w => editor.SetScreen(w, editor.Screen.Height));
 
     internal static Control HeightBox(UiEditor editor) =>
-        ValueBox(ScreenSize.Format(editor.Screen.Height), ScreenSize, "height", h => editor.SetScreen(editor.Screen.Width, h));
+        ValueBox(() => editor.Screen.Height, ScreenSize, "height", h => editor.SetScreen(editor.Screen.Width, h));
 
-    internal static Control ScaleBox(UiEditor editor)
-    {
-        var format = ValueFormats.Number(UiEditor.MinScaleFactor, UiEditor.MaxScaleFactor);
-        return ValueBox(format.Format(editor.ScaleFactor), format, "ui.scale", editor.SetScaleFactor);
-    }
+    internal static Control ScaleBox(UiEditor editor) =>
+        ValueBox(() => editor.ScaleFactor, ValueFormats.Number(UiEditor.MinScaleFactor, UiEditor.MaxScaleFactor), "ui.scale", editor.SetScaleFactor);
 
     void Show()
     {

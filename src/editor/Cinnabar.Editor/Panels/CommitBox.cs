@@ -142,7 +142,6 @@ sealed class CommitBox
         return verdict;
     };
 
-    // The one writer of the state.
     void Commit()
     {
         var text = _text();
