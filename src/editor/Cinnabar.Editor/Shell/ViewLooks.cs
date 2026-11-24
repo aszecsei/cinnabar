@@ -423,4 +423,8 @@ public sealed class ViewLooks
                 return false;
         }
     }
+
+    /// <summary>Whether <see cref="Escape"/> would do something in a view, which it does not do.</summary>
+    public bool CanEscape(int viewport) =>
+        this[viewport] is ViewLook.Camera { Pilot: Pilot.Ready { Gesture: PilotGesture.Moving } } or ViewLook.Through;
 }

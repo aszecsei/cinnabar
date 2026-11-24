@@ -307,15 +307,6 @@ sealed class CutsceneCurveEditor : Control
         Input.LostCapture();
     }
 
-    protected override void OnKeyDown(KeyEventArgs e)
-    {
-        base.OnKeyDown(e);
-        if (e.Key == Key.Escape && Input.Escape())
-        {
-            e.Handled = true;
-        }
-    }
-
     protected override void OnKeyUp(KeyEventArgs e)
     {
         base.OnKeyUp(e);

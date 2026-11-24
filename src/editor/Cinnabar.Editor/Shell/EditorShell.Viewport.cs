@@ -292,6 +292,19 @@ public sealed partial class EditorShell
     /// </summary>
     public IReadOnlyList<IViewportTool> LeftTools => field ??= [new GizmoTool(this), Mesh, Landscape];
 
+    /// <summary>
+    /// What Esc cancels in a scene view after the view's own look and drag (see docs/editor/viewport.md), in this
+    /// order: a cutscene's armed pick of a binding's entity, then mesh mode's Escape, then a mesh tool's points, or
+    /// else the mesh tool, which goes back to Select.
+    /// </summary>
+    public IReadOnlyList<(Func<bool> When, Action Run)> ViewportCancels =>
+    [
+        (() => BindingPicking, () => CancelBindingPicks()),
+        (() => Mesh.InMeshMode, Mesh.EscapeMeshMode),
+        (() => Mesh.Tools.ToolPointCount > 0, Mesh.Tools.CancelToolPoints),
+        (() => Mesh.MeshTool != MeshTool.Select, () => Mesh.SetMeshTool(MeshTool.Select)),
+    ];
+
     // The gizmo's and the probe handles' drags. A capture lost mid-drag commits, as a release does.
     sealed class GizmoTool(EditorShell shell) : IViewportTool
     {

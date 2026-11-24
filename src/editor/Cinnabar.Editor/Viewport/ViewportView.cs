@@ -25,8 +25,10 @@ namespace Cinnabar.Editor.Viewport;
 /// drops onto it. The mouse makes a scene view the active one, which the shell's tools act in. A scene view keeps all of
 /// this while the game plays. The Game view has none of it: it gives the game its keyboard, mouse, text and gamepads
 /// while the game plays and the view has the focus, with a frame in the mode's color around it, and is passive otherwise.
+/// While it has the keyboard it is the focused command scope (see docs/editor/shell-and-panels.md#commands), which gives
+/// Cancel, Esc, its order here.
 /// </summary>
-public sealed class ViewportView : Grid
+public sealed class ViewportView : Grid, Commands.ICommandScope
 {
     // Wheel notches per pixel of an Alt and right button drag.
     const double DollyPerPixel = 1.0 / 40;
@@ -121,6 +123,7 @@ public sealed class ViewportView : Grid
         Background = Brushes.Black;
         Focusable = true;
         ClipToBounds = true;
+        FocusFollower.Scope(this, shell.Commands, this);
         ScopeShortcuts.Attach(this, Commands.ShortcutScopes.Viewport, shell, KeysFree);
         _control = new ViewportControl { Session = _session };
         Children.Add(_control);
@@ -972,22 +975,6 @@ public sealed class ViewportView : Grid
         {
             return;
         }
-        // Esc in a view that looks through a camera disarms a pick of its focus, takes back a pilot's gesture, a flight
-        // too, or else ends the look.
-        if (e.Key == Key.Escape && Looking && _gesture == Gesture.None && _shell.CancelFocusPick(_viewport.Index))
-        {
-            e.Handled = true;
-            return;
-        }
-        if (e.Key == Key.Escape && Looking && _shell.Looks.Escape(_viewport.Index))
-        {
-            if (_gesture is Gesture.Fly or Gesture.Dolly or Gesture.Pan or Gesture.Orbit)
-            {
-                EndGesture();
-            }
-            e.Handled = true;
-            return;
-        }
         // A key that flies is the camera's until it is released: when the right button goes up first, the key's repeats
         // would pick a tool, as W picks Move.
         if (_gesture == Gesture.Fly || _held.Contains(e.Key))
@@ -996,40 +983,13 @@ public sealed class ViewportView : Grid
             e.Handled = true;
             return;
         }
-        // The tools', mesh mode's and the texture tools' keys are the view's scoped shortcuts (see KeysFree), which come
-        // before this. What is left is Esc, Enter and Backspace, which the gestures and the mesh tools' points have.
+        // The tools', mesh mode's and the texture tools' keys, and Esc, are the view's scoped shortcuts (see KeysFree),
+        // which come before this. What is left is Enter and Backspace, which the mesh tools' points have.
         if (e.KeyModifiers != KeyModifiers.None)
         {
             return;
         }
-        if (e.Key == Key.Escape && _drag is { } drag)
-        {
-            drag.Cancel();
-            EndGesture();
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Escape && _shell.CancelBindingPicks())
-        {
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Escape && _shell.Mesh.InMeshMode)
-        {
-            _shell.Mesh.EscapeMeshMode();
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Escape && (_shell.Mesh.MeshTool != MeshTool.Select || _shell.Mesh.Tools.ToolPointCount > 0))
-        {
-            if (_shell.Mesh.Tools.ToolPointCount > 0)
-            {
-                _shell.Mesh.Tools.CancelToolPoints();
-            }
-            else
-            {
-                _shell.Mesh.SetMeshTool(MeshTool.Select);
-            }
-            e.Handled = true;
-        }
-        else if (e.Key is Key.Enter or Key.Return && _shell.Mesh.Tools.ToolPointCount > 0)
+        if (e.Key is Key.Enter or Key.Return && _shell.Mesh.Tools.ToolPointCount > 0)
         {
             _shell.Mesh.Tools.ApplyToolPoints();
             e.Handled = true;
@@ -1043,7 +1003,47 @@ public sealed class ViewportView : Grid
 
     // Whether the view's scoped shortcuts may have a key (see docs/editor/shell-and-panels.md#commands): not while the game has the
     // keys or in the Game view, and not a key that flies while it is the camera's, so that it reaches OnKeyDown's _held.
-    bool KeysFree(Key key) => !InputGoesToGame && !_viewport.IsGame && _gesture != Gesture.Fly && !_held.Contains(key);
+    // Esc is Cancel's even in a flight, which it takes back while the view looks through a camera.
+    bool KeysFree(Key key) =>
+        !InputGoesToGame && !_viewport.IsGame && (key == Key.Escape || (_gesture != Gesture.Fly && !_held.Contains(key)));
+
+    /// <summary>
+    /// Cancel, which Esc runs while the view has the keyboard, in this order:
+    /// <list type="number">
+    /// <item>In a view that looks through a camera: an armed pick of its focus, then a pilot's gesture, a flight too, or
+    /// else the look itself.</item>
+    /// <item>A flight, which keeps Esc and cancels nothing.</item>
+    /// <item>A drag of one of the shell's left tools.</item>
+    /// <item>The shell's <see cref="EditorShell.ViewportCancels"/>: a binding's pick, then mesh mode.</item>
+    /// </list>
+    /// </summary>
+    public Commands.ScopedCommand? Handler(string commandId) => commandId switch
+    {
+        EditorCommands.Cancel => Commands.ScopedCommand.FirstOf(
+        [
+            (() => Looking && _gesture == Gesture.None && _shell.FocusPickArmed(_viewport.Index), () => _shell.CancelFocusPick(_viewport.Index)),
+            (() => Looking && _shell.Looks.CanEscape(_viewport.Index), EscapeLook),
+            (() => _gesture == Gesture.Fly, () => { }),
+            (() => _drag != null, CancelDrag),
+            .. _shell.ViewportCancels,
+        ]),
+        _ => null,
+    };
+
+    void EscapeLook()
+    {
+        _shell.Looks.Escape(_viewport.Index);
+        if (_gesture is Gesture.Fly or Gesture.Dolly or Gesture.Pan or Gesture.Orbit)
+        {
+            EndGesture();
+        }
+    }
+
+    void CancelDrag()
+    {
+        _drag?.Cancel();
+        EndGesture();
+    }
 
     protected override void OnKeyUp(KeyEventArgs e)
     {

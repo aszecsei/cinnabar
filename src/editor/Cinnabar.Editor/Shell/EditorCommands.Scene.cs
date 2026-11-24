@@ -73,6 +73,15 @@ static partial class EditorCommands
             Shortcut = "Ctrl+Y",
             CanExecuteWhen = () => shell.IsEditing && shell.Scene?.CanRedo == true,
         });
+        // Esc: the scope that has the keyboard cancels what is under way there, in its own order (see
+        // docs/editor/shell-and-panels.md#commands). Outside those scopes there is nothing to cancel.
+        commands.Register(new Command(Cancel, "Cancel", () => { })
+        {
+            Description = "Cancel what is under way where the keyboard is: a drag, a pick, a tool's points, a look through a camera, or the selection of a timeline or a UI document.",
+            Shortcut = "Escape",
+            ShortcutScopes = [ShortcutScopes.Viewport, ShortcutScopes.Canvas, ShortcutScopes.CutsceneEditor],
+            CanExecuteWhen = () => false,
+        });
         // A command for each kind of entity of the catalog (see docs/editor/shell-and-panels.md#add), which the Add
         // menus and the command palette show.
         foreach (var template in EntityCatalog.All)

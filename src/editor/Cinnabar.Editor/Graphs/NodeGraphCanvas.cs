@@ -58,7 +58,7 @@ public readonly record struct CanvasPress(CanvasPressKind Kind, int Id = 0);
 /// the canvas's own units under a pan and a zoom, framed when it first has a size. The left button selects (Shift adds,
 /// Ctrl toggles), drags what is selected, drags a box, and starts the drags that a canvas has of its own. The right or
 /// middle button pans, and a right click without a drag, Space or Tab opens the canvas's add menu. The wheel zooms
-/// about the mouse. Delete deletes what is selected, F frames the graph, and Escape cancels a drag. The view's input
+/// about the mouse. Delete deletes what is selected, F frames the graph, and Esc (Cancel) cancels a drag. The view's input
 /// goes through <see cref="Press"/>, <see cref="MovePointer"/>, <see cref="Release"/>, <see cref="LoseCapture"/> and
 /// <see cref="PressKey"/>, which tests drive as the view does. While it has the keyboard it is the focused command scope
 /// (see docs/editor/shell-and-panels.md#commands), so Delete and Duplicate act on the graph, not on the entities.
@@ -114,8 +114,25 @@ public abstract class NodeGraphCanvas : Control, ICommandScope
         EditorCommands.DuplicateEntity => Duplicate ?? ScopedCommand.Never,
         EditorCommands.FrameSelected => new(Frame),
         EditorCommands.AddNode => new(() => OpenAddMenu(ToCanvas(_last))),
+        EditorCommands.Cancel => ScopedCommand.FirstOf(
+            (() => _gesture == Gesture.Move, CancelMove),
+            (() => _gesture == Gesture.Connect, CancelConnectGesture)),
         _ => null,
     };
+
+    // Cancel, which Esc runs: a move puts the nodes back, and a link that is drawn links nothing.
+    void CancelMove()
+    {
+        _editor.EndMove(cancel: true);
+        _gesture = Gesture.None;
+    }
+
+    void CancelConnectGesture()
+    {
+        CancelConnect();
+        _gesture = Gesture.None;
+        InvalidateVisual();
+    }
 
     /// <summary>What Duplicate does in the graph, which has none without it.</summary>
     protected virtual ScopedCommand? Duplicate => null;
@@ -423,15 +440,6 @@ public abstract class NodeGraphCanvas : Control, ICommandScope
             // F and Space are the canvas's scoped shortcuts, Frame Selected and Add Node. Tab is a second key for the add menu.
             case Key.Tab when modifiers == KeyModifiers.None:
                 OpenAddMenu(ToCanvas(_last));
-                break;
-            case Key.Escape when _gesture == Gesture.Move:
-                _editor.EndMove(cancel: true);
-                _gesture = Gesture.None;
-                break;
-            case Key.Escape when _gesture == Gesture.Connect:
-                CancelConnect();
-                _gesture = Gesture.None;
-                InvalidateVisual();
                 break;
             default:
                 return false;

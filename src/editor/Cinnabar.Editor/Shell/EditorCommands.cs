@@ -16,6 +16,7 @@ static partial class EditorCommands
     public const string WorldOpenPreviewed = "world.openPreviewed";
     public const string Undo = "edit.undo";
     public const string Redo = "edit.redo";
+    public const string Cancel = "edit.cancel";
     public const string CreateEntity = "entity.create";
     public const string CreateVolume = "entity.createVolume";
     public const string CreateReflectionProbe = "entity.createReflectionProbe";

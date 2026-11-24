@@ -441,6 +441,9 @@ public sealed class CutsceneCurveInput
         }
     }
 
+    /// <summary>Whether <see cref="Escape"/> would do something: a drag, a box, or a selection to clear.</summary>
+    public bool CanEscape => Dragging || _gesture != Gesture.None || _editor.SelectedPaths.Count > 0;
+
     /// <summary>
     /// Esc: cancels a drag, so the cutscene and the undo stack are as they were, or a box, or else clears the selection.
     /// Returns whether it did something.

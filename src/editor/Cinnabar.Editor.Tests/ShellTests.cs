@@ -374,6 +374,7 @@ public sealed class ShellTests : IDisposable
     [InlineData("OemPeriod", EditorCommands.TextureRotateRight)]
     [InlineData("OemPlus", EditorCommands.TextureScaleUp)]
     [InlineData("OemMinus", EditorCommands.TextureScaleDown)]
+    [InlineData("Escape", EditorCommands.Cancel)]
     public void TheViewportsKeysAreItsScopedShortcuts(string key, string command)
     {
         using var shell = NewShell();
@@ -399,6 +400,21 @@ public sealed class ShellTests : IDisposable
             .ToList();
 
         Assert.Empty(shadowed);
+    }
+
+    // Esc is Cancel in each scope that has something to cancel, and is not the window's, so the pickers, the value boxes
+    // and the other controls that use Esc keep it.
+    [Fact]
+    public void EscIsCancelInTheViewportTheCanvasesAndTheCutsceneEditor()
+    {
+        using var shell = NewShell();
+
+        Assert.Equal(
+            [Commands.ShortcutScopes.Viewport, Commands.ShortcutScopes.Canvas, Commands.ShortcutScopes.CutsceneEditor],
+            shell.KeyBindings.ScopesOf(EditorCommands.Cancel));
+        Assert.Contains((EditorCommands.Cancel, "Escape"), shell.KeyBindings.InScope(Commands.ShortcutScopes.CutsceneEditor));
+        Assert.DoesNotContain(shell.KeyBindings.All, b => b.Shortcut == "Escape");
+        Assert.False(shell.Commands.Get(EditorCommands.Cancel).CanExecute);
     }
 
     [Fact]

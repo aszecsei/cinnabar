@@ -25,4 +25,11 @@ public sealed record ScopedCommand(Action Run, Func<bool>? CanRun = null)
 
     /// <summary>A command that the scope takes and that never runs in it, so it does not reach the next scope.</summary>
     public static readonly ScopedCommand Never = new(() => { }, () => false);
+
+    /// <summary>
+    /// A ladder, as Esc cancels a drag before it ends a pick: the first rung whose check holds runs, and the command
+    /// can run while any rung's does. The checks change nothing, since views ask whether the command can run.
+    /// </summary>
+    public static ScopedCommand FirstOf(params (Func<bool> When, Action Run)[] rungs) =>
+        new(() => Array.Find(rungs, r => r.When()).Run?.Invoke(), () => Array.Exists(rungs, r => r.When()));
 }

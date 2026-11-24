@@ -266,11 +266,15 @@ public sealed class MaterialTests : IDisposable
         var sample = geometry.Find(3)!;
         var output = At(canvas, roughness.OutputAt(roughness.OutputIndex("value")));
         var uv = At(canvas, sample.InputAt(sample.InputIndex("uv")));
+        // Esc is Cancel, which the focused canvas takes.
+        var cancel = shell.Commands.Get(EditorCommands.Cancel);
+        shell.Commands.Focus(canvas);
+        Assert.False(cancel.CanExecute);
 
         // Escape during the drag cancels it, and the release on the input that follows links nothing.
         Assert.True(canvas.Press(output, MouseButton.Left, KeyModifiers.None));
         canvas.MovePointer(uv);
-        Assert.True(canvas.PressKey(Key.Escape, KeyModifiers.None));
+        Assert.True(cancel.Execute());
         canvas.Release(uv, KeyModifiers.None);
         Assert.Equal(text, editor.Document.Text);
         Assert.Empty(editor.Document.History);
@@ -299,6 +303,7 @@ public sealed class MaterialTests : IDisposable
         var tint = editor.Geometry().Find(2)!.Bounds;
         var body = At(canvas, new Vec2(tint.X + 90, tint.Y + 10));
         var away = new Point(body.X + 30, body.Y + 20);
+        shell.Commands.Focus(canvas);
 
         // A press on a node selects it, and a drag moves it by as much, in one entry that Escape puts back.
         Assert.True(canvas.Press(body, MouseButton.Left, KeyModifiers.None));
@@ -307,7 +312,7 @@ public sealed class MaterialTests : IDisposable
         canvas.MovePointer(away);
         Assert.True(editor.Document.InTransaction);
         Assert.NotEqual(tint.X, editor.Document.Graph.Find(2)!.X);
-        Assert.True(canvas.PressKey(Key.Escape, KeyModifiers.None));
+        Assert.True(shell.Commands.Get(EditorCommands.Cancel).Execute());
         canvas.Release(away, KeyModifiers.None);
         Assert.False(editor.Document.InTransaction);
         Assert.Empty(editor.Document.History);

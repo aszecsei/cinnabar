@@ -267,18 +267,5 @@ sealed class UiCanvas : Grid
             e.Handled = true;
         }
 
-        protected override void OnKeyDown(KeyEventArgs e)
-        {
-            base.OnKeyDown(e);
-            switch (e.Key)
-            {
-                case Key.Escape:
-                    Editor.Select(null);
-                    break;
-                default:
-                    return;
-            }
-            e.Handled = true;
-        }
     }
 }

@@ -33,7 +33,7 @@ The document's elements, each under its parent, then its templates under their o
 
 - A click selects an element, as a click on the canvas does.
 - **Dragging** a row moves its element: before the row's element near its top edge, after it near its bottom edge, and into it, last, in its middle if it holds elements. An element cannot go into itself, into a text, an image, a field or a button with text, and a template stays under the root.
-- **Add** puts an element of the palette (box, row, column, stack, text, image, button, field) into the selected element if it holds elements, or after it, and selects it. **Template** adds a template with a box in it. **Duplicate** (Ctrl+D) copies the selected element after itself, and **Delete** (Delete) takes it out and selects its parent. Their keys are the scene's Duplicate and Delete, which the tree and the canvas take while one has the keyboard (see [Commands](shell-and-panels.md#commands)). Deleting a button's text takes the text out of the button.
+- **Add** puts an element of the palette (box, row, column, stack, text, image, button, field) into the selected element if it holds elements, or after it, and selects it. **Template** adds a template with a box in it. **Duplicate** (Ctrl+D) copies the selected element after itself, and **Delete** (Delete) takes it out and selects its parent. Their keys are the scene's Duplicate and Delete, which the tree and the canvas take while one has the keyboard (see [Commands](shell-and-panels.md#commands)). Esc in the canvas is Cancel, which selects nothing. Deleting a button's text takes the text out of the button.
 
 ## Properties
 
