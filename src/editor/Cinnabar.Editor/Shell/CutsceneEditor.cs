@@ -653,35 +653,13 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     public CutsceneBlock? SelectedTrack => Selected is { } block ? CutsceneEdits.TrackOf(block) : null;
 
     /// <summary>
-    /// Whether the timeline or the curve editor has the keyboard: the timeline's commands act only then, as their keys
-    /// are bare letters that the viewport and the other panels use too.
+    /// Whether the timeline or the curve editor has the keyboard: the editor takes the timeline's commands only then
+    /// (see <see cref="Handler"/>).
     /// </summary>
     public bool TimelineFocused => _pane != CutscenePane.None;
 
     /// <summary>Which pane has the keyboard. F, Delete and the tangent commands act on the curve editor while it does.</summary>
     public CutscenePane KeyboardPane => _pane;
-
-    /// <summary>
-    /// The scene's Delete and Duplicate while a pane has the keyboard, as the active editor's tab takes them (see
-    /// <see cref="EditorScope"/>): Delete deletes what is selected, or else the selected binding with its tracks.
-    /// </summary>
-    public ScopedCommand? Handler(string commandId) => commandId switch
-    {
-        _ when !TimelineFocused => null,
-        EditorCommands.DeleteEntity => new(() =>
-        {
-            if (CanEditSelection)
-            {
-                DeleteSelected(ripple: false);
-            }
-            else
-            {
-                _ = DeleteBinding();
-            }
-        }, () => CanEditSelection || CanDeleteBinding),
-        EditorCommands.DuplicateEntity => new(Duplicate, () => CanDuplicate),
-        _ => null,
-    };
 
     /// <summary>
     /// The one writer of <see cref="KeyboardPane"/>, which each pane's view calls as the focus moves. When neither pane

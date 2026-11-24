@@ -5,6 +5,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Panels;
+using Cinnabar.Editor.Ribbon;
 using Cinnabar.Editor.Shell;
 using static Cinnabar.Editor.Panels.Kit;
 
@@ -44,7 +45,7 @@ sealed class UiTreeView : DockPanel
         }
         buttons.Children.Add(new Button { Content = "Add", Flyout = add, Classes = { "field-button" }, Margin = new Thickness(0, 0, 4, 0) });
         buttons.Children.Add(SmallButton("Template", "Add a template, which scripts copy with Ui.add", _editor.AddTemplate));
-        string Keys(string tip, string command) => shell.KeyBindings.ShortcutOf(command) is { } key ? $"{tip} ({key})" : tip;
+        string Keys(string tip, string command) => CommandViews.Tip(shell.KeyBindings, tip, command);
         buttons.Children.Add(SmallButton("Duplicate", Keys("Copy the element after itself", EditorCommands.DuplicateEntity), () =>
         {
             if (_editor.SelectedNode is { } n)

@@ -35,7 +35,7 @@ public sealed class CutsceneEditorView : DockPanel
     bool _flushQueued;
     readonly TextBlock _time = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0) };
     readonly TextBlock _status = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
-    readonly TextBox _search = new() { PlaceholderText = "Filter tracks (Ctrl+F)", Classes = { "value-edit" }, MinWidth = 200, FontSize = 12 };
+    readonly TextBox _search = new() { Classes = { "value-edit" }, MinWidth = 200, FontSize = 12 };
     readonly ToggleButton _selectedOnly = new() { Content = "Selected entities", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(8, 0, 0, 0) };
     readonly ToggleButton _curves = new() { Content = "Curves", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(8, 0, 0, 0) };
     readonly RowDefinition _curveRow = new(0, GridUnitType.Pixel);
@@ -53,15 +53,13 @@ public sealed class CutsceneEditorView : DockPanel
         _shell = shell;
         _editor = editor;
         var toolbar = new DockPanel { Margin = new Thickness(8, 4) };
-        var save = new Button { Content = CommandViews.Icon("save", 16), Classes = { "viewport-tool" }, Focusable = false, Margin = new Thickness(0, 0, 8, 0) };
-        ToolTip.SetTip(save, "Save (Ctrl+S)");
-        save.Click += (_, _) => shell.SaveGraph(editor);
+        var save = CommandViews.SaveButton(shell, editor);
         DockPanel.SetDock(save, DockSide.Left);
         toolbar.Children.Add(save);
         var text = SmallButton("Open in Script Editor", "Edit the cutscene's text. Save first: this editor does not read the file again.", () => shell.OpenScript(editor.Document.Path));
         DockPanel.SetDock(text, DockSide.Left);
         toolbar.Children.Add(text);
-        ToolTip.SetTip(_play, "Play or pause the preview in the game (Space)");
+        ToolTip.SetTip(_play, CommandViews.Tip(shell.KeyBindings, "Play or pause the preview in the game", EditorCommands.CutscenePlayPause));
         _play.Click += (_, _) => shell.CutscenePreview.PlayPause();
         DockPanel.SetDock(_play, DockSide.Left);
         toolbar.Children.Add(_play);
@@ -70,7 +68,7 @@ public sealed class CutsceneEditorView : DockPanel
         {
             _rate.Items.Add(new ComboBoxItem { Content = $"{rate:0.##}×", Tag = rate });
         }
-        ToolTip.SetTip(_rate, "The rate at which Space plays the preview");
+        ToolTip.SetTip(_rate, "The rate at which the preview plays");
         _rate.SelectionChanged += (_, _) =>
         {
             if (_rate.SelectedItem is ComboBoxItem { Tag: float rate })
@@ -83,14 +81,14 @@ public sealed class CutsceneEditorView : DockPanel
         _loop.IsCheckedChanged += (_, _) => editor.Loop = _loop.IsChecked == true;
         DockPanel.SetDock(_loop, DockSide.Left);
         toolbar.Children.Add(_loop);
-        ToolTip.SetTip(_curves, "Show the curves of the selected tracks below the timeline (Ctrl+E)");
+        ToolTip.SetTip(_curves, CommandViews.Tip(shell.KeyBindings, "Show the curves of the selected tracks below the timeline", EditorCommands.CutsceneCurves));
         _curves.IsCheckedChanged += (_, _) => editor.CurvesOpen = _curves.IsChecked == true;
         DockPanel.SetDock(_curves, DockSide.Left);
         toolbar.Children.Add(_curves);
         // The playhead's time: a click, or Go to Time, swaps in a box to type a time. Enter jumps there, and Enter or
         // Esc gives the keyboard back to the timeline.
         _playheadButton.Content = _playhead;
-        ToolTip.SetTip(_playheadButton, "Type a time to go to (Ctrl+G)");
+        ToolTip.SetTip(_playheadButton, CommandViews.Tip(shell.KeyBindings, "Type a time to go to", EditorCommands.CutsceneGoToTime));
         _playheadButton.Click += (_, _) => GoToTime();
         DockPanel.SetDock(_playheadButton, DockSide.Left);
         toolbar.Children.Add(_playheadButton);
@@ -140,6 +138,7 @@ public sealed class CutsceneEditorView : DockPanel
         _timeBox.LostFocus += (_, _) => EndGoToTime(jump: false, refocus: false);
         // The strip over the timeline: the search box, which filters the tracks by binding or track name as it is
         // typed, and Esc in it clears it and gives the keyboard back to the timeline; and the keys-under-selection toggle.
+        _search.PlaceholderText = CommandViews.Tip(shell.KeyBindings, "Filter tracks", EditorCommands.CutsceneFind);
         _search.Text = editor.FilterText;
         _search.TextChanged += (_, _) => editor.SetFilterText(_search.Text ?? "");
         _search.KeyDown += (_, e) =>
@@ -221,6 +220,10 @@ public sealed class CutsceneEditorView : DockPanel
         var cancel = new CutsceneCancelScope(editor, timeline.Input, _curveEditor.Input);
         FocusFollower.Scope(this, shell.Commands, cancel);
         ScopeShortcuts.Attach(this, Commands.ShortcutScopes.CutsceneEditor, shell, beatsText: () => cancel.DragUnderWay);
+        // The timeline's keys are bare letters, Space and the arrows, so only the two panes have them: the details and
+        // the strip keep theirs. The cutscene editor takes the commands while a pane has the keyboard.
+        ScopeShortcuts.Attach(timeline, Commands.ShortcutScopes.CutsceneTimeline, shell);
+        ScopeShortcuts.Attach(_curveEditor, Commands.ShortcutScopes.CutsceneTimeline, shell);
 
         void Find()
         {

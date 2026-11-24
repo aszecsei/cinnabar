@@ -543,7 +543,7 @@ public sealed class CutsceneTimelineTests : IDisposable
         shell.Commands.Get("edit.undo").Execute();
         Assert.Equal(text, editor.Document.Text);
 
-        // Every one of them has a key that a window can bind, except the two toggles without one, and no key is bound twice.
+        // Every one of them but the toggles without a key has a key gesture, and no key is bound twice.
         Assert.Empty(shell.KeyBindings.Warnings);
         foreach (var id in EditorCommands.CutsceneTimelineCommands)
         {
