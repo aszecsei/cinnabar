@@ -8,7 +8,6 @@ using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
 using static Cinnabar.Editor.Panels.Kit;
-using AssetIndex = Cinnabar.Editor.Content.AssetIndex;
 using DockSide = Avalonia.Controls.Dock;
 
 namespace Cinnabar.Editor.Materials;
@@ -36,7 +35,15 @@ sealed class NodeDetails : ScrollViewer
         new ViewSubscriptions(this, attached: Refresh)
             .Add(() => _editor.SelectionChanged += Refresh, () => _editor.SelectionChanged -= Refresh)
             .Add(() => _editor.Changed += Refresh, () => _editor.Changed -= Refresh)
-            .Add(() => _editor.ProblemsChanged += Refresh, () => _editor.ProblemsChanged -= Refresh);
+            .Add(() => _editor.ProblemsChanged += Refresh, () => _editor.ProblemsChanged -= Refresh)
+            .Add(() => _shell.Assets.Changed += Rebuild, () => _shell.Assets.Changed -= Rebuild);
+    }
+
+    // A function node names its function from the content, which a cook changes.
+    void Rebuild()
+    {
+        _shown = "";
+        Refresh();
     }
 
     // The panel builds again only when what it shows changed, so a box keeps its focus while a drag moves the node.
@@ -149,14 +156,27 @@ sealed class NodeDetails : ScrollViewer
             case PropertyKind.Switch:
                 return Choice(graph.Switches.Select(s => s.Name), (value as GraphText)?.Text, name => Set(new GraphText(name)));
             case PropertyKind.Function:
-                var functions = _shell.Assets.Assets.Values.Where(a => a.Kind == AssetKind.MaterialFunction && a.Guid != _editor.Guid)
-                    .OrderBy(a => a.Path, StringComparer.OrdinalIgnoreCase).ToList();
-                var names = functions.Select(f => AssetIndex.DisplayName(f)).ToList();
-                var selected = value is GraphAsset asset ? functions.FindIndex(f => f.Guid == asset.Guid) : -1;
-                return Choice(names, selected >= 0 ? names[selected] : null, name => Set(new GraphAsset(functions[names.IndexOf(name)].Guid)));
+                var function = new AssetView(FunctionAssets(), new ValueSink(guid => Set(FunctionStored(guid))));
+                function.Show(FunctionShown(value));
+                return function.Control;
         }
         return Dim("");
     }
+
+    // The material functions that a function node can call: any but the one being edited.
+    AssetContext FunctionAssets() =>
+        new(_shell.Assets, "material_function", _shell.Content.RevealAsset) { Exclude = a => a.Guid == _editor.Guid };
+
+    /// <summary>A function node's function as its asset view shows it: the GUID, "" for none, or text that is not one, which shows as missing.</summary>
+    internal static string FunctionShown(GraphValue? value) => value switch
+    {
+        null => "",
+        GraphAsset asset => asset.Guid,
+        _ => value.Write(),
+    };
+
+    /// <summary>The value that a function node's asset view sets: the function's asset, or none.</summary>
+    internal static GraphAsset? FunctionStored(string guid) => guid == "" ? null : new GraphAsset(guid);
 
     Control InputRow(GraphNode node, GraphPin pin)
     {

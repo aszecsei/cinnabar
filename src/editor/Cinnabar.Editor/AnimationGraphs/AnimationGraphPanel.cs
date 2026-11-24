@@ -4,11 +4,9 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Cinnabar.Editor.Document;
-using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
 using static Cinnabar.Editor.Panels.Kit;
-using AssetIndex = Cinnabar.Editor.Content.AssetIndex;
 using DockSide = Avalonia.Controls.Dock;
 
 namespace Cinnabar.Editor.AnimationGraphs;
@@ -167,9 +165,11 @@ sealed class AnimationGraphPanel : ScrollViewer
         return new Border { Classes = { "value-box" }, Padding = new Thickness(6), Child = panel };
     }
 
-    // What the menu calls an animation: its name, and the file that has it when it is a sub-asset.
-    static string AnimationName(Asset a) =>
-        AssetIndex.IsSubasset(a) ? $"{Path.GetFileNameWithoutExtension(a.Path)} / {AssetIndex.DisplayName(a)}" : AssetIndex.DisplayName(a);
+    /// <summary>A clip's animation as its asset view shows it: the GUID, or "" for the all-zero GUID of a clip with none.</summary>
+    internal static string ClipShown(string guid) => guid.All(ch => ch == '0') ? "" : guid;
+
+    /// <summary>The GUID that a clip's asset view sets: the animation's, or all zeros for none, as a clip always names a GUID.</summary>
+    internal static string ClipStored(string picked) => picked == "" ? new string('0', 32) : picked;
 
     Control ClipView(AnimationGraphClip c)
     {
@@ -183,18 +183,10 @@ sealed class AnimationGraphPanel : ScrollViewer
         top.Children.Add(box);
         panel.Children.Add(top);
 
-        var animations = _shell.Assets.Assets.Values.Where(a => a.Kind == AssetKind.Animation).OrderBy(AnimationName, StringComparer.OrdinalIgnoreCase).ToList();
-        var names = animations.Select(AnimationName).ToList();
-        var current = animations.Find(a => a.Guid == guid);
-        // An animation that the content does not have shows as missing, and stays until another is picked.
-        var missing = current == null ? (guid.All(ch => ch == '0') ? "none" : $"missing {guid}") : null;
-        panel.Children.Add(Row("Animation", Choice(missing == null ? names : [.. names, missing], missing ?? AnimationName(current!), picked =>
-        {
-            if (picked != missing)
-            {
-                _editor.SetClip(name, name, animations[names.IndexOf(picked)].Guid);
-            }
-        })));
+        var animation = new AssetView(new AssetContext(_shell.Assets, "animation", _shell.Content.RevealAsset),
+            new ValueSink(picked => _editor.SetClip(name, name, ClipStored(picked))));
+        animation.Show(ClipShown(guid));
+        panel.Children.Add(Row("Animation", animation.Control));
         foreach (var e in c.Events)
         {
             panel.Children.Add(new TextBlock { Text = e, Classes = { "empty" }, FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis });

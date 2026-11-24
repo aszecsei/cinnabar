@@ -3,12 +3,10 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Cinnabar.Editor.Document;
-using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
 using static Cinnabar.Editor.Panels.Kit;
-using AssetIndex = Cinnabar.Editor.Content.AssetIndex;
 using DockSide = Avalonia.Controls.Dock;
 
 namespace Cinnabar.Editor.Materials;
@@ -124,21 +122,10 @@ sealed class ParametersPanel : ScrollViewer
     {
         if (p.Type == "texture")
         {
-            var textures = _shell.Assets.Assets.Values.Where(a => a.Kind == AssetKind.Texture).OrderBy(a => a.Path, StringComparer.OrdinalIgnoreCase).ToList();
-            var names = TextureDefaults.Concat(textures.Select(t => AssetIndex.DisplayName(t))).ToList();
-            var current = TextureDefaults.Contains(p.Value) ? p.Value
-                : textures.Find(t => "$" + t.Guid == p.Value) is { } chosen ? AssetIndex.DisplayName(chosen) : null;
-            // A texture that the content does not have shows as missing, and stays until another is picked.
-            var missing = current == null ? $"missing {p.Value}" : null;
-            return Choice(missing == null ? names : [.. names, missing], current ?? missing, name =>
-            {
-                if (name == missing)
-                {
-                    return;
-                }
-                var value = TextureDefaults.Contains(name) ? name : "$" + textures[names.IndexOf(name) - TextureDefaults.Length].Guid;
-                _editor.SetParam(p.Name, p with { Value = value });
-            });
+            var assets = new AssetContext(_shell.Assets, "texture", _shell.Content.RevealAsset) { Builtins = TextureDefaults, Clearable = false };
+            var texture = new AssetView(assets, new ValueSink(picked => _editor.SetParam(p.Name, p with { Value = TextureStored(picked) })));
+            texture.Show(TextureShown(p.Value));
+            return texture.Control;
         }
         var count = p.Type switch
         {
@@ -150,6 +137,12 @@ sealed class ParametersPanel : ScrollViewer
         var box = ValueBox(p.Value, ValueFormats.Numbers(count), DefaultOf(p.Type), n => _editor.SetParam(p.Name, p with { Value = n.Write() }));
         return p.Type == "color" && GraphNumbers.TryParse(p.Value) is { } color ? WithSwatch(Swatch(color.Values), box) : box;
     }
+
+    /// <summary>A texture parameter's value as its asset view shows it: a built-in such as "white" as itself, and a GUID without its "$".</summary>
+    internal static string TextureShown(string value) => value.StartsWith('$') ? value[1..] : value;
+
+    /// <summary>The value that a texture parameter's asset view sets: a built-in as itself, and a texture as "$" and its GUID.</summary>
+    internal static string TextureStored(string picked) => TextureDefaults.Contains(picked) ? picked : "$" + picked;
 
     static string DefaultOf(string type) => type switch
     {
