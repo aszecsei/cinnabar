@@ -109,6 +109,9 @@ public sealed class ViewportView : Grid
     // The game has the keyboard and the mouse of the Game view only.
     bool InputGoesToGame => _viewport.IsGame && _shell.InputGoesToGame;
 
+    /// <summary>The view's viewport, of the shell's.</summary>
+    public EditorViewport Viewport => _viewport;
+
     public ViewportView(EditorShell shell, EditorViewport viewport)
     {
         _shell = shell;

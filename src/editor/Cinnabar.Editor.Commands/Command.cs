@@ -35,21 +35,40 @@ public class Command
 
     public bool IsToggle => IsCheckedWhen != null;
 
-    public bool CanExecute => CanExecuteWhen?.Invoke() ?? true;
+    /// <summary>Whether the command can run now: by the scope that takes it, or else by its own check.</summary>
+    public bool CanExecute => Handler() is { } scoped ? scoped.CanExecute : CanExecuteWhen?.Invoke() ?? true;
 
     public bool IsChecked => IsCheckedWhen?.Invoke() ?? false;
 
     /// <summary>The command's state may have changed. Views ask <see cref="CanExecute"/> and <see cref="IsChecked"/> again.</summary>
     public event Action? Changed;
 
-    /// <summary>Runs the command if it can run, and returns whether it ran.</summary>
+    /// <summary>The registry that the command is in, whose scopes can take it.</summary>
+    internal CommandRegistry? Registry { get; set; }
+
+    ScopedCommand? Handler() => Registry?.HandlerOf(Id);
+
+    /// <summary>
+    /// Runs the command if it can run, and returns whether it ran: the action of the scope that takes it, or else its own.
+    /// </summary>
     public bool Execute()
     {
-        if (!CanExecute)
+        if (Handler() is { } scoped)
+        {
+            if (!scoped.CanExecute)
+            {
+                return false;
+            }
+            scoped.Run();
+        }
+        else if (CanExecuteWhen?.Invoke() ?? true)
+        {
+            _execute();
+        }
+        else
         {
             return false;
         }
-        _execute();
         Invalidate();
         return true;
     }

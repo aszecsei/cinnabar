@@ -9,6 +9,7 @@ static partial class EditorCommands
     static void RegisterScene(EditorShell shell)
     {
         var commands = shell.Commands;
+        commands.AddScope(new EditorScope(shell));
         commands.Register(new Command(Palette, "Command Palette", shell.RequestPalette)
         {
             Description = "Search every command by name.",
@@ -36,14 +37,14 @@ static partial class EditorCommands
             Icon = "delete",
             CanExecuteWhen = () => shell.Scenes.Count > 1,
         });
-        // Save, Undo and Redo act on the graph editor whose document is active, and on the active scene otherwise.
-        commands.Register(new Command(Save, "Save", () => _ = shell.ActiveGraphEditor is { } graph ? shell.SaveGraph(graph) : shell.SaveScene())
+        // Save, Undo and Redo act on the active scene. The active editor's tab takes them first (see EditorScope).
+        commands.Register(new Command(Save, "Save", () => _ = shell.SaveScene())
         {
             Description = "Write the active scene, or the graph that the active graph editor shows, to its file. Not while a drag or a tool has an edit open.",
             Icon = "save",
             Shortcut = "Ctrl+S",
             // An open entry's preview can still be put back, so the file waits for it to end.
-            CanExecuteWhen = () => shell.ActiveGraphEditor is { } graph ? !graph.Document.InTransaction : shell.Scene != null && shell.OpenEdit == null,
+            CanExecuteWhen = () => shell.Scene != null && shell.OpenEdit == null,
         });
         commands.Register(new Command(SaveAs, "Save As", shell.RequestSaveAs)
         {
@@ -58,39 +59,19 @@ static partial class EditorCommands
             Icon = "save",
             CanExecuteWhen = () => shell.AnySceneDirty && shell.OpenEdit == null,
         });
-        commands.Register(new Command(Undo, "Undo", () =>
-        {
-            if (shell.UndoEditor is { } graph)
-            {
-                graph.Document.Undo();
-            }
-            else
-            {
-                shell.Scene?.Undo();
-            }
-        })
+        commands.Register(new Command(Undo, "Undo", () => shell.Scene?.Undo())
         {
             Description = "Undo the last edit of the active editor's tab, or with none, of the active scene, or of the cutscene keyed after it.",
             Icon = "undo",
             Shortcut = "Ctrl+Z",
-            CanExecuteWhen = () => shell.UndoEditor is { } graph ? graph.Document.CanUndo : shell.IsEditing && shell.Scene?.CanUndo == true,
+            CanExecuteWhen = () => shell.IsEditing && shell.Scene?.CanUndo == true,
         });
-        commands.Register(new Command(Redo, "Redo", () =>
-        {
-            if (shell.UndoEditor is { } graph)
-            {
-                graph.Document.Redo();
-            }
-            else
-            {
-                shell.Scene?.Redo();
-            }
-        })
+        commands.Register(new Command(Redo, "Redo", () => shell.Scene?.Redo())
         {
             Description = "Apply the last undone edit again, of the active editor's tab, or with none, of the active scene, or of the cutscene keyed after it.",
             Icon = "redo",
             Shortcut = "Ctrl+Y",
-            CanExecuteWhen = () => shell.UndoEditor is { } graph ? graph.Document.CanRedo : shell.IsEditing && shell.Scene?.CanRedo == true,
+            CanExecuteWhen = () => shell.IsEditing && shell.Scene?.CanRedo == true,
         });
         // A command for each kind of entity of the catalog (see docs/editor/shell-and-panels.md#add), which the Add
         // menus and the command palette show.
@@ -104,26 +85,14 @@ static partial class EditorCommands
                 CanExecuteWhen = () => shell.CanEditScene,
             });
         }
-        // While a cutscene's timeline has the keyboard, Duplicate duplicates what it selects (see
-        // docs/editor/cutscene-editor.md#copy-and-paste).
-        commands.Register(new Command(DuplicateEntity, "Duplicate", () =>
+        // Duplicate, Delete and Select All act on the scene's entities. A scope takes them first, as a graph canvas
+        // or a cutscene's timeline with the keyboard does (see docs/editor/shell-and-panels.md#commands).
+        commands.Register(new Command(DuplicateEntity, "Duplicate", shell.DuplicateSelected)
         {
-            if (shell.ActiveCutscene is { TimelineFocused: true } cutscene)
-            {
-                cutscene.Duplicate();
-            }
-            else
-            {
-                shell.DuplicateSelected();
-            }
-        })
-        {
-            Description = "Copy the selected entities and their children, or on a cutscene's timeline, the selected sections, events, keys and markers, right after themselves.",
+            Description = "Copy the selected entities and their children, or on a cutscene's timeline, the selected sections, events, keys and markers, right after themselves. In a graph, the UI editor or the content browser with the keyboard, copy what it selects.",
             Icon = "copy",
             Shortcut = "Ctrl+D",
-            CanExecuteWhen = () => shell.ActiveCutscene is { TimelineFocused: true } cutscene
-                ? cutscene.CanDuplicate
-                : shell.SelectedSceneEntities.Count > 0,
+            CanExecuteWhen = () => shell.SelectedSceneEntities.Count > 0,
         });
         commands.Register(new Command(MakePrefab, "Make Prefab", shell.RequestMakePrefab)
         {
@@ -174,33 +143,12 @@ static partial class EditorCommands
             Icon = "prefab",
             CanExecuteWhen = () => shell.SelectedSceneEntity is { } e && shell.InstanceOf(e.Id) != null,
         });
-        // While a cutscene's timeline has the keyboard, Delete deletes what it selects (see
-        // docs/editor/cutscene-editor.md#the-timeline).
-        commands.Register(new Command(DeleteEntity, "Delete", () =>
+        commands.Register(new Command(DeleteEntity, "Delete", shell.DeleteSelected)
         {
-            if (shell.ActiveCutscene is { TimelineFocused: true } cutscene)
-            {
-                if (cutscene.CanEditSelection)
-                {
-                    cutscene.DeleteSelected(ripple: false);
-                }
-                else
-                {
-                    _ = cutscene.DeleteBinding();
-                }
-            }
-            else
-            {
-                shell.DeleteSelected();
-            }
-        })
-        {
-            Description = "Delete the selected entities and their children, or in mesh mode the selected vertices, edges or faces, or on a cutscene's timeline, the selected sections, events and keys, or the selected binding with its tracks.",
+            Description = "Delete the selected entities and their children, or in mesh mode the selected vertices, edges or faces, or on a cutscene's timeline, the selected sections, events and keys, or the selected binding with its tracks. In a graph, the UI editor or the content browser with the keyboard, delete what it selects.",
             Icon = "delete",
             Shortcut = "Delete",
-            CanExecuteWhen = () => shell.ActiveCutscene is { TimelineFocused: true } cutscene
-                ? cutscene.CanEditSelection || cutscene.CanDeleteBinding
-                : shell.Mesh.InMeshMode ? !shell.Mesh.MeshSelection.IsEmpty : shell.SelectedSceneEntities.Count > 0,
+            CanExecuteWhen = () => shell.Mesh.InMeshMode ? !shell.Mesh.MeshSelection.IsEmpty : shell.SelectedSceneEntities.Count > 0,
         });
     }
 
@@ -252,7 +200,7 @@ static partial class EditorCommands
             }
         })
         {
-            Description = "Select every entity, or in mesh mode every vertex, edge or face of the edited meshes.",
+            Description = "Select every entity, or in mesh mode every vertex, edge or face of the edited meshes. In the content browser with the keyboard, select every asset that shows.",
             Shortcut = "Ctrl+A",
             CanExecuteWhen = () => shell.World.HasWorld,
         });

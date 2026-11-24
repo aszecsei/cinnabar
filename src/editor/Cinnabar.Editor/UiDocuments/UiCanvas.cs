@@ -14,7 +14,8 @@ namespace Cinnabar.Editor.UiDocuments;
 /// <summary>
 /// The UI editor's canvas (see docs/editor/ui-editor.md#the-canvas): the game's drawing of the document on its screen,
 /// with the selected element's rectangle, padding and clip outlined over it. A click picks the topmost element, the
-/// middle or right button pans, the wheel zooms about the pointer, and F fits the screen.
+/// middle or right button pans, the wheel zooms about the pointer, and F fits the screen. Delete and Duplicate act on the
+/// selected element while the canvas has the keyboard (see <see cref="UiElementScope"/>).
 /// </summary>
 sealed class UiCanvas : Grid
 {
@@ -29,6 +30,7 @@ sealed class UiCanvas : Grid
         _shell = shell;
         _editor = editor;
         Background = new SolidColorBrush(Color.Parse("#141416"));
+        UiElementScope.Follow(this, shell.Commands, editor);
         ClipToBounds = true;
         Children.Add(_message);
         if (editor.Preview is not { } session)
@@ -273,12 +275,6 @@ sealed class UiCanvas : Grid
                     break;
                 case Key.Escape:
                     Editor.Select(null);
-                    break;
-                case Key.Delete when Editor.SelectedNode is { } n:
-                    Editor.Delete(n);
-                    break;
-                case Key.D when e.KeyModifiers == KeyModifiers.Control && Editor.SelectedNode is { } n:
-                    Editor.Duplicate(n);
                     break;
                 default:
                     return;

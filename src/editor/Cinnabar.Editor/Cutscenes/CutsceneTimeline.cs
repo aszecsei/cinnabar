@@ -79,6 +79,8 @@ sealed class CutsceneTimeline : Control
         void Played() => Input.OnPlayStarted();
         void Reveal(string path) => Input.Reveal(path);
         void Viewed() => InvalidateVisual();
+        // Tells the editor when the keyboard is in the timeline.
+        FocusFollower.Follow(this, () => _editor.SetKeyboardPane(CutscenePane.Timeline), () => _editor.LeaveKeyboardPane(CutscenePane.Timeline));
         new ViewSubscriptions(this, attached: Input.Refresh)
             .Add(() => _editor.TimeViewChanged += Viewed, () => _editor.TimeViewChanged -= Viewed)
             .Add(() => _editor.RevealRequested += Reveal, () => _editor.RevealRequested -= Reveal)
@@ -91,22 +93,6 @@ sealed class CutsceneTimeline : Control
     }
 
     public CutsceneTimelineInput Input { get; }
-
-    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
-    {
-        base.OnAttachedToVisualTree(e);
-        _focus = new CutscenePaneFocus(this, _editor, CutscenePane.Timeline);
-    }
-
-    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
-    {
-        _focus?.Dispose();
-        _focus = null;
-        base.OnDetachedFromVisualTree(e);
-    }
-
-    // Tells the editor when the keyboard is in the timeline.
-    CutscenePaneFocus? _focus;
 
     FormattedText Text(string text, IBrush brush, double size = 11)
     {

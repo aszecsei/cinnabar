@@ -176,9 +176,9 @@ The **M** and **S** buttons in a track's header, and **Mute Track** and **Solo T
 ### Keys
 
 Each action is a command, so it is in the command palette, and `keybindings.json` can change its key. None of them is in the ribbon.
-- **The timeline's keys are bare letters,** which the viewport and the other panels also use. So each command acts only while the timeline or the curve editor has the keyboard, or while the command palette opened from one of them has it. When another window, such as a floating panel, becomes active, neither has the keyboard. Which pane has it is one value, `CutsceneEditor.KeyboardPane`, which each pane's `CutscenePaneFocus` sets.
+- **The timeline's keys are bare letters,** which the viewport and the other panels also use. So each command acts only while the timeline or the curve editor has the keyboard, or while the command palette opened from one of them has it. When another window, such as a floating panel, becomes active, neither has the keyboard. Which pane has it is one value, `CutsceneEditor.KeyboardPane`, which each pane's `FocusFollower` sets.
 - **Frame Selection and Delete** act on the pane that has the keyboard: in the curve editor, F frames the curves and Delete deletes the selected keys.
-- **Delete and Duplicate.** While the timeline has the keyboard, the scene's Delete deletes the timeline's selection, and its Duplicate duplicates it.
+- **Delete and Duplicate.** While the timeline has the keyboard, the scene's Delete deletes the timeline's selection, and its Duplicate duplicates it. The cutscene's tab takes them as a command scope (see [Commands](shell-and-panels.md#commands)).
 - **Copy and paste.** A command that cannot act leaves its key to the focused control, and a text box keeps Ctrl+C, Ctrl+X and Ctrl+V. So the timeline's copy and paste take those keys only while it has the keyboard.
 - **Keying.** Key Transform and Key Tracked Fields act on the selected entities wherever the keyboard is (see [Keying](#keying)). K is Shuttle Pause, so they use Ctrl+K and Ctrl+Shift+K.
 

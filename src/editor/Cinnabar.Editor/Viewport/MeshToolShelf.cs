@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
 
@@ -108,12 +109,22 @@ public sealed class MeshToolShelf : Border
 /// <summary>
 /// The Scene document's view (see docs/editor/viewport.md#views): the tool strip, mesh mode's shelf while the mode is on,
 /// the Landscape tool's shelf while it is the tool, and the scene views. The strip and the shelves are the Scene's, not
-/// a view's, because the tool, the space, snapping and mesh mode are the same in every view.
+/// a view's, because the tool, the space, snapping and mesh mode are the same in every view. Their buttons take no
+/// keyboard, so that the view keeps its keys; a press on one while the keyboard is elsewhere, as in a graph, gives it to
+/// the active view, so the strip's Delete deletes the scene's entities, not what a graph's scope would.
 /// </summary>
 public sealed class SceneDocumentView : DockPanel
 {
     public SceneDocumentView(EditorShell shell)
     {
+        AddHandler(PointerPressedEvent, (_, _) =>
+        {
+            if (!IsKeyboardFocusWithin)
+            {
+                var views = this.GetVisualDescendants().OfType<ViewportView>().ToList();
+                (views.FirstOrDefault(v => v.Viewport == shell.ActiveViewport) ?? views.FirstOrDefault())?.Focus();
+            }
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
         var strip = new SceneToolStrip(shell);
         var shelf = new MeshToolShelf(shell);
         var landscape = new LandscapeShelf(shell);

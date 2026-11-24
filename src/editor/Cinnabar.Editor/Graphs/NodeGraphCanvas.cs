@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
@@ -16,6 +17,9 @@ public interface IGraphCanvasEditor
     IReadOnlyCollection<int> Selection { get; }
 
     void Select(IEnumerable<int> ids, SelectMode mode = SelectMode.Replace);
+
+    /// <summary>The selection changed.</summary>
+    event Action? SelectionChanged;
 
     /// <summary>Where the selected things are now, which a drag's steps start from.</summary>
     Dictionary<int, Vec2> MoveStarts();
@@ -55,9 +59,10 @@ public readonly record struct CanvasPress(CanvasPressKind Kind, int Id = 0);
 /// middle button pans, and a right click without a drag, Space or Tab opens the canvas's add menu. The wheel zooms
 /// about the mouse. Delete deletes what is selected, F frames the graph, and Escape cancels a drag. The view's input
 /// goes through <see cref="Press"/>, <see cref="MovePointer"/>, <see cref="Release"/>, <see cref="LoseCapture"/> and
-/// <see cref="PressKey"/>, which tests drive as the view does.
+/// <see cref="PressKey"/>, which tests drive as the view does. While it has the keyboard it is the focused command scope
+/// (see docs/editor/shell-and-panels.md#commands), so Delete and Duplicate act on the graph, not on the entities.
 /// </summary>
-public abstract class NodeGraphCanvas : Control
+public abstract class NodeGraphCanvas : Control, ICommandScope
 {
     protected const double MinZoom = 0.2;
     protected const double MaxZoom = 2;
@@ -85,12 +90,30 @@ public abstract class NodeGraphCanvas : Control
     Dictionary<int, Vec2> _moveStarts = [];
     bool _framed;
 
-    protected NodeGraphCanvas(IGraphCanvasEditor editor)
+    protected NodeGraphCanvas(IGraphCanvasEditor editor, CommandRegistry commands)
     {
         _editor = editor;
         Focusable = true;
         ClipToBounds = true;
+        FocusFollower.Scope(this, commands, this);
+        // Whether Delete and Duplicate can run follows the selection, so the ribbon's buttons do too.
+        void Refresh() => commands.Refresh(this);
+        new ViewSubscriptions(this).Add(() => editor.SelectionChanged += Refresh, () => editor.SelectionChanged -= Refresh);
     }
+
+    /// <summary>
+    /// Delete and Duplicate act on what is selected, and a graph without Duplicate takes it and does nothing, so the
+    /// key never reaches the entities.
+    /// </summary>
+    public ScopedCommand? Handler(string commandId) => commandId switch
+    {
+        EditorCommands.DeleteEntity => new(_editor.DeleteSelected, () => _editor.Selection.Count > 0),
+        EditorCommands.DuplicateEntity => Duplicate ?? ScopedCommand.Never,
+        _ => null,
+    };
+
+    /// <summary>What Duplicate does in the graph, which has none without it.</summary>
+    protected virtual ScopedCommand? Duplicate => null;
 
     /// <summary>Where the graph's things are now, which framing and a box read.</summary>
     protected abstract IGraphLayout Layout { get; }
@@ -388,7 +411,8 @@ public abstract class NodeGraphCanvas : Control
     {
         switch (key)
         {
-            case Key.Delete or Key.Back:
+            // Delete is the window's, which comes before the canvas sees the key and reaches the canvas as its scope.
+            case Key.Back:
                 _editor.DeleteSelected();
                 break;
             case Key.F when modifiers == KeyModifiers.None:

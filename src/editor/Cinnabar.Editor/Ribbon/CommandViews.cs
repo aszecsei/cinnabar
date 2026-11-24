@@ -27,8 +27,11 @@ sealed class CommandAdapter : ICommand
 
 /// <summary>
 /// A command as a shortcut: while the game has the keys the shortcut does nothing, except on the function keys, so F5 and
-/// Shift+F5 work during play. Nor does one that a text box uses, while a text box has the focus: a window's key bindings
-/// come before the focused control sees the key, so Delete in a search box would delete the selected entities.
+/// Shift+F5 work during play. Nor does one that a text box uses, while a text box has the focus. Avalonia runs the key
+/// bindings of the focused control and of each control around it, nearest first and the window's last, before the
+/// focused control sees the key, and a binding that cannot run leaves the key to the next one and then to the control.
+/// So Delete in a search box would otherwise delete the selected entities, and a panel that gives Delete its own meaning
+/// does so as the focused command scope (see <see cref="Commands.ICommandScope"/>), not in its key handler.
 /// </summary>
 sealed class ShortcutCommand(ICommand command, KeyGesture gesture, Func<bool> gameHasKeys, Func<bool> textHasFocus) : ICommand
 {
@@ -85,9 +88,11 @@ sealed class CommandViews(CommandRegistry commands, KeyBindings keyBindings)
         return adapter;
     }
 
-    public KeyGesture? Gesture(string id)
+    public KeyGesture? Gesture(string id) => ParseGesture(KeyBindings.ShortcutOf(id));
+
+    /// <summary>A shortcut as a key gesture, or null for none or for one that is not a gesture.</summary>
+    public static KeyGesture? ParseGesture(string? shortcut)
     {
-        var shortcut = KeyBindings.ShortcutOf(id);
         try
         {
             return shortcut == null ? null : KeyGesture.Parse(shortcut);

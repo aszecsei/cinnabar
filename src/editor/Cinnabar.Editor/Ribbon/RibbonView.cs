@@ -161,6 +161,7 @@ public sealed class RibbonView : DockPanel
         var command = _shell.Commands.Get(id);
         Button button = command.IsToggle ? new ToggleButton() : new Button();
         button.Classes.Add("ribbon-quick");
+        button.Focusable = false;
         button.Content = CommandViews.Icon(command.Icon, 16) ?? (object)command.Label;
         button.Command = _views.Adapter(id);
         ToolTip.SetTip(button, _views.Tooltip(command));
@@ -258,6 +259,9 @@ public sealed class RibbonView : DockPanel
         var command = _shell.Commands.Get(id);
         Button button = command.IsToggle ? new ToggleButton() : new Button();
         button.Classes.Add(large ? "ribbon-large" : "ribbon-small");
+        // A press does not take the keyboard, so the command acts on the panel that has it, as its key does: the
+        // ribbon's Delete deletes a focused graph's nodes (see docs/editor/shell-and-panels.md#commands).
+        button.Focusable = false;
         button.Content = Content(command.Label, command.Icon, large);
         button.Command = _views.Adapter(id);
         ToolTip.SetTip(button, _views.Tooltip(command));
@@ -279,6 +283,7 @@ public sealed class RibbonView : DockPanel
         var button = new Avalonia.Controls.SplitButton
         {
             Classes = { "ribbon-large" },
+            Focusable = false,
             Content = Content(command.Label, command.Icon, large: true),
             Command = _views.Adapter(split.Command),
             Flyout = _views.Flyout(split.Menu, _unsubscribe),
@@ -291,6 +296,7 @@ public sealed class RibbonView : DockPanel
     Control Dropdown(Dropdown dropdown) => new DropDownButton
     {
         Classes = { "ribbon-large" },
+        Focusable = false,
         Content = Content(dropdown.Label, dropdown.Icon, large: true),
         Flyout = _views.Flyout(dropdown.Menu, _unsubscribe),
         [AutomationProperties.NameProperty] = dropdown.Label,

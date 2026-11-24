@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Input;
 using Avalonia.Media;
+using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Graphs;
 using Cinnabar.Editor.Link.Cook;
@@ -37,7 +38,7 @@ public sealed class GraphCanvas : NodeGraphCanvas
     LinkDrag? _link;
 
     public GraphCanvas(EditorShell shell, MaterialEditor editor)
-        : base(editor)
+        : base(editor, shell.Commands)
     {
         _shell = shell;
         _editor = editor;
@@ -328,13 +329,6 @@ public sealed class GraphCanvas : NodeGraphCanvas
 
     protected override void OpenAddMenu(Vec2 at) => _picker.Open(this, at, null);
 
-    internal override bool PressKey(Key key, KeyModifiers modifiers)
-    {
-        if (key == Key.D && modifiers == KeyModifiers.Control)
-        {
-            _editor.DuplicateSelected();
-            return true;
-        }
-        return base.PressKey(key, modifiers);
-    }
+    // Ctrl+D duplicates the selected nodes with the links between them.
+    protected override ScopedCommand Duplicate => new(_editor.DuplicateSelected, () => _editor.Selection.Count > 0);
 }

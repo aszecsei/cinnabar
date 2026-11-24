@@ -322,8 +322,10 @@ public sealed class MaterialTests : IDisposable
         // The second press of a double click takes nothing: no drag follows it.
         Assert.False(canvas.Press(away, MouseButton.Left, KeyModifiers.None, clickCount: 2));
 
-        // Ctrl+D duplicates the selection, and a click on nothing clears it.
-        Assert.True(canvas.PressKey(Key.D, KeyModifiers.Control));
+        // Ctrl+D duplicates the selection, as the canvas takes Duplicate while it has the keyboard, and a click on
+        // nothing clears it.
+        shell.Commands.Focus(canvas);
+        Assert.True(shell.Commands.Get(EditorCommands.DuplicateEntity).Execute());
         Assert.Equal("Duplicate tint", editor.Document.History[^1]);
         Assert.DoesNotContain(2, editor.Selection);
         Assert.True(canvas.Press(At(canvas, new Vec2(-2000, 0)), MouseButton.Left, KeyModifiers.None));
@@ -331,14 +333,53 @@ public sealed class MaterialTests : IDisposable
         Assert.Empty(editor.Selection);
     }
 
-    EditorShell NewShell()
+    // A scene of one entity, which the host reports, for the tests of the scene's commands beside a graph.
+    const string DoorScene = "scene 1\n\nentity 0000000000000001\nname = \"Door\"\ncomponent 1 Transform\n\tposition = [0, 0, 0]\n\trotation = [0, 0, 0, 1]\n\tscale = [1, 1, 1]\n";
+    const ulong DoorHandle = 1UL << 32;
+
+    [Fact]
+    public void DeleteAndDuplicateWithTheCanvasFocusedActOnTheGraphAndNeverOnTheSelectedEntities()
+    {
+        using var shell = NewShell(DoorScene);
+        shell.OnGameMessage(new Link.Protocol.EntitySnapshot([new Link.Protocol.EntityInfo(DoorHandle, "Door", 1, 1, 0, true, [1])]));
+        var editor = shell.OpenMaterial(shell.Assets.Find(MaterialGuid)!)!;
+        var canvas = new GraphCanvas(shell, editor);
+        var delete = shell.Commands.Get(EditorCommands.DeleteEntity);
+        var duplicate = shell.Commands.Get(EditorCommands.DuplicateEntity);
+        shell.Selection.Set([DoorHandle]);
+        Assert.True(delete.CanExecute);
+
+        // The window's Delete and Ctrl+D run before the focused canvas sees the key, so they reach the graph as the
+        // canvas's scope. With nothing selected in the graph they do nothing, and the entities stay.
+        shell.Commands.Focus(canvas);
+        editor.Select([]);
+        Assert.False(delete.CanExecute);
+        Assert.False(delete.Execute());
+        Assert.False(duplicate.Execute());
+        Assert.Single(shell.Scene!.Scene.Entities);
+        Assert.Empty(editor.Document.History);
+
+        // With a node selected, only the node goes.
+        editor.Select([2]);
+        Assert.True(delete.Execute());
+        Assert.Null(editor.Document.Graph.Find(2));
+        Assert.Single(shell.Scene.Scene.Entities);
+        Assert.Empty(shell.Scene.History);
+
+        // Once the canvas lets the keyboard go, Delete deletes the entities again.
+        shell.Commands.Leave(canvas);
+        Assert.True(delete.Execute());
+        Assert.Empty(shell.Scene.Scene.Entities);
+    }
+
+    EditorShell NewShell(string? scene = null)
     {
         Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(_temp.Combine("checker.material"), Text(Checker));
         File.WriteAllText(_temp.Combine("rim.material_function"), Text(Rim));
         File.WriteAllText(_temp.Combine("glow.material"), "material 1\nshading = lit\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n");
         File.WriteAllText(_temp.Combine("smoke.effect"), "effect 1\nemitter puffs\n");
-        var shell = TestShell.Open(_temp, null, null);
+        var shell = TestShell.Open(_temp, scene == null ? null : "door.scene", scene);
         shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], Nodes, []));
         shell.Assets.Apply(new ShadingModels(Shading));
         shell.Assets.Apply(new AssetSnapshot(
