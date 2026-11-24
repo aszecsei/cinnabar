@@ -776,14 +776,16 @@ sealed class AssetView : ReferenceView
             {
                 menu.Items.Add(new Separator());
             }
+            var any = false;
             foreach (var asset in assets.Choices)
             {
+                any = true;
                 var guid = asset.Guid;
                 var item = new MenuItem { Header = Content.AssetIndex.DisplayName(asset), Command = new RelayCommand(() => editor.SetAsset(guid)) };
                 ToolTip.SetTip(item, Content.AssetIndex.IsSubasset(asset) ? $"{asset.Root}/{asset.Path}" : $"{asset.Root}/{Content.AssetIndex.Parent(asset.Path)}");
                 menu.Items.Add(item);
             }
-            if (menu.Items.Count == assets.Builtins.Count)
+            if (!any)
             {
                 menu.Items.Add(new MenuItem { Header = assets.Kind == "" ? "No assets" : $"No {assets.Kind.Replace('_', ' ')} assets", IsEnabled = false });
             }
