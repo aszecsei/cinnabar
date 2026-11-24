@@ -24,13 +24,4 @@ public static class WeatherMapFile
     /// <summary>Whether a file's name has the weather suffix, so the cooker takes it as a data texture without a setting.</summary>
     public static bool HasWeatherSuffix(string path) =>
         Path.GetFileNameWithoutExtension(path).EndsWith("_weather", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>Writes bytes to a temporary file and moves it over the target, so a crash or a cook never sees half a file.</summary>
-    public static void WriteAtomically(string path, byte[] bytes)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var temporary = path + ".tmp";
-        File.WriteAllBytes(temporary, bytes);
-        File.Move(temporary, path, overwrite: true);
-    }
 }

@@ -220,7 +220,7 @@ public sealed class MeshModeTests : IDisposable
         var document = shell.Mesh.Meshes.Find(guid);
         Assert.NotNull(document);
         Assert.True(document.IsLive && document.IsDirty);
-        Assert.Null(document.Saved);
+        Assert.IsType<SavedSnapshot<MeshData>.NoFile>(document.Saved);
         Assert.Equal(_temp.Combine("main_meshes", "block.mesh"), document.Path);
         Assert.Equal(6, document.Data.Faces.Length);
         // Its footprint is on the grid, and it is a grid cell deep along the view's axis.

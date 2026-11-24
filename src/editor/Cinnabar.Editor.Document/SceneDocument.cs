@@ -359,7 +359,7 @@ public sealed class SceneDocument
         {
             prefab.Save();
         }
-        WriteAtomically(target, SceneFile.Write(Scene));
+        AtomicFile.Write(target, SceneFile.Write(Scene));
         Path = target;
         SavedPosition = Position;
         Changed?.Invoke();
@@ -370,14 +370,5 @@ public sealed class SceneDocument
     {
         Path = System.IO.Path.GetFullPath(path);
         Changed?.Invoke();
-    }
-
-    /// <summary>Writes text to a temporary file and moves it over the target, so a crash never leaves half a file.</summary>
-    public static void WriteAtomically(string path, string text)
-    {
-        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
-        var temporary = path + ".tmp";
-        File.WriteAllText(temporary, text);
-        File.Move(temporary, path, overwrite: true);
     }
 }

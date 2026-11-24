@@ -15,35 +15,36 @@ public enum LandscapeMapKind
 /// A height map or a hole mask that the landscape tools paint (see docs/editor/landscape.md#height-maps-and-masks): its
 /// GUID, its file, its texels, and the revision that the file has. The scene's undo stack holds its strokes, as
 /// <see cref="LandscapeOperation"/>s, so it keeps no history of its own. Each edit, undo and redo gives a new
-/// <see cref="Revision"/>, and the map is dirty while it is not the one that the file has.
+/// <see cref="Revision"/>, and the map is dirty while it is not the one that the file has. The texels change in place,
+/// so the revision is the map's snapshot, and its strokes are not <see cref="SnapshotOperation{TSnapshot}"/>s.
 /// </summary>
-public sealed class LandscapeMap(string guid, string path, LandscapeMapKind kind, HeightGrid grid)
+public sealed class LandscapeMap : LiveSnapshotAsset<int>
 {
     static int _revisions;
 
-    /// <summary>The asset's GUID, as 32 lowercase hex digits.</summary>
-    public string Guid { get; } = guid;
+    LandscapeMap(string guid, string path, LandscapeMapKind kind, HeightGrid grid, bool saved)
+        : this(guid, path, kind, grid, NextRevision(), saved)
+    {
+    }
 
-    /// <summary>The PNG's full path.</summary>
-    public string Path { get; } = System.IO.Path.GetFullPath(path);
+    LandscapeMap(string guid, string path, LandscapeMapKind kind, HeightGrid grid, int revision, bool saved)
+        : base(guid, path, revision, saved ? new SavedSnapshot<int>.At(revision) : new SavedSnapshot<int>.NoFile())
+    {
+        Kind = kind;
+        Grid = grid;
+    }
 
-    public LandscapeMapKind Kind { get; } = kind;
+    /// <summary>A new map, which has no file until it is saved.</summary>
+    public LandscapeMap(string guid, string path, LandscapeMapKind kind, HeightGrid grid) : this(guid, path, kind, grid, saved: false)
+    {
+    }
 
-    public HeightGrid Grid { get; } = grid;
+    public LandscapeMapKind Kind { get; }
+
+    public HeightGrid Grid { get; }
 
     /// <summary>Which edit the texels are: every stroke, and so every undo and redo of one, has its own.</summary>
-    public int Revision { get; private set; } = NextRevision();
-
-    /// <summary>The revision that the file has, or null for a map with no file yet.</summary>
-    public int? SavedRevision { get; private set; } = null;
-
-    public bool IsDirty => Revision != SavedRevision;
-
-    /// <summary>
-    /// The host draws the map from the editor's texels: it was sent as a live texture and not let go of. A map that is
-    /// saved and cooked is let go of until the next edit.
-    /// </summary>
-    public bool IsLive { get; set; }
+    public int Revision => Current;
 
     /// <summary>The texels in a rectangle changed: by a stroke's step, an undo or a redo.</summary>
     public event Action<LandscapeMap, TexelRect>? Changed;
@@ -60,14 +61,14 @@ public sealed class LandscapeMap(string guid, string path, LandscapeMapKind kind
             Grid.Write(tile.Rect, after ? tile.After : tile.Before);
             changed = changed.Union(tile.Rect);
         }
-        Revision = revision;
+        Current = revision;
         Changed?.Invoke(this, changed);
     }
 
     /// <summary>The texels changed in place, as a stroke's step does, and the map is a new revision.</summary>
     public void Touched(TexelRect rect, int revision)
     {
-        Revision = revision;
+        Current = revision;
         Changed?.Invoke(this, rect);
     }
 
@@ -82,12 +83,16 @@ public sealed class LandscapeMap(string guid, string path, LandscapeMapKind kind
     /// <summary>The values of a texel of a map of a kind: four for a layer map, one for the others.</summary>
     public static int ChannelsOf(LandscapeMapKind kind) => kind == LandscapeMapKind.Layers ? 4 : 1;
 
-    /// <summary>Writes the map to its file, through a temporary file, and the file has this revision.</summary>
-    public void Save()
-    {
-        WeatherMapFile.WriteAtomically(Path, EncodePng());
-        SavedRevision = Revision;
-    }
+    // The texels are the current revision's: a map saves only its current one.
+    protected override byte[] Encode(int snapshot) => EncodePng();
+
+    /// <summary>
+    /// A new map's <c>.meta</c>: for a layer map a data texture, its weights as they are, clamped; for a hole mask a
+    /// mask, with box mips and clamped, as docs/rendering/surfaces.md#holes asks.
+    /// </summary>
+    protected override MetaFile.Builder NewMeta() => Kind == LandscapeMapKind.Layers
+        ? MetaFile.New(Guid).Set("usage", "data").Set("sampler.wrap", "clamp")
+        : MetaFile.New(Guid).Set("usage", "mask").Set("mip_map.kernel", "box").Set("sampler.wrap", "clamp");
 
     /// <summary>
     /// A map from its file, whatever PNG it is: its first channel, or for a layer map its first four, widened to 16 bits.
@@ -109,9 +114,7 @@ public sealed class LandscapeMap(string guid, string path, LandscapeMapKind kind
             return null;
         }
         var channels = ChannelsOf(kind);
-        var map = new LandscapeMap(guid, path, kind, new HeightGrid(image.Width, image.Height, image.Channels16(channels), channels));
-        map.SavedRevision = map.Revision;
-        return map;
+        return new LandscapeMap(guid, path, kind, new HeightGrid(image.Width, image.Height, image.Channels16(channels), channels), saved: true);
     }
 }
 

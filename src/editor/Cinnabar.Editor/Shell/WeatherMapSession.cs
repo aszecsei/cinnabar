@@ -273,8 +273,8 @@ public sealed class WeatherMapSession(EditorShell shell)
         {
             // A new map's .meta file, with its GUID and its import settings, is the editor's to write, so the scene's
             // reference resolves at the daemon's next pass. The daemon owns it from then on.
-            SceneDocument.WriteAtomically(path + MetaFile.Extension, WeatherMapFile.MetaText(guid));
-            WeatherMapFile.WriteAtomically(path, generated.EncodePng());
+            AtomicFile.Write(path + MetaFile.Extension, WeatherMapFile.MetaText(guid));
+            AtomicFile.Write(path, generated.EncodePng());
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -343,7 +343,7 @@ public sealed class WeatherMapSession(EditorShell shell)
     {
         try
         {
-            WeatherMapFile.WriteAtomically(path, map.EncodePng());
+            AtomicFile.Write(path, map.EncodePng());
             return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)

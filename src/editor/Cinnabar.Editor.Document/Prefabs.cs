@@ -2,21 +2,13 @@ namespace Cinnabar.Editor.Document;
 
 /// <summary>
 /// One prefab that the open scene uses (see docs/editor/prefabs.md#the-editors-documents): its file, its GUID, its
-/// scene as the file has it, with one root, and the text that the file has. The scene's undo stack holds its edits,
+/// scene, with one root, and the scene that the file has. The scene's undo stack holds its edits,
 /// as a mesh document's are, so it keeps no history of its own.
 /// </summary>
-public sealed class PrefabDocument(string path, string guid, Scene scene, string? savedText)
+public sealed class PrefabDocument(string path, string guid, Scene scene, SavedSnapshot<Scene> saved)
+    : SnapshotAsset<Scene>(path: path, guid: guid, current: scene, saved: saved)
 {
-    /// <summary>The file's full path.</summary>
-    public string Path { get; private set; } = System.IO.Path.GetFullPath(path);
-
-    /// <summary>The asset's GUID, as 32 lowercase hex digits.</summary>
-    public string Guid { get; } = guid;
-
-    public Scene Scene { get; internal set; } = scene;
-
-    /// <summary>The text that the file has, or null for a prefab that has no file yet, as one that Make Prefab made.</summary>
-    public string? SavedText { get; private set; } = savedText;
+    public Scene Scene { get => Current; internal set => Current = value; }
 
     /// <summary>
     /// The file's scene when the file no longer has the text that the document was read from or saved with, as after
@@ -27,7 +19,8 @@ public sealed class PrefabDocument(string path, string guid, Scene scene, string
         try
         {
             var text = File.ReadAllText(Path);
-            if (SceneFile.Parse(text, Options).Scene is not { } scene || SceneFile.Write(scene) == SavedText)
+            if (SceneFile.Parse(text, Options).Scene is not { } scene
+                || (Saved is SavedSnapshot<Scene>.At(var saved) && SceneFile.Write(scene) == SceneFile.Write(saved)))
             {
                 return null;
             }
@@ -39,16 +32,13 @@ public sealed class PrefabDocument(string path, string guid, Scene scene, string
         }
     }
 
-    /// <summary>The scene that <see cref="Changed"/> read is the file's: the document takes it, clean.</summary>
-    internal void Reloaded(Scene scene)
-    {
-        Scene = scene;
-        SavedText = SceneFile.Write(scene);
-    }
-
     public string Title => System.IO.Path.GetFileName(Path);
 
-    public bool IsDirty => SavedText != SceneFile.Write(Scene);
+    /// <summary>A prefab is dirty while its scene's text is not the file's, so an edit that gives an equal scene leaves it clean.</summary>
+    protected override bool IsSame(Scene current, Scene saved) =>
+        ReferenceEquals(current, saved) || SceneFile.Write(current) == SceneFile.Write(saved);
+
+    protected override byte[] Encode(Scene snapshot) => Utf8Text.Encode(SceneFile.Write(snapshot));
 
     // A prefab's sublevel key is a warning and is dropped, since an instance can be in any sublevel.
     static readonly SceneParseOptions Options = new(IsPrefab: true);
@@ -66,27 +56,8 @@ public sealed class PrefabDocument(string path, string guid, Scene scene, string
             return (null, [new SceneProblem(0, e.Message, true)]);
         }
         var (scene, problems) = SceneFile.Parse(text, Options);
-        return (scene == null ? null : new PrefabDocument(path, guid, scene, SceneFile.Write(scene)), problems);
+        return (scene == null ? null : new PrefabDocument(path, guid, scene, new SavedSnapshot<Scene>.At(scene)), problems);
     }
-
-    /// <summary>
-    /// Writes the prefab to its file, through a temporary file, and a new prefab's <c>.meta</c> file with its GUID, so
-    /// the scene's reference to it resolves at the cook daemon's next pass.
-    /// </summary>
-    public void Save()
-    {
-        var text = SceneFile.Write(Scene);
-        var meta = Path + MetaFile.Extension;
-        if (!File.Exists(meta))
-        {
-            SceneDocument.WriteAtomically(meta, MetaFile.New(Guid).Text());
-        }
-        SceneDocument.WriteAtomically(Path, text);
-        SavedText = text;
-    }
-
-    /// <summary>The prefab's file moved, as when the content browser moves or renames it. Nothing is written.</summary>
-    public void Move(string path) => Path = System.IO.Path.GetFullPath(path);
 }
 
 /// <summary>
@@ -146,7 +117,7 @@ public sealed class PrefabSet(Func<string, PrefabDocument?> open)
     public IReadOnlyList<PrefabDocument> ReloadChanged(List<PrefabDocument> kept)
     {
         var reloaded = new List<PrefabDocument>();
-        foreach (var document in _documents.Values.Where(d => d.SavedText != null))
+        foreach (var document in _documents.Values.Where(d => d.Saved is SavedSnapshot<Scene>.At))
         {
             if (document.Changed() is not { } scene)
             {

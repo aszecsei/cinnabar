@@ -92,7 +92,7 @@ public sealed class PrefabTests : IDisposable
     {
         var prefabs = FixturePrefabs();
         var document = new SceneDocument(_temp.Combine("level.scene"), Parse(text),
-            g => prefabs.TryGetValue(g, out var scene) ? new PrefabDocument(_temp.Combine(g + ".prefab"), g, scene, SceneFile.Write(scene)) : null);
+            g => prefabs.TryGetValue(g, out var scene) ? new PrefabDocument(_temp.Combine(g + ".prefab"), g, scene, new SavedSnapshot<Scene>.At(scene)) : null);
         var sent = new List<Wire.Operation>();
         document.Applied += ops => sent.AddRange(ops.SelectMany(o => o.ToWires()));
         return (document, sent);

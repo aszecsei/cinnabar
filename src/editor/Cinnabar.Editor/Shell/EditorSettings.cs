@@ -39,7 +39,7 @@ public sealed class EditorSettings(string directory)
 
     public void Write(string name, string text)
     {
-        SceneDocument.WriteAtomically(Path.Combine(Directory, name), text);
+        AtomicFile.Write(Path.Combine(Directory, name), text);
     }
 
     /// <summary>

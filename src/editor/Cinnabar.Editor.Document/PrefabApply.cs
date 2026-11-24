@@ -466,7 +466,7 @@ public static partial class PrefabEdits
             MapFields(copy, Map);
             scene.Entities.Add(copy);
         }
-        var variant = new PrefabDocument(path, guid, scene, null);
+        var variant = new PrefabDocument(path, guid, scene, new SavedSnapshot<Scene>.NoFile());
         var skip = overrides.Concat(added).Select(b => b.Id).ToHashSet();
         // The scene names the original's entities through the variant's root now, and the added ones in the variant.
         var rest = Reroute(document, instance, moved, skip, p => [instance, .. p]);
