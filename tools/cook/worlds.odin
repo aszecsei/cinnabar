@@ -1,7 +1,6 @@
 package cook
 
 import "core:fmt"
-import "core:hash"
 import "core:slice"
 import "core:strings"
 
@@ -23,38 +22,32 @@ World_Scene :: struct {
 	line:   int,
 }
 
-cook_worlds :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
-	out_dir := config_dir(options)
-	worlds := carry_kind(pass, {.World})
-	if len(worlds) > 0 && !make_output_dir(pass, out_dir, {.World}) {
-		return false
+cook_worlds :: proc(options: Cook_Options, pass: ^Pass) -> bool {
+	refs := World_Refs {
+		assets  = pass.assets,
+		by_guid = make(map[format.Guid]int, len(pass.assets), context.temp_allocator),
 	}
-	by_guid := make(map[format.Guid]int, len(assets), context.temp_allocator)
-	for a, i in assets {
-		by_guid[a.meta.guid] = i
+	for a, i in pass.assets {
+		refs.by_guid[a.meta.guid] = i
 	}
-	ok := true
-	step_begin(pass, .World, "", len(worlds))
-	for i in worlds {
-		defer step_advance(pass)
-		asset_source(pass, i)
-		result := cook_world(&assets[i], assets, by_guid, out_dir, pass)
-		settle(pass, i, result)
-		ok &&= !asset_failed(result)
-	}
-	return ok
+	return cook_text_kind(options, pass, world_text_cook(), &refs, world_step)
+}
+
+world_text_cook :: proc() -> Text_Cook {
+	return {.World, WORLD_COOK_VERSION, format.world_layout()}
+}
+
+// World_Refs is what a world's cook checks its scenes against: every asset, and each one's index by GUID.
+@(private = "file")
+World_Refs :: struct {
+	assets:  []Asset_Source,
+	by_guid: map[format.Guid]int,
 }
 
 @(private = "file")
-cook_world :: proc(
-	a: ^Asset_Source,
-	assets: []Asset_Source,
-	by_guid: map[format.Guid]int,
-	out_dir: string,
-	pass: ^Pass,
-) -> Asset_Result {
+world_step :: proc(a: ^Asset_Source, key: u64, data: rawptr, pass: ^Pass) -> ([]byte, bool) {
+	refs := (^World_Refs)(data)
 	problems := &pass.problems
-	settings_ok := check_settings(a^, problems)
 	scenes, parse_problems := world_parse(string(source_of(a^)), context.temp_allocator)
 	for p in parse_problems {
 		report_error(problems, a.path, p.line, 0, "%s", p.message)
@@ -66,7 +59,7 @@ cook_world :: proc(
 		if !slice.contains(a.dependencies[:], s.record.guid) {
 			append(&a.dependencies, s.record.guid)
 		}
-		child, found := by_guid[s.record.guid]
+		child, found := refs.by_guid[s.record.guid]
 		switch {
 		case !found:
 			report_error(
@@ -78,52 +71,33 @@ cook_world :: proc(
 				guid_text(s.record.guid),
 			)
 			refs_ok = false
-		case assets[child].kind != .Scene:
+		case refs.assets[child].kind != .Scene:
 			report_error(
 				problems,
 				a.path,
 				s.line,
 				0,
 				"%s is not a scene, but %s",
-				assets[child].name,
-				kind_noun(assets[child].kind),
+				refs.assets[child].name,
+				kind_noun(refs.assets[child].kind),
 			)
 			refs_ok = false
 		}
 	}
-	// A world with errors keeps its old blob, so the running game keeps the last good version.
-	if len(parse_problems) > 0 || !refs_ok || !settings_ok {
-		return .Failed
-	}
-	key := hash.fnv64a(
-		transmute([]byte)fmt.tprintf(
-			"%s\x00%s\x00%x\x00",
-			WORLD_COOK_VERSION,
-			a.name,
-			format.world_layout(),
-		),
-	)
-	key = hash.fnv64a(source_of(a^), key)
-	guid := a.meta.guid
-	key = hash.fnv64a(guid[:], key)
-	output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(guid))
-	if cooked_key(output, .World, format.world_layout()) == key && !pass.force[guid] {
-		return .Current
+	if len(parse_problems) > 0 || !refs_ok {
+		return nil, false
 	}
 	records := make([]format.World_Scene_Record, len(scenes), context.temp_allocator)
 	for s, i in scenes {
 		records[i] = s.record
 	}
 	contents := format.World_Contents {
-		guid        = guid,
+		guid        = a.meta.guid,
 		key         = key,
 		scenes      = records,
 		source_path = a.name,
 	}
-	if !write_blob(output, format.world_write(contents, context.temp_allocator)) {
-		return .Failed
-	}
-	return .Cooked
+	return format.world_write(contents, context.temp_allocator), true
 }
 
 // World_Seen is a setting that a scene has set.

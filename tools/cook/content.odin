@@ -229,26 +229,26 @@ cook :: proc(
 		pass.ok = cook_materials(options, pass.assets, &pass) && pass.ok
 	}
 	if .Effect in kinds {
-		pass.ok = cook_effects(options, pass.assets, &pass) && pass.ok
+		pass.ok = cook_effects(options, &pass) && pass.ok
 	}
 	if .Animation_Graph in kinds {
-		pass.ok = cook_animation_graphs(options, pass.assets, &pass) && pass.ok
+		pass.ok = cook_animation_graphs(options, &pass) && pass.ok
 	}
 	if .Instance_Set in kinds {
-		pass.ok = cook_instance_sets(options, pass.assets, &pass) && pass.ok
+		pass.ok = cook_instance_sets(options, &pass) && pass.ok
 	}
 	if .Blackboard in kinds {
-		pass.ok = cook_blackboards(options, pass.assets, &pass) && pass.ok
+		pass.ok = cook_blackboards(options, &pass) && pass.ok
 	}
 	// A decision reads its blackboard's source, not its blob, so the order of the two passes does not matter.
 	if .Decision in kinds {
 		pass.ok = cook_decisions(options, pass.assets, &pass) && pass.ok
 	}
 	if .Perception in kinds {
-		pass.ok = cook_perceptions(options, pass.assets, &pass) && pass.ok
+		pass.ok = cook_perceptions(options, &pass) && pass.ok
 	}
 	if .World in kinds {
-		pass.ok = cook_worlds(options, pass.assets, &pass) && pass.ok
+		pass.ok = cook_worlds(options, &pass) && pass.ok
 	}
 	// A cutscene reads its sub-sequences' sources, not their blobs, so it can cook in any order.
 	if .Cutscene in kinds {
@@ -261,7 +261,7 @@ cook :: proc(
 		pass.ok = cook_fonts(options, pass.assets, &pass) && pass.ok
 	}
 	if .Ui in kinds {
-		pass.ok = cook_ui_documents(options, pass.assets, &pass) && pass.ok
+		pass.ok = cook_ui_documents(options, &pass) && pass.ok
 	}
 	if .Sprite_Sheet in kinds {
 		pass.ok = cook_sprite_sheets(options, pass.assets, &pass) && pass.ok

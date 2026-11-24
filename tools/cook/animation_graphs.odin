@@ -38,38 +38,33 @@ Animation_Graph_Problem :: struct {
 	message: string,
 }
 
-cook_animation_graphs :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
-	out_dir := config_dir(options)
-	graphs := carry_kind(pass, {.Animation_Graph})
-	if len(graphs) > 0 && !make_output_dir(pass, out_dir, {.Animation_Graph}) {
-		return false
-	}
-	ok := true
-	step_begin(pass, .Animation_Graph, "", len(graphs))
-	for i in graphs {
-		defer step_advance(pass)
-		asset_source(pass, i)
-		result := cook_animation_graph(&assets[i], out_dir, pass)
-		settle(pass, i, result)
-		ok &&= !asset_failed(result)
-	}
-	return ok
+cook_animation_graphs :: proc(options: Cook_Options, pass: ^Pass) -> bool {
+	return cook_text_kind(options, pass, animation_graph_text_cook(), nil, animation_graph_step)
+}
+
+animation_graph_text_cook :: proc() -> Text_Cook {
+	return {.Animation_Graph, ANIMATION_GRAPH_COOK_VERSION, format.animation_graph_layout()}
 }
 
 @(private = "file")
-cook_animation_graph :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Result {
-	problems := &pass.problems
-	settings_ok := check_settings(a^, problems)
+animation_graph_step :: proc(
+	a: ^Asset_Source,
+	key: u64,
+	_: rawptr,
+	pass: ^Pass,
+) -> (
+	[]byte,
+	bool,
+) {
 	contents, parse_problems := animation_graph_parse(
 		string(source_of(a^)),
 		context.temp_allocator,
 	)
 	for p in parse_problems {
-		report_error(problems, a.path, p.line, 0, "%s", p.message)
+		report_error(&pass.problems, a.path, p.line, 0, "%s", p.message)
 	}
-	// A graph with errors keeps its old blob, so the running game keeps the last good version.
-	if len(parse_problems) > 0 || !settings_ok {
-		return .Failed
+	if len(parse_problems) > 0 {
+		return nil, false
 	}
 	// What it names is known whether it cooks or not, so the index has it either way.
 	for c in contents.clips {
@@ -77,28 +72,8 @@ cook_animation_graph :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> 
 			append(&a.dependencies, c.clip)
 		}
 	}
-	layout := format.animation_graph_layout()
-	key := hash.fnv64a(
-		transmute([]byte)fmt.tprintf(
-			"%s\x00%s\x00%x\x00",
-			ANIMATION_GRAPH_COOK_VERSION,
-			a.name,
-			layout,
-		),
-	)
-	key = hash.fnv64a(source_of(a^), key)
-	guid := a.meta.guid
-	key = hash.fnv64a(guid[:], key)
-	buffer: [32]u8
-	output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(guid, &buffer))
-	if cooked_key(output, .Animation_Graph, layout) == key && !pass.force[guid] {
-		return .Current
-	}
-	contents.guid, contents.key, contents.source_path = guid, key, a.name
-	if !write_blob(output, format.animation_graph_write(contents, context.temp_allocator)) {
-		return .Failed
-	}
-	return .Cooked
+	contents.guid, contents.key, contents.source_path = a.meta.guid, key, a.name
+	return format.animation_graph_write(contents, context.temp_allocator), true
 }
 
 @(private = "file")
