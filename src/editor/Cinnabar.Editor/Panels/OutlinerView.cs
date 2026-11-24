@@ -670,6 +670,10 @@ public sealed class OutlinerView : DockPanel
         var menu = new ContextMenu();
         menu.Opening += (_, _) =>
         {
+            // A right click does not move the keyboard, so the menu takes it to the outliner: its Delete and Duplicate
+            // then act on the entities, not on a graph or a timeline that had the keyboard (see
+            // docs/editor/shell-and-panels.md#commands).
+            _list.Focus();
             menu.Items.Clear();
             FillRowMenu(menu, row);
         };
