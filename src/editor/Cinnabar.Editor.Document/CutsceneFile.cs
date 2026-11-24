@@ -55,7 +55,7 @@ public sealed class CutsceneBlock : FieldBlock
     /// <summary>The ID of a binding, track, section, trigger, range or marker, or null for another block or a bad ID.</summary>
     public int? Id => Kind is CutsceneBlockKind.Binding or CutsceneBlockKind.Track or CutsceneBlockKind.Section
             or CutsceneBlockKind.Trigger or CutsceneBlockKind.Range or CutsceneBlockKind.Marker
-        && Words is [var id, ..] && CutsceneFile.TryParseTicks(id, out var value) && value > 0
+        && Words is [var id, ..] && CutsceneFile.TryParseId(id, out var value)
             ? value
             : null;
 
@@ -461,31 +461,46 @@ public sealed class CutsceneFile : LineFile<CutsceneBlock>, ITextFile<CutsceneFi
             ? rate
             : DefaultRate;
 
-    /// <summary>Reads a time or an ID as the cooker does: digits, with <c>_</c> between them, up to 2147483647.</summary>
+    /// <summary>
+    /// Reads a time in ticks as the cooker's <c>format.whole_ticks</c> does: a whole number from 0 to 2147483647, in the
+    /// digits 0 to 9 alone. <c>lib/engine/asset/format/testdata/lexemes.json</c> pins the two together.
+    /// </summary>
     public static bool TryParseTicks(string text, out int ticks)
     {
         ticks = 0;
+        if (text.Length == 0)
+        {
+            return false;
+        }
         long value = 0;
-        var digits = 0;
         foreach (var c in text)
         {
-            if (c == '_' && digits > 0)
-            {
-                continue;
-            }
             if (!char.IsAsciiDigit(c))
             {
                 return false;
             }
             value = value * 10 + (c - '0');
-            digits++;
             if (value > int.MaxValue)
             {
                 return false;
             }
         }
         ticks = (int)value;
-        return digits > 0;
+        return true;
+    }
+
+    /// <summary>
+    /// Reads a binding's, a track's or a section's ID as the cooker's <c>format.whole_id</c> does: a whole number from 1
+    /// to 2147483647, in the digits 0 to 9 alone.
+    /// </summary>
+    public static bool TryParseId(string text, out int id)
+    {
+        if (TryParseTicks(text, out id) && id > 0)
+        {
+            return true;
+        }
+        id = 0;
+        return false;
     }
 
     /// <summary>

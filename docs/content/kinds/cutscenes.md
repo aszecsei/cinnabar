@@ -44,11 +44,11 @@ Every time in the text and in the blob is a whole number of **ticks**, `i32`, at
 
 - A frame at 24, 25, 30, 48, 50 or 60 fps is a whole number of ticks.
 - An `i32` holds about 9.9 hours.
-- A tick in the text is a whole number from 0 to 2147483647. `1.5`, `-1` and `2147483648` are problems.
+- A tick in the text is a whole number from 0 to 2147483647. It is in the digits 0 to 9 alone, so `1.5`, `-1`, `1_000` and `2147483648` are problems.
 
 ## The text
 
-- **The first line** is `cutscene 1`. A `#` starts a comment at the line's start or after a space or a tab, except inside quotes. So a color is quoted, as `"#ff8800"`. A `#` inside a word is not a comment, so a `possess` path, `@<guid>/<instance>#<entity>`, is whole, and `x = 1 # note` still ends at the comment. The other text formats keep their own rule (`strip_line_comment`), and this one is `strip_cutscene_comment`. Indents make the text easier to read, but the parser ignores them.
+- **The first line** is `cutscene 1`. A `#` starts a comment at the line's start or after a space or a tab, except inside quotes. So a color is quoted, as `"#ff8800"`. A `#` inside a word is not a comment, so a `possess` path, `@<guid>/<instance>#<entity>`, is whole, and `x = 1 # note` still ends at the comment. Both rules are `format.strip_comment`: the other text formats call it plainly, and this one with `hash_in_word`. Indents make the text easier to read, but the parser ignores them.
 - **Blocks.** These lines start a block:
   - `binding <id> "<name>"`
   - `track <id> <kind> "<name>"`

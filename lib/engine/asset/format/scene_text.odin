@@ -534,7 +534,7 @@ parse_value :: proc(p: ^Parser, text: string) -> (value: Scene_Value, ok: bool) 
 		if text == "$0" {
 			return {kind = .Asset}, true
 		}
-		guid, guid_ok := guid_parse(text[1:])
+		guid, guid_ok := guid_ref(text)
 		if !guid_ok {
 			problem(p, true, "an asset is 32 hex digits after $, or $0 for none, not %q", text)
 			return

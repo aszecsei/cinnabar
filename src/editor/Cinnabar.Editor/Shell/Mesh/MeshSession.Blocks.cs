@@ -136,7 +136,7 @@ public sealed partial class MeshSession : IViewportTool
 
     /// <summary>The project's default mesh material, for new faces: <c>mesh.default_material</c>, or the engine's dev_gray.</summary>
     public string DefaultMeshMaterial =>
-        ProjectSettings.Get(_shell.ProjectPath, "mesh.default_material") is { Length: 32 } guid && guid.All(Uri.IsHexDigit) ? guid.ToLowerInvariant() : DevGrayMaterial;
+        ProjectSettings.Get(_shell.ProjectPath, "mesh.default_material") is { } text && AssetGuid.TryParse(text, out var guid) ? guid.Text : DevGrayMaterial;
 
     /// <summary>The engine's dev_gray material instance (see docs/editor/mesh-editing.md#dev-materials).</summary>
     public const string DevGrayMaterial = "5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d";

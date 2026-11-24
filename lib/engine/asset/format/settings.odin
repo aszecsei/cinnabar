@@ -9,13 +9,8 @@ settings_value :: proc(text, key: string) -> string {
 	result := ""
 	rest := text
 	for raw in strings.split_lines_iterator(&rest) {
-		s := strings.trim_space(raw)
-		if s == "" || s[0] == '#' {
-			continue
-		}
-		k, _, v := strings.partition(s, "=")
-		if strings.trim_space(k) == key {
-			result = strings.trim_space(v)
+		if k, v, ok := settings_line(raw); ok && k == key {
+			result = v
 		}
 	}
 	return result

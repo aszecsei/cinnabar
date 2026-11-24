@@ -127,7 +127,7 @@ blob_references :: proc(
 		blob := ui_view(data) or_return
 		for p in ui_props(data, blob) {
 			if UI_ATTRS[p.attr].kind == .Guid {
-				if guid, parsed := ui_parse_guid(blob_string(data, p.value)); parsed {
+				if guid, parsed := guid_ref(blob_string(data, p.value)); parsed {
 					add(&list, guid)
 				}
 			}

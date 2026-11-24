@@ -5,7 +5,7 @@ namespace Cinnabar.Editor.Document;
 /// for a new line or a last line without one. With <paramref name="hashInWord"/>, as a cutscene's lines are, a <c>#</c>
 /// inside a word is not a comment, so an instance's path such as <c>@&lt;guid&gt;/&lt;instance&gt;#&lt;entity&gt;</c> stays whole.
 /// </summary>
-sealed class TextLine(string text, string ending, bool hashInWord = false)
+public sealed class TextLine(string text, string ending, bool hashInWord = false)
 {
     public string Text { get; set; } = text;
 

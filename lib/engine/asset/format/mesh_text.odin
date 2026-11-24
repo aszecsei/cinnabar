@@ -222,10 +222,7 @@ parse_asset :: proc(text: string) -> (guid: Guid, ok: bool) {
 	if text == "$0" {
 		return {}, true
 	}
-	if len(text) < 1 || text[0] != '$' {
-		return
-	}
-	return guid_parse(text[1:])
+	return guid_ref(text)
 }
 
 @(private = "file")

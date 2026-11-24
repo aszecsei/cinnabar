@@ -250,7 +250,7 @@ public sealed class CutsceneTimelineLayout
         var rows = new List<CutsceneTimelineRow>();
         var bindingIds = file.Bindings.Select(b => b.Id).OfType<int>().ToHashSet();
         int? BindingOf(CutsceneBlock track) =>
-            track.Get("binding") is { } text && CutsceneFile.TryParseTicks(text, out var id) && bindingIds.Contains(id) ? id : null;
+            track.Get("binding") is { } text && CutsceneFile.TryParseId(text, out var id) && bindingIds.Contains(id) ? id : null;
         bool Names(string? name) => filter.Text.Length == 0 || (name?.Contains(filter.Text, StringComparison.OrdinalIgnoreCase) ?? false);
         bool HasKeysIn(CutsceneBlock track) => filter.KeysIn is not { } span || track.Children.Any(s => s is { Kind: CutsceneBlockKind.Section, Start: { } start }
             && s.Descendants().Any(k => k.Kind == CutsceneBlockKind.Key && k.Start is { } t && start + t >= span.Start && start + t <= span.End));
@@ -401,7 +401,7 @@ public sealed class CutsceneTimelineLayout
     static string SectionLabel(CutsceneFile file, CutsceneBlock track, CutsceneBlock section) => track.TrackKind switch
     {
         "presentation" => section.Get("text") is { } text ? TextQuote.Unquote(text) ?? text : section.Get("kind") ?? "",
-        "camera_cut" => section.Get("camera") is { } camera && CutsceneFile.TryParseTicks(camera, out var id)
+        "camera_cut" => section.Get("camera") is { } camera && CutsceneFile.TryParseId(camera, out var id)
             ? file.Bindings.FirstOrDefault(b => b.Id == id)?.Name ?? $"binding {id}"
             : "",
         _ => $"#{section.Id}",

@@ -807,7 +807,7 @@ cutscene_parse :: proc(
 	section_count, channel_count, key_count := 0, 0, 0
 	for raw, index in strings.split_lines(text) {
 		line := index + 1
-		trimmed := strings.trim_space(strip_cutscene_comment(raw))
+		trimmed := strings.trim_space(format.strip_comment(raw, hash_in_word = true))
 		if trimmed == "" {
 			continue
 		}
@@ -835,7 +835,7 @@ cutscene_parse :: proc(
 				},
 			}
 			id_text, _, name_text := strings.partition(rest, " ")
-			id, id_ok := cutscene_id(id_text)
+			id, id_ok := format.whole_id(id_text)
 			name, name_ok := cutscene_name(strings.trim_space(name_text))
 			if !id_ok || !name_ok || name == "" {
 				problem(
@@ -883,8 +883,8 @@ cutscene_parse :: proc(
 			}
 			id_text, _, after_id := strings.partition(rest, " ")
 			time_text, _, name_text := strings.partition(strings.trim_space(after_id), " ")
-			id, id_ok := cutscene_id(id_text)
-			time, time_ok := cutscene_ticks_text(time_text)
+			id, id_ok := format.whole_id(id_text)
+			time, time_ok := format.whole_ticks(time_text)
 			name, name_ok := cutscene_name(strings.trim_space(name_text))
 			if !id_ok || !time_ok || !name_ok || name == "" {
 				problem(
@@ -921,7 +921,7 @@ cutscene_parse :: proc(
 			}
 			id_text, _, after_id := strings.partition(rest, " ")
 			kind_text, _, name_text := strings.partition(strings.trim_space(after_id), " ")
-			id, id_ok := cutscene_id(id_text)
+			id, id_ok := format.whole_id(id_text)
 			name, name_ok := cutscene_name(strings.trim_space(name_text))
 			kind_ok := false
 			for k, kind in CUTSCENE_TRACK_KINDS {
@@ -979,9 +979,9 @@ cutscene_parse :: proc(
 			id: u32
 			if ok {
 				id_ok, start_ok, end_ok: bool
-				id, id_ok = cutscene_id(fields[0])
-				s.contents.start, start_ok = cutscene_ticks_text(fields[1])
-				s.contents.end, end_ok = cutscene_ticks_text(fields[2])
+				id, id_ok = format.whole_id(fields[0])
+				s.contents.start, start_ok = format.whole_ticks(fields[1])
+				s.contents.end, end_ok = format.whole_ticks(fields[2])
 				ok = id_ok && start_ok && end_ok
 			}
 			if !ok {
@@ -1027,11 +1027,11 @@ cutscene_parse :: proc(
 			id: u32
 			if ok {
 				id_ok, start_ok, end_ok: bool
-				id, id_ok = cutscene_id(fields[0])
-				ev.contents.start, start_ok = cutscene_ticks_text(fields[1])
+				id, id_ok = format.whole_id(fields[0])
+				ev.contents.start, start_ok = format.whole_ticks(fields[1])
 				ev.contents.end, end_ok = ev.contents.start, true
 				if is_range {
-					ev.contents.end, end_ok = cutscene_ticks_text(fields[2])
+					ev.contents.end, end_ok = format.whole_ticks(fields[2])
 				}
 				ev.contents.name = fields[len(fields) - 1]
 				ok = id_ok && start_ok && end_ok && is_identifier(ev.contents.name)
@@ -1128,8 +1128,8 @@ cutscene_parse :: proc(
 			tr := &tracks[len(tracks) - 1]
 			s := &tr.sections[len(tr.sections) - 1]
 			child_text, has_parent, parent_text := strings.partition(rest, "=")
-			child, child_ok := cutscene_id(strings.trim_space(child_text))
-			parent, parent_ok := cutscene_id(strings.trim_space(parent_text))
+			child, child_ok := format.whole_id(strings.trim_space(child_text))
+			parent, parent_ok := format.whole_id(strings.trim_space(parent_text))
 			if has_parent == "" || !child_ok || !parent_ok {
 				problem(
 					&found,
@@ -1203,7 +1203,7 @@ cutscene_parse :: proc(
 			append(&header_seen, name)
 			switch name {
 			case "length":
-				ticks, ok := cutscene_ticks_text(value_text)
+				ticks, ok := format.whole_ticks(value_text)
 				if !ok || ticks == 0 {
 					problem(&found, line, "length is a whole number of ticks from 1 to 2147483647")
 					continue
@@ -1297,7 +1297,7 @@ cutscene_parse :: proc(
 					skip_line = line
 				}
 			case "skip_fade":
-				ticks, ok := cutscene_ticks_text(value_text)
+				ticks, ok := format.whole_ticks(value_text)
 				if !ok {
 					problem(
 						&found,
@@ -1339,7 +1339,7 @@ cutscene_parse :: proc(
 			append(&tr.seen, name)
 			switch name {
 			case "binding":
-				id, ok := cutscene_id(value_text)
+				id, ok := format.whole_id(value_text)
 				if !ok {
 					problem(&found, line, "binding is the ID of a binding of the cutscene")
 					continue
@@ -1397,7 +1397,7 @@ cutscene_parse :: proc(
 					space = .Relative
 				case len(words) == 2 && words[0] == "relative":
 					space = .Relative_To
-					id, ok = cutscene_id(words[1])
+					id, ok = format.whole_id(words[1])
 				case:
 					ok = false
 				}
@@ -1556,7 +1556,7 @@ cutscene_parse :: proc(
 			}
 			switch name {
 			case "ease_in", "ease_out", "pre_roll", "post_roll":
-				ticks, ok := cutscene_ticks_text(value_text)
+				ticks, ok := format.whole_ticks(value_text)
 				if !ok {
 					problem(&found, line, "%s is a whole number of ticks", name)
 					continue
@@ -1604,10 +1604,10 @@ cutscene_parse :: proc(
 				s.blend_line = line
 			case "trim":
 				start_text, _, end_text := strings.partition(value_text, " ")
-				start, start_ok := cutscene_ticks_text(start_text)
+				start, start_ok := format.whole_ticks(start_text)
 				end, end_ok := i32(0), true
 				if end_text = strings.trim_space(end_text); end_text != "" {
-					end, end_ok = cutscene_ticks_text(end_text)
+					end, end_ok = format.whole_ticks(end_text)
 				}
 				if !start_ok || !end_ok || (end != 0 && end <= start) {
 					problem(
@@ -1634,7 +1634,7 @@ cutscene_parse :: proc(
 				}
 				s.contents.speed, s.sub_lines[1] = f32(value.numbers[0]), line
 			case "offset":
-				ticks, ok := cutscene_ticks_text(value_text)
+				ticks, ok := format.whole_ticks(value_text)
 				if !ok {
 					problem(&found, line, "offset is a whole number of ticks into the clip")
 					continue
@@ -1680,7 +1680,7 @@ cutscene_parse :: proc(
 				}
 				s.play_lines[3] = line
 			case "camera":
-				id, ok := cutscene_id(value_text)
+				id, ok := format.whole_id(value_text)
 				if !ok {
 					problem(&found, line, "camera is the ID of a binding of the cutscene")
 					continue
@@ -1688,7 +1688,7 @@ cutscene_parse :: proc(
 				s.camera_id, s.cut_lines[0] = id, line
 			case "blend_in", "blend_out":
 				ticks_text, _, curve_text := strings.partition(value_text, " ")
-				ticks, ticks_ok := cutscene_ticks_text(ticks_text)
+				ticks, ticks_ok := format.whole_ticks(ticks_text)
 				curve, curve_ok := cutscene_blend_curve(strings.trim_space(curve_text))
 				if !ticks_ok || !curve_ok {
 					problem(
@@ -1798,7 +1798,7 @@ cutscene_parse :: proc(
 						strings.clone(quoted), line
 				}
 			case "audio":
-				id, ok := cutscene_id(value_text)
+				id, ok := format.whole_id(value_text)
 				if !ok {
 					problem(&found, line, "audio is the ID of a section of an audio track")
 					continue
@@ -2609,7 +2609,7 @@ cutscene_event_value :: proc(text: string) -> (v: Cutscene_Value_Text, message: 
 		}
 	case "entity":
 		v.kind = .Entity
-		id, ok := cutscene_id(value_text)
+		id, ok := format.whole_id(value_text)
 		if !ok {
 			return v,
 				"an entity value is `entity <binding id>`, the ID of a binding of the cutscene"
@@ -2717,7 +2717,7 @@ cutscene_binding_setting :: proc(
 	case "parent":
 		spawn_only(b, name, line)
 		b.parent_line = line
-		id, ok := cutscene_id(value_text)
+		id, ok := format.whole_id(value_text)
 		if ok {
 			for other, i in bindings[:len(bindings) - 1] {
 				if other.contents.id == id {
@@ -2798,7 +2798,7 @@ cutscene_constraint_setting :: proc(
 	for kind_name, kind in CUTSCENE_CONSTRAINT_NAMES {
 		switch {
 		case name == kind_name:
-			id, ok := cutscene_id(value_text)
+			id, ok := format.whole_id(value_text)
 			if !ok {
 				problem(found, line, "%s is the ID of a binding of the cutscene", name)
 			} else {
@@ -2817,7 +2817,7 @@ cutscene_constraint_setting :: proc(
 			}
 			pc.offset_lines[kind] = line
 		case kind != .Focus && name == fmt.tprintf("%s_damping", kind_name):
-			ticks, ok := cutscene_ticks_text(value_text)
+			ticks, ok := format.whole_ticks(value_text)
 			if !ok {
 				problem(found, line, "%s is a whole number of ticks", name)
 			}
@@ -3022,7 +3022,7 @@ cutscene_key :: proc(
 	if len(fields) < 3 {
 		return {}, {}, USAGE
 	}
-	time, time_ok := cutscene_ticks_text(fields[0])
+	time, time_ok := format.whole_ticks(fields[0])
 	if !time_ok || (duration > 0 && time > duration) {
 		return {}, {}, fmt.tprintf("a key's time is a whole number of ticks from 0 to the section's duration (%d)", duration)
 	}
@@ -3502,39 +3502,6 @@ cutscene_name :: proc(text: string) -> (name: string, ok: bool) {
 	return value.text, true
 }
 
-// cutscene_id reads an ID: a whole number from 1 to 2147483647.
-@(private = "file")
-cutscene_id :: proc(text: string) -> (id: u32, ok: bool) {
-	for c in transmute([]byte)text {
-		if c < '0' || c > '9' {
-			return
-		}
-	}
-	n := strconv.parse_u64_of_base(text, 10) or_return
-	if n == 0 || n > u64(max(i32)) {
-		return
-	}
-	return u32(n), true
-}
-
-// cutscene_ticks_text reads a time in ticks: a whole number from 0 to 2147483647, in digits.
-@(private = "file")
-cutscene_ticks_text :: proc(text: string) -> (ticks: i32, ok: bool) {
-	if text == "" {
-		return
-	}
-	for c in transmute([]byte)text {
-		if c < '0' || c > '9' {
-			return
-		}
-	}
-	n := strconv.parse_u64_of_base(text, 10) or_return
-	if n > u64(max(i32)) {
-		return
-	}
-	return i32(n), true
-}
-
 // cutscene_ticks_number is a number that parse_graph_value read as a time in ticks, if it is a whole one in range.
 @(private = "file")
 cutscene_ticks_number :: proc(n: f64) -> (ticks: i32, ok: bool) {
@@ -3542,21 +3509,4 @@ cutscene_ticks_number :: proc(n: f64) -> (ticks: i32, ok: bool) {
 		return
 	}
 	return i32(n), true
-}
-
-// strip_cutscene_comment is a cutscene line without its comment: a # at the line's start or after a space or a tab,
-// outside quotes. A # inside a word stays, so a possess's path, @<scene guid>/<instance>#<entity>, is whole.
-strip_cutscene_comment :: proc(line: string) -> string {
-	quoted := false
-	for i := 0; i < len(line); i += 1 {
-		switch {
-		case quoted && line[i] == '\\':
-			i += 1
-		case line[i] == '"':
-			quoted = !quoted
-		case line[i] == '#' && !quoted && (i == 0 || line[i - 1] == ' ' || line[i - 1] == '\t'):
-			return line[:i]
-		}
-	}
-	return line
 }

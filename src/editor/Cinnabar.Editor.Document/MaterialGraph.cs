@@ -30,7 +30,7 @@ public abstract record GraphValue
             case '"':
                 return TextQuote.Unquote(text) is { } unquoted ? new GraphText(unquoted) : null;
             case '$':
-                return text.Length == 33 && text[1..].All(Uri.IsHexDigit) ? new GraphAsset(text[1..].ToLowerInvariant()) : null;
+                return AssetGuid.TryParseRef(text, out var asset) ? new GraphAsset(asset.Text) : null;
             case '@':
                 var dot = text.IndexOf('.');
                 return dot > 1 && int.TryParse(text[1..dot], NumberStyles.None, CultureInfo.InvariantCulture, out var node) && dot + 1 < text.Length

@@ -154,7 +154,7 @@ animation_graph_parse :: proc(
 	current := -1
 	for raw, index in strings.split_lines(text) {
 		line := index + 1
-		trimmed := strings.trim_space(strip_comment(raw))
+		trimmed := strings.trim_space(format.strip_comment(raw))
 		if trimmed == "" {
 			continue
 		}
@@ -277,24 +277,6 @@ animation_graph_check :: proc(
 		report_error(&problems, path, 0, 0, "cannot write its preview")
 	}
 	return
-}
-
-// strip_comment is a line without a # and what follows it, outside of quotes.
-@(private = "file")
-strip_comment :: proc(line: string) -> string {
-	quoted := false
-	for i := 0; i < len(line); i += 1 {
-		switch {
-		case quoted && line[i] == '\\':
-			// The escaped character does not end the string.
-			i += 1
-		case line[i] == '"':
-			quoted = !quoted
-		case line[i] == '#' && !quoted:
-			return line[:i]
-		}
-	}
-	return line
 }
 
 // parameter_line reads `param <name> float [<value>]`, `param <name> bool [true|false]` or `param <name> trigger`.

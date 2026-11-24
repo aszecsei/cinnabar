@@ -130,30 +130,24 @@ package_content :: proc(options: Package_Options) -> bool {
 	return true
 }
 
-// project_global_scenes reads the scenes that are not levels from a project's settings file.
+// project_global_scenes reads the scenes that are not levels from a project's settings file. As with every key, the
+// last line that sets it wins.
 project_global_scenes :: proc(path: string) -> (scenes: []format.Guid, ok: bool) {
 	text, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil {
 		log.errorf("cook: %s: %v", path, err)
 		return
 	}
-	rest := string(text)
-	for line in strings.split_lines_iterator(&rest) {
-		key, _, value := strings.partition(strings.trim_space(line), "=")
-		if strings.trim_space(key) != format.BUNDLE_GLOBAL_SCENES_KEY {
-			continue
-		}
-		if scenes, ok = format.bundle_parse_scenes(value, context.temp_allocator); !ok {
-			log.errorf(
-				"cook: %s: %s takes scenes' GUIDs between commas, not %q",
-				path,
-				format.BUNDLE_GLOBAL_SCENES_KEY,
-				strings.trim_space(value),
-			)
-		}
-		return
+	value := format.settings_value(string(text), format.BUNDLE_GLOBAL_SCENES_KEY)
+	if scenes, ok = format.bundle_parse_scenes(value, context.temp_allocator); !ok {
+		log.errorf(
+			"cook: %s: %s takes scenes' GUIDs between commas, not %q",
+			path,
+			format.BUNDLE_GLOBAL_SCENES_KEY,
+			value,
+		)
 	}
-	return nil, true
+	return
 }
 
 // read_cache_blobs reads every <guid>.blob of a cache, at format.BLOB_ALIGN, and the assets that each names. It fails

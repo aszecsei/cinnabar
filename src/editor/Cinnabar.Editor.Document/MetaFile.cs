@@ -211,6 +211,5 @@ public sealed class MetaFile
         name != "" && name != "guid" && name.All(c => c == '_' || char.IsAsciiLetterOrDigit(c));
 
     // 32 hex digits, as guid_parse reads them, in lowercase.
-    static string? ParseGuid(string text) =>
-        text.Length == 32 && text.All(char.IsAsciiHexDigit) ? text.ToLowerInvariant() : null;
+    static string? ParseGuid(string text) => AssetGuid.TryParse(text, out var guid) ? guid.Text : null;
 }

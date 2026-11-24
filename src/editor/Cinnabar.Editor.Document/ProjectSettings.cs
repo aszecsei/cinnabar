@@ -136,14 +136,24 @@ public static class ProjectSettings
         return sublevels;
     }
 
-    static (string Key, string Value)? Parse(string line)
+    /// <summary>
+    /// Splits a <c>key = value</c> line as the engine's <c>format.settings_line</c> does, and is false for a blank line or
+    /// a comment. A line without <c>=</c> is a key with an empty value. <c>lib/engine/asset/format/testdata/lexemes.json</c>
+    /// pins the two together.
+    /// </summary>
+    public static bool TryParseLine(string line, out string key, out string value)
     {
         var trimmed = line.Trim();
-        var equals = trimmed.IndexOf('=');
-        if (trimmed.Length == 0 || trimmed[0] == '#' || equals <= 0)
+        if (trimmed.Length == 0 || trimmed[0] == '#')
         {
-            return null;
+            key = value = "";
+            return false;
         }
-        return (trimmed[..equals].Trim(), trimmed[(equals + 1)..].Trim());
+        var equals = trimmed.IndexOf('=');
+        (key, value) = equals < 0 ? (trimmed, "") : (trimmed[..equals].Trim(), trimmed[(equals + 1)..].Trim());
+        return true;
     }
+
+    static (string Key, string Value)? Parse(string line) =>
+        TryParseLine(line, out var key, out var value) ? (key, value) : null;
 }

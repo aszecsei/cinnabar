@@ -55,7 +55,7 @@ public readonly record struct PossessRef(string SceneGuid, ulong Id)
     /// <summary>A binding's <c>possess</c> value, <c>@&lt;guid&gt;/&lt;id&gt;</c> or <c>@&lt;guid&gt;/&lt;instance&gt;#&lt;entity&gt;</c>, or null.</summary>
     public static PossessRef? Parse(string? text)
     {
-        if (text?.Trim() is not ['@', .. var rest] || rest.IndexOf('/') is not 32 || !rest[..32].All(Uri.IsHexDigit))
+        if (text?.Trim() is not ['@', .. var rest] || rest.IndexOf('/') is not 32 || !AssetGuid.TryParse(rest.AsSpan(0, 32), out var scene))
         {
             return null;
         }
@@ -69,7 +69,7 @@ public readonly record struct PossessRef(string SceneGuid, ulong Id)
             path.Add(id);
         }
         var folded = ScenePath.Id(path);
-        return folded == 0 ? null : new PossessRef(rest[..32].ToLowerInvariant(), folded);
+        return folded == 0 ? null : new PossessRef(scene.Text, folded);
     }
 }
 
