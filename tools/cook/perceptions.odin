@@ -1,7 +1,6 @@
 package cook
 
 import "core:fmt"
-import "core:hash"
 import "core:slice"
 import "core:strings"
 
@@ -19,56 +18,25 @@ Perception_Problem :: struct {
 	message: string,
 }
 
-cook_perceptions :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
-	out_dir := config_dir(options)
-	perceptions := carry_kind(pass, {.Perception})
-	if len(perceptions) > 0 && !make_output_dir(pass, out_dir, {.Perception}) {
-		return false
-	}
-	ok := true
-	step_begin(pass, .Perception, "", len(perceptions))
-	for i in perceptions {
-		defer step_advance(pass)
-		asset_source(pass, i)
-		result := cook_perception(&assets[i], out_dir, pass)
-		settle(pass, i, result)
-		ok &&= !asset_failed(result)
-	}
-	return ok
+cook_perceptions :: proc(options: Cook_Options, pass: ^Pass) -> bool {
+	return cook_text_kind(options, pass, perception_text_cook(), nil, perception_step)
+}
+
+perception_text_cook :: proc() -> Text_Cook {
+	return {.Perception, PERCEPTION_COOK_VERSION, format.perception_layout()}
 }
 
 @(private = "file")
-cook_perception :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Result {
-	problems := &pass.problems
-	settings_ok := check_settings(a^, problems)
+perception_step :: proc(a: ^Asset_Source, key: u64, _: rawptr, pass: ^Pass) -> ([]byte, bool) {
 	contents, parse_problems := perception_parse(string(source_of(a^)), context.temp_allocator)
 	for p in parse_problems {
-		report_error(problems, a.path, p.line, 0, "%s", p.message)
+		report_error(&pass.problems, a.path, p.line, 0, "%s", p.message)
 	}
-	// A perception with errors keeps its old blob, so the running game keeps the last good version.
-	if len(parse_problems) > 0 || !settings_ok {
-		return .Failed
+	if len(parse_problems) > 0 {
+		return nil, false
 	}
-	key := hash.fnv64a(
-		transmute([]byte)fmt.tprintf(
-			"%s\x00%s\x00%x\x00",
-			PERCEPTION_COOK_VERSION,
-			a.name,
-			format.perception_layout(),
-		),
-	)
-	key = hash.fnv64a(source_of(a^), key)
-	guid := a.meta.guid
-	key = hash.fnv64a(guid[:], key)
-	output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(guid))
-	if cooked_key(output, .Perception, format.perception_layout()) == key && !pass.force[guid] {
-		return .Current
-	}
-	contents.guid, contents.key, contents.source_path = guid, key, a.name
-	if !write_blob(output, format.perception_write(contents, context.temp_allocator)) {
-		return .Failed
-	}
-	return .Cooked
+	contents.guid, contents.key, contents.source_path = a.meta.guid, key, a.name
+	return format.perception_write(contents, context.temp_allocator), true
 }
 
 // perception_parse parses a perception's text into the contents of its blob, without its GUID, key or path: the first

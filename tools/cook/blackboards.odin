@@ -1,7 +1,6 @@
 package cook
 
 import "core:fmt"
-import "core:hash"
 import "core:math"
 import "core:slice"
 import "core:strconv"
@@ -44,64 +43,32 @@ type_name :: proc(t: format.Blackboard_Type) -> string {
 	return names[t]
 }
 
-cook_blackboards :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
-	out_dir := config_dir(options)
-	boards := carry_kind(pass, {.Blackboard})
-	if len(boards) > 0 && !make_output_dir(pass, out_dir, {.Blackboard}) {
-		return false
-	}
-	ok := true
-	step_begin(pass, .Blackboard, "", len(boards))
-	for i in boards {
-		defer step_advance(pass)
-		asset_source(pass, i)
-		result := cook_blackboard(&assets[i], out_dir, pass)
-		settle(pass, i, result)
-		ok &&= !asset_failed(result)
-	}
-	return ok
+cook_blackboards :: proc(options: Cook_Options, pass: ^Pass) -> bool {
+	return cook_text_kind(options, pass, blackboard_text_cook(), nil, blackboard_step)
+}
+
+blackboard_text_cook :: proc() -> Text_Cook {
+	return {.Blackboard, BLACKBOARD_COOK_VERSION, format.blackboard_layout()}
 }
 
 // blackboard_key is a blackboard's cache key, which its blob's header holds. A decision computes it from the
 // blackboard's source too, and keeps it, so the runtime uses a decision only with the blackboard it was cooked
 // against.
 blackboard_key :: proc(a: Asset_Source) -> u64 {
-	key := hash.fnv64a(
-		transmute([]byte)fmt.tprintf(
-			"%s\x00%s\x00%x\x00",
-			BLACKBOARD_COOK_VERSION,
-			a.name,
-			format.blackboard_layout(),
-		),
-	)
-	key = hash.fnv64a(source_of(a), key)
-	guid := a.meta.guid
-	return hash.fnv64a(guid[:], key)
+	return text_key(blackboard_text_cook(), a)
 }
 
 @(private = "file")
-cook_blackboard :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Result {
-	problems := &pass.problems
-	settings_ok := check_settings(a^, problems)
+blackboard_step :: proc(a: ^Asset_Source, key: u64, _: rawptr, pass: ^Pass) -> ([]byte, bool) {
 	contents, parse_problems := blackboard_parse(string(source_of(a^)), context.temp_allocator)
 	for p in parse_problems {
-		report_error(problems, a.path, p.line, 0, "%s", p.message)
+		report_error(&pass.problems, a.path, p.line, 0, "%s", p.message)
 	}
-	// A blackboard with errors keeps its old blob, so the running game keeps the last good version.
-	if len(parse_problems) > 0 || !settings_ok {
-		return .Failed
+	if len(parse_problems) > 0 {
+		return nil, false
 	}
-	key := blackboard_key(a^)
-	guid := a.meta.guid
-	output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(guid))
-	if cooked_key(output, .Blackboard, format.blackboard_layout()) == key && !pass.force[guid] {
-		return .Current
-	}
-	contents.guid, contents.key, contents.source_path = guid, key, a.name
-	if !write_blob(output, format.blackboard_write(contents, context.temp_allocator)) {
-		return .Failed
-	}
-	return .Cooked
+	contents.guid, contents.key, contents.source_path = a.meta.guid, key, a.name
+	return format.blackboard_write(contents, context.temp_allocator), true
 }
 
 // blackboard_check gives the problems of a blackboard's text that the editor has not saved, as a cook of the file at
