@@ -15,9 +15,9 @@ Property_Field :: struct {
 	component:       ecs.Component_Id,
 	offset:          u32,
 	size:            u32,
-	kind:            scene.Field_Kind,
+	kind:            ecs.Field_Kind,
 	// For an enum, the kind of its integer.
-	enum_base:       scene.Field_Kind,
+	enum_base:       ecs.Field_Kind,
 	// A volume's setting: the track also sets its override flag, which is at override_offset, while a section covers
 	// the time.
 	has_override:    bool,
@@ -134,7 +134,7 @@ resolve_property :: proc(
 	field = {
 		component       = info.id,
 		offset          = found.offset,
-		size            = u32(field_size(found.kind, found.enum_base)),
+		size            = u32(ecs.field_size(found.kind, found.enum_base)),
 		kind            = found.kind,
 		enum_base       = found.enum_base,
 		has_override    = found.has_override,
@@ -178,8 +178,9 @@ stepped_key_problem :: proc(field: scene.Field, value: f32) -> string {
 			}
 		}
 		return "an enum's keys are the values of its names"
-	case .I8, .I16, .I32, .I64, .U8, .U16, .U32, .U64:
-		if value != math.floor(value) {
+	case:
+		traits := ecs.FIELD_TRAITS
+		if traits[field.kind].integer && value != math.floor(value) {
 			return "an integer's keys are whole numbers"
 		}
 	}
@@ -267,7 +268,8 @@ blend_stepped :: proc(
 		put_stepped(ctx, target, value, f64(v))
 	}
 	if added != 0 {
-		put_stepped(ctx, target, value, f64(get_integer(value, integer_kind(target))) + added)
+		integer := ecs.read_integer(raw_data(value), integer_kind(target), .Clamp)
+		put_stepped(ctx, target, value, f64(integer) + added)
 	}
 	return
 }
@@ -283,20 +285,26 @@ put_stepped :: proc(ctx: ^Track_Context, target: Property_Field, out: []byte, v:
 		guid := format.cutscene_guids(ctx.data, ctx.blob)[int(v)]
 		mem.copy(raw_data(out), &guid, size_of(guid))
 	case:
-		put_integer(out, integer_kind(target), i64(clamp(v, -(1 << 62), 1 << 62)))
+		ecs.write_integer(
+			raw_data(out),
+			integer_kind(target),
+			i64(clamp(v, -(1 << 62), 1 << 62)),
+			.Clamp,
+		)
 	}
 }
 
 // continuous is whether a field's kind blends between keys.
 @(private)
-continuous :: proc(kind: scene.Field_Kind) -> bool {
-	return kind == .F32 || kind == .Vector2 || kind == .Vector3
+continuous :: proc(kind: ecs.Field_Kind) -> bool {
+	traits := ecs.FIELD_TRAITS
+	return traits[kind].continuous
 }
 
 // channel_component is which of a field's numbers a channel keys: value for a number and for every stepped kind, and
 // x, y and z, or r, g and b, for a vector's.
 @(private)
-channel_component :: proc(kind: scene.Field_Kind, name: string) -> (int, bool) {
+channel_component :: proc(kind: ecs.Field_Kind, name: string) -> (int, bool) {
 	#partial switch kind {
 	case .Vector2, .Vector3:
 		count := 2 if kind == .Vector2 else 3
@@ -314,7 +322,7 @@ channel_component :: proc(kind: scene.Field_Kind, name: string) -> (int, bool) {
 }
 
 @(private)
-channels_of :: proc(kind: scene.Field_Kind) -> string {
+channels_of :: proc(kind: ecs.Field_Kind) -> string {
 	#partial switch kind {
 	case .Vector2:
 		return "x and y, or r and g"
@@ -325,75 +333,6 @@ channels_of :: proc(kind: scene.Field_Kind) -> string {
 }
 
 @(private)
-integer_kind :: proc(target: Property_Field) -> scene.Field_Kind {
+integer_kind :: proc(target: Property_Field) -> ecs.Field_Kind {
 	return target.enum_base if target.kind == .Enum else target.kind
-}
-
-@(private)
-field_size :: proc(kind, enum_base: scene.Field_Kind) -> int {
-	#partial switch kind {
-	case .Bool, .I8, .U8:
-		return 1
-	case .I16, .U16:
-		return 2
-	case .I32, .U32, .F32:
-		return 4
-	case .I64, .U64, .Vector2:
-		return 8
-	case .Vector3:
-		return 12
-	case .Asset:
-		return size_of(format.Guid)
-	case .Enum:
-		return field_size(enum_base, .Bool)
-	}
-	return 0
-}
-
-@(private)
-get_integer :: proc(src: []byte, kind: scene.Field_Kind) -> i64 {
-	p := raw_data(src)
-	#partial switch kind {
-	case .I8:
-		return i64((^i8)(p)^)
-	case .I16:
-		return i64((^i16)(p)^)
-	case .I32:
-		return i64((^i32)(p)^)
-	case .I64:
-		return (^i64)(p)^
-	case .U8:
-		return i64((^u8)(p)^)
-	case .U16:
-		return i64((^u16)(p)^)
-	case .U32:
-		return i64((^u32)(p)^)
-	case .U64:
-		return i64(min((^u64)(p)^, u64(max(i64))))
-	}
-	return 0
-}
-
-// put_integer writes an integer of a kind, clamped to the kind's range.
-@(private)
-put_integer :: proc(dst: []byte, kind: scene.Field_Kind, value: i64) {
-	p := raw_data(dst)
-	#partial switch kind {
-	case .I8:
-		(^i8)(p)^ = i8(clamp(value, i64(min(i8)), i64(max(i8))))
-	case .I16:
-		(^i16)(p)^ = i16(clamp(value, i64(min(i16)), i64(max(i16))))
-	case .I32:
-		(^i32)(p)^ = i32(clamp(value, i64(min(i32)), i64(max(i32))))
-	case .I64:
-		(^i64)(p)^ = value
-	case .U8:
-		(^u8)(p)^ = u8(clamp(value, 0, i64(max(u8))))
-	case .U16:
-		(^u16)(p)^ = u16(clamp(value, 0, i64(max(u16))))
-	case .U32:
-		(^u32)(p)^ = u32(clamp(value, 0, i64(max(u32))))
-	case .U64:
-		(^u64)(p)^ = u64(max(value, 0))
-	}
 }

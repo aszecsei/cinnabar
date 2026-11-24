@@ -9,34 +9,6 @@ import "core:strings"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
-Field_Kind :: enum u8 {
-	Bool,
-	I8,
-	I16,
-	I32,
-	I64,
-	U8,
-	U16,
-	U32,
-	U64,
-	F32,
-	F64,
-	// An integer of the kind enum_base, with names in enum_values.
-	Enum,
-	// [3]f32.
-	Vector3,
-	// quaternion128: x, y, z, w.
-	Quaternion,
-	// World_Position: three i64 in units of 2^-24 m.
-	Position,
-	// An entity handle.
-	Entity,
-	// An asset's GUID, format.Guid. asset_kind names the kind of asset that it takes.
-	Asset,
-	// [2]f32.
-	Vector2,
-}
-
 Enum_Value :: struct {
 	name:  string,
 	value: i64,
@@ -48,8 +20,8 @@ Field :: struct {
 	// Nested structs are flattened, with dotted names, such as inner.amount.
 	name:            string,
 	offset:          u32,
-	kind:            Field_Kind,
-	enum_base:       Field_Kind,
+	kind:            ecs.Field_Kind,
+	enum_base:       ecs.Field_Kind,
 	enum_values:     []Enum_Value,
 	// From the struct tag editor:"read".
 	read_only:       bool,
@@ -185,79 +157,21 @@ editor_tags :: proc(tag: string, field: ^Field) -> bool {
 	return true
 }
 
-// field_kind sets the field's kind, and returns false for a type that is not a field kind.
+// field_kind sets the field's kind from ecs.field_kind_of, and an enum's base and names. It returns false for a type
+// that is not a field kind.
 @(private = "file")
 field_kind :: proc(ti: ^runtime.Type_Info, field: ^Field, allocator: runtime.Allocator) -> bool {
-	switch ti.id {
-	case ecs.World_Position:
-		field.kind = .Position
-		return true
-	case ecs.Entity:
-		field.kind = .Entity
-		return true
-	case format.Guid:
-		field.kind = .Asset
+	field.kind, field.enum_base = ecs.field_kind_of(ti) or_return
+	if field.kind != .Enum {
 		return true
 	}
-	#partial switch v in runtime.type_info_base(ti).variant {
-	case runtime.Type_Info_Float:
-		switch ti.size {
-		case 4:
-			field.kind = .F32
-			return true
-		case 8:
-			field.kind = .F64
-			return true
+	v := runtime.type_info_base(ti).variant.(runtime.Type_Info_Enum)
+	field.enum_values = make([]Enum_Value, len(v.names), allocator)
+	for name, i in v.names {
+		field.enum_values[i] = {
+			name  = name,
+			value = i64(v.values[i]),
 		}
-	case runtime.Type_Info_Integer:
-		kind, ok := integer_kind(v.signed, ti.size)
-		field.kind = kind
-		return ok
-	case runtime.Type_Info_Boolean:
-		field.kind = .Bool
-		return ti.size == 1
-	case runtime.Type_Info_Enum:
-		base, ok := integer_kind(
-			runtime.type_info_base(v.base).variant.(runtime.Type_Info_Integer).signed,
-			ti.size,
-		)
-		if !ok {
-			return false
-		}
-		values := make([]Enum_Value, len(v.names), allocator)
-		for name, i in v.names {
-			values[i] = {
-				name  = name,
-				value = i64(v.values[i]),
-			}
-		}
-		field.kind, field.enum_base, field.enum_values = .Enum, base, values
-		return true
-	case runtime.Type_Info_Array:
-		if v.elem.id == f32 && (v.count == 2 || v.count == 3) {
-			field.kind = .Vector2 if v.count == 2 else .Vector3
-			return true
-		}
-	case runtime.Type_Info_Quaternion:
-		field.kind = .Quaternion
-		return ti.size == size_of(quaternion128)
 	}
-	return false
-}
-
-@(private = "file")
-integer_kind :: proc(signed: bool, size: int) -> (Field_Kind, bool) {
-	kinds :=
-		[4]Field_Kind{.I8, .I16, .I32, .I64} if signed else [4]Field_Kind{.U8, .U16, .U32, .U64}
-	switch size {
-	case 1:
-		return kinds[0], true
-	case 2:
-		return kinds[1], true
-	case 4:
-		return kinds[2], true
-	case 8:
-		return kinds[3], true
-	}
-	return {}, false
+	return true
 }

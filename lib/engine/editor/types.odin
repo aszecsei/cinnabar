@@ -50,11 +50,11 @@ component_types :: proc(w: ^ecs.World, allocator: runtime.Allocator) -> link.Com
 	return {types = types}
 }
 
-#assert(len(scene.Field_Kind) == len(link.Field_Kind))
-#assert(int(scene.Field_Kind.Entity) == int(link.Field_Kind.Entity))
-#assert(int(scene.Field_Kind.Enum) == int(link.Field_Kind.Enum))
-#assert(int(scene.Field_Kind.Asset) == int(link.Field_Kind.Asset))
-#assert(int(scene.Field_Kind.Vector2) == int(link.Field_Kind.Vector2))
+#assert(len(ecs.Field_Kind) == len(link.Field_Kind))
+#assert(int(ecs.Field_Kind.Entity) == int(link.Field_Kind.Entity))
+#assert(int(ecs.Field_Kind.Enum) == int(link.Field_Kind.Enum))
+#assert(int(ecs.Field_Kind.Asset) == int(link.Field_Kind.Asset))
+#assert(int(ecs.Field_Kind.Vector2) == int(link.Field_Kind.Vector2))
 #assert(len(render.Debug_View) == len(link.Debug_View))
 #assert(int(render.Debug_View.Shadow_Cascades) == int(link.Debug_View.Shadow_Cascades))
 #assert(int(render.Debug_View.Luminance) == int(link.Debug_View.Luminance))

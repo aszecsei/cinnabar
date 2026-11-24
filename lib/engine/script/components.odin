@@ -15,39 +15,18 @@ MAX_EXPOSED :: 64
 MAX_FIELDS :: 512
 MAX_NAME :: 64
 
-// Field_Kind is how a component field looks to scripts.
-@(private)
-Field_Kind :: enum u8 {
-	F32,
-	F64,
-	I8,
-	I16,
-	I32,
-	I64,
-	U8,
-	U16,
-	U32,
-	U64,
-	Bool,
-	// A string with the enum value's name.
-	Enum,
-	// [3]f32 as a vector.
-	Vector,
-	Quaternion,
-	Position,
-	Entity,
-}
-
-// Field is a component field that scripts can see. name and info point into the DLL image, so reload clears the
-// fields and expose builds them again.
+// Field is a component field that scripts can see. An Enum is a string with the value's name, and a Vector3 is a
+// vector. name and info point into the DLL image, so reload clears the fields and expose builds them again.
 @(private)
 Field :: struct {
-	atom:     i16,
-	name:     string,
-	offset:   u32,
-	kind:     Field_Kind,
-	readonly: bool,
-	info:     ^runtime.Type_Info,
+	atom:      i16,
+	name:      string,
+	offset:    u32,
+	kind:      ecs.Field_Kind,
+	// For an Enum, the kind of its integer.
+	enum_base: ecs.Field_Kind,
+	readonly:  bool,
+	info:      ^runtime.Type_Info,
 }
 
 // Exposed is a native component that scripts can see.
@@ -97,20 +76,21 @@ expose_with_default :: proc(r: ^Runtime, $T: typeid, default: T) {
 
 	for f in reflect.struct_fields_zipped(T) {
 		tag := reflect.struct_tag_get(f.tag, "script")
-		kind, supported := field_kind(f.type)
-		if tag == "-" || !supported || f.is_using {
+		kind, enum_base, supported := ecs.field_kind_of(f.type)
+		if tag == "-" || !supported || kind in HIDDEN_KINDS || f.is_using {
 			continue
 		}
 		if r.field_count == MAX_FIELDS {
 			log.panicf("script: more than %d exposed fields", MAX_FIELDS)
 		}
 		r.fields[r.field_count] = {
-			atom     = r.platform.script_atom(f.name),
-			name     = f.name,
-			offset   = u32(f.offset),
-			kind     = kind,
-			readonly = tag == "read",
-			info     = f.type,
+			atom      = r.platform.script_atom(f.name),
+			name      = f.name,
+			offset    = u32(f.offset),
+			kind      = kind,
+			enum_base = enum_base,
+			readonly  = tag == "read",
+			info      = f.type,
 		}
 		r.field_count += 1
 	}
@@ -119,48 +99,10 @@ expose_with_default :: proc(r: ^Runtime, $T: typeid, default: T) {
 	set_path(r, exposed_name(x))
 }
 
+// HIDDEN_KINDS are the field kinds that scripts cannot hold. Scripts have no value for a [2]f32 or an asset reference
+// yet, so a Vector2 or an Asset field is hidden from them. Exposing them is a product decision, not yet made.
 @(private = "file")
-field_kind :: proc(ti: ^runtime.Type_Info) -> (kind: Field_Kind, ok: bool) {
-	switch ti.id {
-	case ecs.World_Position:
-		return .Position, true
-	case ecs.Entity:
-		return .Entity, true
-	}
-	#partial switch v in runtime.type_info_base(ti).variant {
-	case runtime.Type_Info_Float:
-		switch ti.size {
-		case 4:
-			return .F32, true
-		case 8:
-			return .F64, true
-		}
-	case runtime.Type_Info_Integer:
-		kinds :=
-			v.signed ? [4]Field_Kind{.I8, .I16, .I32, .I64} : [4]Field_Kind{.U8, .U16, .U32, .U64}
-		switch ti.size {
-		case 1:
-			return kinds[0], true
-		case 2:
-			return kinds[1], true
-		case 4:
-			return kinds[2], true
-		case 8:
-			return kinds[3], true
-		}
-	case runtime.Type_Info_Boolean:
-		return .Bool, ti.size == 1
-	case runtime.Type_Info_Enum:
-		return .Enum, true
-	case runtime.Type_Info_Array:
-		if v.count == 3 && v.elem.id == f32 {
-			return .Vector, true
-		}
-	case runtime.Type_Info_Quaternion:
-		return .Quaternion, ti.size == size_of(quaternion128)
-	}
-	return
-}
+HIDDEN_KINDS :: bit_set[ecs.Field_Kind]{.Vector2, .Asset}
 
 @(private)
 exposed_name :: proc(x: ^Exposed) -> string {
@@ -269,7 +211,7 @@ push_field :: proc(L: ^luau.State, f: ^Field, data: [^]byte) {
 		} else {
 			luau.pushnil(L)
 		}
-	case .Vector:
+	case .Vector3:
 		push_vector(L, (^[3]f32)(p)^)
 	case .Quaternion:
 		push_quaternion(L, (^quaternion128)(p)^)
@@ -277,6 +219,9 @@ push_field :: proc(L: ^luau.State, f: ^Field, data: [^]byte) {
 		push_position(L, (^ecs.World_Position)(p)^)
 	case .Entity:
 		push_entity(L, (^ecs.Entity)(p)^)
+	case .Vector2, .Asset:
+		// In HIDDEN_KINDS, so expose never makes such a field.
+		luau.pushnil(L)
 	}
 }
 
@@ -316,18 +261,9 @@ set_field :: proc(r: ^Runtime, L: ^luau.State, f: ^Field, data: [^]byte, idx: c.
 		if !found {
 			raise(L, fmt.aprintf("%q is not a value of %s", name, f.name, allocator = frame(r)))
 		}
-		enum_info := runtime.type_info_base(f.info).variant.(runtime.Type_Info_Enum)
-		switch enum_info.base.size {
-		case 1:
-			(^u8)(p)^ = u8(value)
-		case 2:
-			(^u16)(p)^ = u16(value)
-		case 4:
-			(^u32)(p)^ = u32(value)
-		case 8:
-			(^u64)(p)^ = u64(value)
-		}
-	case .Vector:
+		// The value is one of the enum's own, so it fits its integer.
+		ecs.write_integer(p, f.enum_base, i64(value), .Refuse)
+	case .Vector3:
 		(^[3]f32)(p)^ = check_vector(L, idx)
 	case .Quaternion:
 		(^quaternion128)(p)^ = check_quaternion(L, idx)
@@ -335,6 +271,8 @@ set_field :: proc(r: ^Runtime, L: ^luau.State, f: ^Field, data: [^]byte, idx: c.
 		(^ecs.World_Position)(p)^ = check_position(L, idx)
 	case .Entity:
 		(^ecs.Entity)(p)^ = luau.isnil(L, idx) ? 0 : check_entity(L, idx)
+	case .Vector2, .Asset:
+	// In HIDDEN_KINDS, so expose never makes such a field.
 	}
 }
 
