@@ -79,6 +79,18 @@ public sealed class CommandRegistry
         }
     }
 
+    /// <summary>
+    /// What a scope can run may have changed, as when its selection changes: views ask the commands again while the
+    /// scope is in the chain, so the ribbon's Delete enables with the graph's selection.
+    /// </summary>
+    public void Refresh(ICommandScope scope)
+    {
+        if (scope == _focused || _scopes.Contains(scope))
+        {
+            InvalidateAll();
+        }
+    }
+
     /// <summary>The action of the first scope that takes a command, or null when none does and the command's own runs.</summary>
     public ScopedCommand? HandlerOf(string commandId)
     {

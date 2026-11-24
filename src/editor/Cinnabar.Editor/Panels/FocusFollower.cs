@@ -11,8 +11,9 @@ namespace Cinnabar.Editor.Panels;
 /// <summary>
 /// Tells an owner when the keyboard moves into a control and out of it, while the control is in a window: a cutscene's
 /// pane, whose commands act then, or a command scope (see docs/editor/shell-and-panels.md#commands). The command palette
-/// that the control opened keeps the keyboard there. Another control taking the keyboard is that control's to say, so
-/// the owner of one that loses it lets go only when it still holds it.
+/// and the ribbon keep the keyboard there, as their commands are for the control: a press on the ribbon's Delete focuses
+/// the button before the click runs it. Another control taking the keyboard is that control's to say, so the owner of
+/// one that loses it lets go only when it still holds it.
 /// </summary>
 sealed class FocusFollower : IDisposable
 {
@@ -66,7 +67,7 @@ sealed class FocusFollower : IDisposable
         {
             _enter();
         }
-        else if (!focused.GetVisualAncestors().OfType<CommandPalette>().Any() && focused is not CommandPalette)
+        else if (!focused.GetSelfAndVisualAncestors().Any(v => v is CommandPalette or RibbonView))
         {
             _leave();
         }

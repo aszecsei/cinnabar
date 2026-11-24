@@ -201,7 +201,7 @@ public sealed class WeatherMapView : DockPanel, ICommandScope
         _status.Text = _session.Status();
         _undo.IsEnabled = _session.Strokes > 0 && !_session.IsPainting;
         // Undo is the panel's while it has the keyboard, so the ribbon's Undo follows the strokes.
-        _shell.Commands.Get(EditorCommands.Undo).Invalidate();
+        _shell.Commands.Refresh(this);
         _revert.IsEnabled = _session.State is WeatherMapSession.MapState.Indexed or WeatherMapSession.MapState.Written;
         if (_generate != null)
         {

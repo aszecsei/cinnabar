@@ -1,4 +1,6 @@
+using Avalonia.Controls;
 using Cinnabar.Editor.Commands;
+using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
 
 namespace Cinnabar.Editor.UiDocuments;
@@ -9,6 +11,18 @@ namespace Cinnabar.Editor.UiDocuments;
 /// </summary>
 sealed class UiElementScope(UiEditor editor) : ICommandScope
 {
+    /// <summary>
+    /// Makes a view's scope the focused one while it has the keyboard, and asks the commands again when the selection
+    /// changes while it is on screen.
+    /// </summary>
+    public static void Follow(Control view, CommandRegistry commands, UiEditor editor)
+    {
+        var scope = new UiElementScope(editor);
+        FocusFollower.Scope(view, commands, scope);
+        void Refresh() => commands.Refresh(scope);
+        new ViewSubscriptions(view).Add(() => editor.SelectionChanged += Refresh, () => editor.SelectionChanged -= Refresh);
+    }
+
     public ScopedCommand? Handler(string commandId) => commandId switch
     {
         EditorCommands.DeleteEntity => new(() => Run(editor.Delete), () => editor.SelectedNode != null),

@@ -63,7 +63,7 @@ sealed class UiTreeView : DockPanel
         Children.Add(buttons);
         Children.Add(new ScrollViewer { Content = _rows, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled });
         Focusable = true;
-        FocusFollower.Scope(this, shell.Commands, new UiElementScope(editor));
+        UiElementScope.Follow(this, shell.Commands, editor);
         new ViewSubscriptions(this, attached: Refresh)
             .Add(() => _editor.Changed += Refresh, () => _editor.Changed -= Refresh)
             .Add(() => _editor.SelectionChanged += ShowSelection, () => _editor.SelectionChanged -= ShowSelection)

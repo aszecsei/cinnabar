@@ -87,7 +87,7 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
   - mine but not now, which stops the command there. Delete in a graph with nothing selected deletes nothing; it does not delete the entities.
 
   The registry asks the scopes in a fixed order:
-  1. The focused scope, which is the control that has the keyboard: a graph canvas, the UI editor's canvas or tree, the content browser, or the Weather Map panel. A `FocusFollower` sets it as the keyboard moves into the control and clears it when the keyboard leaves. The command palette that the control opened keeps it.
+  1. The focused scope, which is the control that has the keyboard: a graph canvas, the UI editor's canvas or tree, the content browser, or the Weather Map panel. A `FocusFollower` sets it as the keyboard moves into the control and clears it when the keyboard leaves. The command palette that the control opened keeps it, and so does the ribbon, so the ribbon's Delete deletes the graph's nodes too. A scope whose selection changes asks the registry to refresh the commands (`CommandRegistry.Refresh`), so the ribbon's buttons enable with it.
   2. The active editor's tab (`EditorScope`). A cutscene's Delete and Duplicate act while its timeline or curve editor has the keyboard. Save, Undo and Redo act on the tab's document, and Undo and Redo also act on the cutscene keyed after the scene's last edit.
   3. The command's own action, which acts on the active scene.
 

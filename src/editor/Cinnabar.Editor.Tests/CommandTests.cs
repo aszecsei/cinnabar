@@ -146,4 +146,24 @@ public class CommandTests
         Assert.True(command.Execute());
         Assert.Equal(1, runs);
     }
+
+    [Fact]
+    public void ARefreshOfAScopeInvalidatesTheCommandsOnlyWhileTheScopeIsInTheChain()
+    {
+        var commands = new CommandRegistry();
+        var delete = commands.Register(new Command("entity.delete", "Delete", () => { }));
+        var changes = 0;
+        delete.Changed += () => changes++;
+        var canvas = new TableScope([]);
+        var editor = new TableScope([]);
+        commands.AddScope(editor);
+
+        commands.Refresh(canvas);
+        Assert.Equal(0, changes);
+        commands.Refresh(editor);
+        Assert.Equal(1, changes);
+        commands.Focus(canvas);
+        commands.Refresh(canvas);
+        Assert.Equal(3, changes);
+    }
 }

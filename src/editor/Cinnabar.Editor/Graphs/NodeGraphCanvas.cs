@@ -18,6 +18,9 @@ public interface IGraphCanvasEditor
 
     void Select(IEnumerable<int> ids, SelectMode mode = SelectMode.Replace);
 
+    /// <summary>The selection changed.</summary>
+    event Action? SelectionChanged;
+
     /// <summary>Where the selected things are now, which a drag's steps start from.</summary>
     Dictionary<int, Vec2> MoveStarts();
 
@@ -93,6 +96,9 @@ public abstract class NodeGraphCanvas : Control, ICommandScope
         Focusable = true;
         ClipToBounds = true;
         FocusFollower.Scope(this, commands, this);
+        // Whether Delete and Duplicate can run follows the selection, so the ribbon's buttons do too.
+        void Refresh() => commands.Refresh(this);
+        new ViewSubscriptions(this).Add(() => editor.SelectionChanged += Refresh, () => editor.SelectionChanged -= Refresh);
     }
 
     /// <summary>

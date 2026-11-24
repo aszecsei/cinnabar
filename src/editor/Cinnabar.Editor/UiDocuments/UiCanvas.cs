@@ -30,7 +30,7 @@ sealed class UiCanvas : Grid
         _shell = shell;
         _editor = editor;
         Background = new SolidColorBrush(Color.Parse("#141416"));
-        FocusFollower.Scope(this, shell.Commands, new UiElementScope(editor));
+        UiElementScope.Follow(this, shell.Commands, editor);
         ClipToBounds = true;
         Children.Add(_message);
         if (editor.Preview is not { } session)
