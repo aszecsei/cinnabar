@@ -146,40 +146,6 @@ get_hashed :: proc(a: ^Action_Context, hash: u32) -> (Value, bool) {
 	return decode(key.type, value_bytes(a.values, key)), true
 }
 
-// convertible is whether an argument of a type fits a parameter of a type: the same type, a number for a number, or a
-// vector constant for a position, in meters.
-@(private)
-convertible :: proc(from, to: format.Blackboard_Type, constant: bool) -> bool {
-	return(
-		from == to ||
-		(from == .Float && to == .Int) ||
-		(from == .Int && to == .Float) ||
-		(constant && from == .Vector && to == .Position) \
-	)
-}
-
-// convert gives an argument's bytes as a parameter's type.
-@(private)
-convert :: proc(
-	from, to: format.Blackboard_Type,
-	value: [format.BLACKBOARD_VALUE_SIZE]byte,
-) -> (
-	result: [format.BLACKBOARD_VALUE_SIZE]byte,
-) {
-	value := value
-	switch {
-	case from == .Float && to == .Int:
-		(^i32)(&result)^ = i32((^f32)(&value)^)
-	case from == .Int && to == .Float:
-		(^f32)(&result)^ = f32((^i32)(&value)^)
-	case from == .Vector && to == .Position:
-		(^ecs.World_Position)(&result)^ = ecs.position_offset({}, (^[3]f32)(&value)^)
-	case:
-		result = value
-	}
-	return
-}
-
 // arg_value is an action reference's argument's value now: a constant, a key's value, or the agent.
 @(private)
 arg_value :: proc(
@@ -198,12 +164,13 @@ arg_value :: proc(
 		return c.value, format.blob_string(decision.data, c.text)
 	case .Key:
 		key := format.blackboard_keys(board.data, board.blob)[a.index]
-		copy(bytes[:], value_bytes(values, key))
-		if key.type == .Enum {
-			text = format.blackboard_enum_name(board.data, board.blob, key, (^u32)(&bytes)^)
+		v := decode(key.type, value_bytes(values, key))
+		if index, is_enum := v.(Enum_Index); is_enum {
+			text = format.blackboard_enum_name(board.data, board.blob, key, u32(index))
 		}
+		_, bytes, _ = encode(v)
 	case .Self:
-		(^ecs.Entity)(&bytes)^ = e
+		_, bytes, _ = encode(e)
 	}
 	return
 }
@@ -478,21 +445,24 @@ script_args :: proc(
 	for x, i in args {
 		bytes, text := arg_value(decision, board, values, e, x)
 		value: script.Action_Value
-		switch x.type {
-		case .Float:
-			value = f64((^f32)(&bytes)^)
-		case .Int:
-			value = f64((^i32)(&bytes)^)
-		case .Bool:
-			value = bytes[0] != 0
-		case .Enum, .String:
+		switch v in decode(x.type, bytes[:]) {
+		case f32:
+			value = f64(v)
+		case i32:
+			value = f64(v)
+		case bool:
+			value = v
+		case Enum_Index:
 			value = text
-		case .Entity:
-			value = (^ecs.Entity)(&bytes)^
-		case .Position:
-			value = (^ecs.World_Position)(&bytes)^
-		case .Vector:
-			value = (^[3]f32)(&bytes)^
+		case ecs.Entity:
+			value = v
+		case ecs.World_Position:
+			value = v
+		case [3]f32:
+			value = v
+		case:
+			// A String.
+			value = text
 		}
 		result[i] = {format.blob_string(decision.data, x.name), value}
 	}

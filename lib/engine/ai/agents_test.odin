@@ -1089,6 +1089,45 @@ scripts_act_and_write_the_blackboard :: proc(t: ^testing.T) {
 	testing.expect(t, !ok)
 }
 
+// A script writes and reads back a ready agent's key of each type, and a number written to an int key is truncated.
+@(test)
+scripts_write_and_read_each_key_type :: proc(t: ^testing.T) {
+	f := setup(t, serial = true, scripts = true)
+	defer teardown(t, f)
+	context.user_ptr = f
+	f.agent = spawn_agent(f, interval = 100)
+	frame(f, 2)
+	testing.expect(t, ready_agent(f, f.agent) != nil)
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=types",
+		`
+		local agent = Test.agent()
+		Blackboard.set(agent, "health", 0.5)
+		Blackboard.set(agent, "ammo", 7.9)
+		Blackboard.set(agent, "alarmed", true)
+		Blackboard.set(agent, "mood", "alert")
+		Blackboard.set(agent, "target", agent)
+		Blackboard.set(agent, "home", WorldPosition.from_meters(4, 5, 6))
+		Blackboard.set(agent, "heading", vector.create(1, 0, 0))
+		Test.report(Blackboard.get(agent, "health"))
+		Test.report(Blackboard.get(agent, "ammo"))
+		Test.report(if Blackboard.get(agent, "alarmed") == true then 1 else 0)
+		Test.report(if Blackboard.get(agent, "mood") == "alert" then 1 else 0)
+		Test.report(if Blackboard.get(agent, "target") == agent then 1 else 0)
+		Test.report(Blackboard.get(agent, "heading").x)
+		Blackboard.set(agent, "target", nil)
+		Test.report(if Blackboard.get(agent, "target") == nil then 1 else 0)
+	`,
+	)
+	testing.expect(t, ok)
+	testing.expectf(t, slice.equal(f.reports[:], []f64{0.5, 7, 1, 1, 1, 1, 1}), "%v", f.reports)
+	home, _ := get_key(&f.ai, f.agent, "home")
+	testing.expect_value(t, home.(ecs.World_Position), at(4, 5, 6))
+	alarmed, _ := get_key(&f.ai, f.agent, "alarmed")
+	testing.expect_value(t, alarmed.(bool), true)
+}
+
 // A script reads an agent's decision and gives it another. The agent starts again with it, from its blackboard's
 // defaults.
 @(test)

@@ -272,8 +272,6 @@ score_option :: proc(b: ^Think, o: format.Utility_Option) -> f64 {
 	buffer: [format.MAX_BLACKBOARD_SIZE]byte
 	copy(buffer[:], values)
 	t.values = buffer[:len(values)]
-	key := format.blackboard_keys(t.board.data, t.board.blob)[o.target]
-	slot := (^ecs.Entity)(&buffer[key.offset])
 	best := -1.0
 	scratch: [MAX_LINKS]format.Utility_Link_State
 	m := t.perception
@@ -282,7 +280,7 @@ score_option :: proc(b: ^Think, o: format.Utility_Option) -> f64 {
 		   (.Tag in o.flags && !ai.tag_matches(t, entry, o.target_tag)) {
 			continue
 		}
-		slot^ = entry.entity
+		ai.store_key(t, o.target, entry.entity)
 		score := score_values(b, o, scratch[:o.link_count])
 		if score > best {
 			best = score
@@ -348,8 +346,8 @@ input :: proc(t: ^ai.Think_Context, c: format.Utility_Consideration) -> f64 {
 
 @(private)
 key_entity :: proc(t: ^ai.Think_Context, slot: u32) -> ecs.Entity {
-	key := format.blackboard_keys(t.board.data, t.board.blob)[slot]
-	return (^ecs.Entity)(&t.values[key.offset])^
+	e, _ := ai.read_key(t, slot).(ecs.Entity)
+	return e
 }
 
 // ticks is a time in ticks, from its constant or its key as the blackboard is now, rounded to the nearest tick.

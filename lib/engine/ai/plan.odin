@@ -77,18 +77,8 @@ Plan_Result :: enum u8 {
 
 // plan_world is the world state of the agent's values: a bool is 0 or 1, an int is itself, and an enum is its index.
 plan_world :: proc(t: ^Think_Context, keys: []u32) -> (w: Plan_World) {
-	board_keys := format.blackboard_keys(t.board.data, t.board.blob)
 	for slot, i in keys {
-		key := board_keys[slot]
-		bytes := value_bytes(t.values, key)
-		#partial switch key.type {
-		case .Bool:
-			w[i] = 1 if bytes[0] != 0 else 0
-		case .Int:
-			w[i] = (^i32)(raw_data(bytes))^
-		case .Enum:
-			w[i] = i32((^u32)(raw_data(bytes))^)
-		}
+		w[i], _ = value_plan(read_key(t, slot))
 	}
 	return
 }
@@ -300,14 +290,7 @@ write_effects :: proc(
 			key    = slot,
 			type   = key.type,
 		}
-		#partial switch key.type {
-		case .Bool:
-			c.value[0] = 1 if world[e.key] != 0 else 0
-		case .Int:
-			(^i32)(&c.value)^ = world[e.key]
-		case .Enum:
-			(^u32)(&c.value)^ = u32(world[e.key])
-		}
+		_, c.value, _ = encode(plan_value(key.type, world[e.key]))
 		append(t.out, c)
 	}
 }

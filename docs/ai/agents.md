@@ -61,6 +61,7 @@ An agent's first think is staggered by its slot: the slot's place on the golden 
   - `ai.stop_action(t)` asks to stop it;
   - `ai.write(t, index)` and `ai.node_writes(t, node)` ask for a decision's writes, with their values as the blackboard is at the think;
   - `ai.write_entity(t, slot, entity)` asks to write an entity key;
+  - `ai.read_key(t, slot)` reads a key as a `Value`, through `ai.decode`, the one reader of a blackboard's bytes. `ai.value_number`, `ai.value_place` and `ai.value_plan` give a value as a number, a place or a planning value, and are false for a value of another type. `ai.store_key` writes a key in a copy of the values that a module gives the context, such as utility's scratch target;
   - `ai.key_number`, `ai.place_of`, `ai.distance`, `ai.seconds_since_changed` and `ai.tag_matches` read the inputs that a module scores;
   - `ai.plan_world`, `ai.plan_start` and `ai.plan_think` read the world state of planning keys and run a plan ([GOAP: The plan runner](goap.md#the-plan-runner)).
 - **When outputs apply:** after the tick's `Fixed` systems. A native action starts in the next tick's `ai actions`; a script action in this tick's script step.
