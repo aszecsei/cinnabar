@@ -132,6 +132,22 @@ sealed class CommandViews(CommandRegistry commands, KeyBindings keyBindings)
         }
     }
 
+    /// <summary>
+    /// A tip that names a command's key as the bindings give it, such as "Save (Ctrl+S)", or the text alone when the
+    /// command has no key, so a rebinding shows in the tip.
+    /// </summary>
+    public static string Tip(KeyBindings keyBindings, string text, string commandId) =>
+        keyBindings.ShortcutOf(commandId) is { } key ? $"{text} ({key})" : text;
+
+    /// <summary>An editor tab's Save button, which saves the tab's document, with Save's key in its tip.</summary>
+    public static Button SaveButton(EditorShell shell, IGraphEditor editor)
+    {
+        var save = new Button { Content = Icon("save", 16), Classes = { "viewport-tool" }, Focusable = false, Margin = new Thickness(0, 0, 8, 0) };
+        ToolTip.SetTip(save, Tip(shell.KeyBindings, "Save", EditorCommands.Save));
+        save.Click += (_, _) => shell.SaveGraph(editor);
+        return save;
+    }
+
     public string Tooltip(Command command)
     {
         var shortcut = KeyBindings.Describe(command.Id);

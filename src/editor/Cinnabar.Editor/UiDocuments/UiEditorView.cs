@@ -31,9 +31,7 @@ public sealed class UiEditorView : DockPanel
         _editor = editor;
 
         var toolbar = new WrapPanel { Margin = new Thickness(8, 4) };
-        var save = new Button { Content = CommandViews.Icon("save", 16), Classes = { "viewport-tool" }, Focusable = false, Margin = new Thickness(0, 0, 8, 0) };
-        ToolTip.SetTip(save, "Save (Ctrl+S)");
-        save.Click += (_, _) => shell.SaveGraph(editor);
+        var save = CommandViews.SaveButton(shell, editor);
         toolbar.Children.Add(save);
         toolbar.Children.Add(SmallButton("Open in Script Editor", "Edit the document's text. Save first: this editor does not read the file again.", () => shell.OpenScript(editor.Document.Path)));
         toolbar.Children.Add(Gap());
@@ -65,7 +63,7 @@ public sealed class UiEditorView : DockPanel
         toolbar.Children.Add(Label("scale"));
         toolbar.Children.Add(scale);
         toolbar.Children.Add(Gap());
-        toolbar.Children.Add(SmallButton("Fit", "Fit the screen in the canvas (F)", editor.Fit));
+        toolbar.Children.Add(SmallButton("Fit", CommandViews.Tip(shell.KeyBindings, "Fit the screen in the canvas", EditorCommands.FrameSelected), editor.Fit));
         toolbar.Children.Add(SmallButton("100%", "One pixel of the screen for each pixel of the canvas, as the game draws it", () =>
         {
             var (w, h) = editor.Size;

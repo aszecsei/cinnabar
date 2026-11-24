@@ -384,10 +384,10 @@ public sealed class ShellTests : IDisposable
         Assert.DoesNotContain(shell.KeyBindings.All, b => b.CommandId == command);
     }
 
-    // A scope's key comes before the window's, so a window shortcut with the same key does not run while the scope has the
-    // keyboard. Only the cutscene timeline's keys may share one, since they run only while the timeline has the keyboard.
+    // A scope's key comes before the window's, so a window shortcut with the same key would not run while the scope has
+    // the keyboard. No scope's key is a window's.
     [Fact]
-    public void AScopedKeyShadowsOnlyTheTimelinesWindowKeys()
+    public void AScopedKeyShadowsNoWindowKey()
     {
         using var shell = NewShell();
         var window = shell.KeyBindings.All.ToLookup(b => Commands.KeyBindings.Normalize(b.Shortcut), b => b.CommandId);
@@ -396,10 +396,43 @@ public sealed class ShellTests : IDisposable
             .SelectMany(scope => shell.KeyBindings.InScope(scope))
             .SelectMany(b => window[Commands.KeyBindings.Normalize(b.Shortcut)])
             .Distinct()
-            .Where(id => !id.StartsWith("cutscene.", StringComparison.Ordinal))
             .ToList();
 
         Assert.Empty(shadowed);
+    }
+
+    // The timeline's keys are bare letters, Space and the arrows, so they are the timeline's and the curve editor's alone,
+    // and nothing runs the commands while neither pane has the keyboard.
+    [Fact]
+    public void TheCutsceneTimelinesKeysAreItsScopedShortcuts()
+    {
+        using var shell = NewShell();
+
+        Assert.Empty(shell.KeyBindings.Warnings);
+        foreach (var id in EditorCommands.CutsceneTimelineCommands)
+        {
+            if (shell.KeyBindings.ShortcutOf(id) != null)
+            {
+                Assert.Equal([Commands.ShortcutScopes.CutsceneTimeline], shell.KeyBindings.ScopesOf(id));
+            }
+            Assert.DoesNotContain(shell.KeyBindings.All, b => b.CommandId == id);
+            Assert.False(shell.Commands.Get(id).CanExecute);
+        }
+        Assert.Contains((EditorCommands.CutscenePlayPause, "Space"), shell.KeyBindings.InScope(Commands.ShortcutScopes.CutsceneTimeline));
+        Assert.Equal("Space in a cutscene's timeline or curves", shell.KeyBindings.Describe(EditorCommands.CutscenePlayPause));
+    }
+
+    // A tip that names a key takes it from the bindings, as the editors' Save buttons do, so a rebinding shows in it.
+    [Fact]
+    public void ATipNamesTheKeyThatTheBindingsGive()
+    {
+        using var shell = NewShell();
+
+        Assert.Equal("Save (Ctrl+S)", Ribbon.CommandViews.Tip(shell.KeyBindings, "Save", EditorCommands.Save));
+        var rebound = new Commands.KeyBindings(shell.Commands, new Dictionary<string, string> { [EditorCommands.Save] = "Ctrl+Alt+S" });
+        Assert.Equal("Save (Ctrl+Alt+S)", Ribbon.CommandViews.Tip(rebound, "Save", EditorCommands.Save));
+        var unbound = new Commands.KeyBindings(shell.Commands, new Dictionary<string, string> { [EditorCommands.Save] = "" });
+        Assert.Equal("Save", Ribbon.CommandViews.Tip(unbound, "Save", EditorCommands.Save));
     }
 
     // Esc is Cancel in each scope that has something to cancel, and is not the window's, so the pickers, the value boxes

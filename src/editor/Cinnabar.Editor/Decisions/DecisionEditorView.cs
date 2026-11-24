@@ -35,15 +35,13 @@ public sealed class DecisionEditorView : DockPanel
         _editor = editor;
 
         var toolbar = new DockPanel { Margin = new Thickness(8, 4) };
-        var save = new Button { Content = CommandViews.Icon("save", 16), Classes = { "viewport-tool" }, Focusable = false, Margin = new Thickness(0, 0, 8, 0) };
-        ToolTip.SetTip(save, "Save (Ctrl+S)");
-        save.Click += (_, _) => shell.SaveGraph(editor);
+        var save = CommandViews.SaveButton(shell, editor);
         DockPanel.SetDock(save, DockSide.Left);
         toolbar.Children.Add(save);
         var text = SmallButton("Open in Script Editor", "Edit the decision's text. Save first: this editor does not read the file again.", () => shell.OpenScript(editor.Document.Path));
         DockPanel.SetDock(text, DockSide.Left);
         toolbar.Children.Add(text);
-        _frame = SmallButton("Frame", "Pan and zoom so the whole tree is in view (F)", () => (_center as BehaviorTreeCanvas)?.Frame());
+        _frame = SmallButton("Frame", CommandViews.Tip(shell.KeyBindings, "Pan and zoom so the whole tree is in view", EditorCommands.FrameSelected), () => (_center as BehaviorTreeCanvas)?.Frame());
         DockPanel.SetDock(_frame, DockSide.Left);
         toolbar.Children.Add(_frame);
         DockPanel.SetDock(_status, DockSide.Right);
