@@ -32,6 +32,7 @@ a_value_comes_back_from_luau_as_itself :: proc(t: ^testing.T) {
 		f64(2.5),
 		true,
 		"door",
+		"",
 		[3]f32{1, 2, 3},
 		ecs.Entity(77),
 		ecs.World_Position{{1 << 40, -3, 5}},

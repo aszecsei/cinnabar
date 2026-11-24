@@ -1029,6 +1029,9 @@ scripts_act_and_write_the_blackboard :: proc(t: ^testing.T) {
 		Blackboard.set(Test.agent(), "target", nil)
 		Blackboard.set(Test.agent(), "mood", "alert")
 		Blackboard.set(Test.agent(), "ammo", 5)
+		Blackboard.set(Test.agent(), "alarmed", true)
+		Blackboard.set(Test.agent(), "home", WorldPosition.from_meters(4, 5, 6))
+		Blackboard.set(Test.agent(), "heading", vector.create(0, 1, 0))
 	`,
 	)
 	testing.expect(t, ok)
@@ -1037,6 +1040,12 @@ scripts_act_and_write_the_blackboard :: proc(t: ^testing.T) {
 	testing.expect_value(t, mood.(Enum_Index), 1)
 	ammo, _ := get_key(&f.ai, f.agent, "ammo")
 	testing.expect_value(t, ammo.(i32), 5)
+	alarmed, _ := get_key(&f.ai, f.agent, "alarmed")
+	testing.expect_value(t, alarmed.(bool), true)
+	home, _ := get_key(&f.ai, f.agent, "home")
+	testing.expect_value(t, home.(ecs.World_Position), ecs.position_from_meters({4, 5, 6}))
+	heading, _ := get_key(&f.ai, f.agent, "heading")
+	testing.expect_value(t, heading.([3]f32), [3]f32{0, 1, 0})
 
 	set_key(&f.ai, f.agent, "target", other)
 	ready_agent(f, f.agent).next_think = f.world.clock.tick
