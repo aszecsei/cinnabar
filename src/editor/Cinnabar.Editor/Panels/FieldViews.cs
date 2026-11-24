@@ -657,26 +657,90 @@ sealed record AssetContext(Content.AssetIndex Index, string Kind, Action<string>
 {
     /// <summary>
     /// Whether the field takes an asset: one in the index of the field's kind, whose snake case name, such as
-    /// "instance_set", is the kind's without underscores. A material field takes materials and their instances alike, as
-    /// a renderer draws either.
+    /// "instance_set", is the kind's without underscores, and that <see cref="Exclude"/> does not leave out. A material
+    /// field takes materials and their instances alike, as a renderer draws either.
     /// </summary>
     public bool Takes(Link.Cook.Asset asset) =>
-        Kind == ""
-        || string.Equals(asset.Kind.ToString(), Kind.Replace("_", ""), StringComparison.OrdinalIgnoreCase)
-        || (Kind == "material" && asset.Kind == Link.Cook.AssetKind.MaterialInstance);
+        (Kind == ""
+         || string.Equals(asset.Kind.ToString(), Kind.Replace("_", ""), StringComparison.OrdinalIgnoreCase)
+         || (Kind == "material" && asset.Kind == Link.Cook.AssetKind.MaterialInstance))
+        && Exclude?.Invoke(asset) != true;
 
     /// <summary>GUIDs of assets that the picker offers first, before the rest by name: the Face panel's dev materials.</summary>
     public IReadOnlySet<string> First { get; init; } = new HashSet<string>();
 
+    /// <summary>
+    /// Values that are not GUIDs and that the field takes too: each shows as itself, and the picker offers them before
+    /// the assets. A material texture parameter's are "white", "black" and "normal".
+    /// </summary>
+    public IReadOnlyList<string> Builtins { get; init; } = [];
+
+    /// <summary>Assets of the field's kind that it does not take, such as a material function's own, as a function cannot call itself.</summary>
+    public Func<Link.Cook.Asset, bool>? Exclude { get; init; }
+
+    /// <summary>Whether the field can hold none. A material texture parameter cannot: it has a built-in at least.</summary>
+    public bool Clearable { get; init; } = true;
+
+    /// <summary>The kind as the view's tips name it, after "a" or "an", such as "a material function".</summary>
+    public string Noun => Kind == "" ? "an asset" : ("aeiou".Contains(Kind[0]) ? "an " : "a ") + Kind.Replace('_', ' ');
+
     /// <summary>The assets that the field takes, the preferred ones first, then by name.</summary>
     public IEnumerable<Link.Cook.Asset> Choices =>
         Index.Assets.Values.Where(Takes).OrderBy(a => First.Contains(a.Guid) ? 0 : 1).ThenBy(Content.AssetIndex.DisplayName, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// How a value shows: "None" for "", a built-in as itself, an asset by its name, with its path and GUID as the tip
+    /// and as a link to the content browser, and a GUID that no asset in the content has as missing.
+    /// </summary>
+    public (string Text, string? Tooltip, bool Linked) Describe(string value)
+    {
+        if (value == "")
+        {
+            return ("None", null, false);
+        }
+        if (Builtins.Contains(value))
+        {
+            return (value, "Built in", false);
+        }
+        return Index.Find(value) is { } asset
+            ? (Content.AssetIndex.DisplayName(asset), $"{asset.Root}/{asset.Path}\n{value}", true)
+            : ("Missing asset", $"No asset in the content has the GUID {value}", false);
+    }
+}
+
+/// <summary>
+/// Adapts a document's setter to the editor of a field view, for a panel whose values are not components' fields, such
+/// as an asset picker in a graph editor. The setter gets the value as the view gives it: for an asset, its GUID, a
+/// built-in, or "" for none. Each panel writes it as its document does, such as with "$" before a GUID.
+/// </summary>
+sealed class ValueSink(Action<string> set) : IFieldEditor
+{
+    public void SetAsset(string guid) => set(guid);
+
+    public bool Commit(int axis, string text)
+    {
+        set(text);
+        return true;
+    }
+
+    public void BeginScrub(int axis)
+    {
+    }
+
+    public void Scrub(int axis, double pixels, KeyModifiers modifiers)
+    {
+    }
+
+    public void EndScrub()
+    {
+    }
 }
 
 /// <summary>
 /// An asset reference (see docs/rendering/assets.md#asset-fields): the asset's name, which shows it in the content browser, and
 /// with an editor, a button that picks from the assets of the field's kind, a drop of one from the content browser,
-/// and a button that clears it. An asset that is not in the content shows as missing, with its GUID.
+/// and a button that clears it. An asset that is not in the content shows as missing, with its GUID. A built-in value
+/// of the field shows as itself.
 /// </summary>
 sealed class AssetView : ReferenceView
 {
@@ -704,6 +768,14 @@ sealed class AssetView : ReferenceView
         void ShowMenu()
         {
             var menu = new MenuFlyout();
+            foreach (var builtin in assets.Builtins)
+            {
+                menu.Items.Add(new MenuItem { Header = builtin, Command = new RelayCommand(() => editor.SetAsset(builtin)) });
+            }
+            if (assets.Builtins.Count > 0)
+            {
+                menu.Items.Add(new Separator());
+            }
             foreach (var asset in assets.Choices)
             {
                 var guid = asset.Guid;
@@ -711,16 +783,16 @@ sealed class AssetView : ReferenceView
                 ToolTip.SetTip(item, Content.AssetIndex.IsSubasset(asset) ? $"{asset.Root}/{asset.Path}" : $"{asset.Root}/{Content.AssetIndex.Parent(asset.Path)}");
                 menu.Items.Add(item);
             }
-            if (menu.Items.Count == 0)
+            if (menu.Items.Count == assets.Builtins.Count)
             {
-                menu.Items.Add(new MenuItem { Header = assets.Kind == "" ? "No assets" : $"No {assets.Kind} assets", IsEnabled = false });
+                menu.Items.Add(new MenuItem { Header = assets.Kind == "" ? "No assets" : $"No {assets.Kind.Replace('_', ' ')} assets", IsEnabled = false });
             }
             menu.ShowAt(pick);
         }
-        pick = Kit.SmallButton("…", assets.Kind == "" ? "Pick an asset" : $"Pick a {assets.Kind}", ShowMenu);
+        pick = Kit.SmallButton("…", $"Pick {assets.Noun}", ShowMenu);
         MakeEditable(() => editor.SetAsset(""),
             e => Dropped(e) is { } guid ? () => editor.SetAsset(guid) : null,
-            assets.Kind == "" ? "Drag an asset here from the content browser" : $"Drag a {assets.Kind} here from the content browser",
+            $"Drag {assets.Noun} here from the content browser",
             pick);
     }
 
@@ -728,12 +800,15 @@ sealed class AssetView : ReferenceView
     string? Dropped(DragEventArgs e) =>
         ContentBrowserView.Dropped(e) is { } guid && _assets.Index.Find(guid) is { } asset && _assets.Takes(asset) ? guid : null;
 
-    public override void Show(FieldDisplay value)
+    public override void Show(FieldDisplay value) => Show(value.Text);
+
+    /// <summary>Shows a GUID, a built-in, or "" for none.</summary>
+    public void Show(string value)
     {
-        _guid = value.Text;
-        var asset = _guid == "" ? null : _assets.Index.Find(_guid);
-        Text.Text = _guid == "" ? "None" : asset != null ? Content.AssetIndex.DisplayName(asset) : "Missing asset";
-        SetTooltip(Text, _guid == "" ? null : asset != null ? $"{asset.Root}/{asset.Path}\n{_guid}" : $"No asset in the content has the GUID {_guid}");
-        ShowState(linked: asset != null, clearable: _guid != "");
+        _guid = value;
+        var (text, tooltip, linked) = _assets.Describe(value);
+        Text.Text = text;
+        SetTooltip(Text, tooltip);
+        ShowState(linked, clearable: value != "" && _assets.Clearable);
     }
 }

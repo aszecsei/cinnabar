@@ -236,7 +236,7 @@ sealed class UiDetails : ScrollViewer
             case "color" or "paint":
                 return ColorEditor(info, value, placeholder, Commit, node, style);
             case "guid":
-                return AssetEditor(info.Name == "font" ? AssetKind.Font : AssetKind.Texture, value, set);
+                return AssetEditor(info.Name == "font" ? "font" : "texture", value, set);
             case "length":
                 var length = new DockPanel();
                 var menu = new MenuFlyout();
@@ -270,24 +270,18 @@ sealed class UiDetails : ScrollViewer
     };
 
     // A font or a texture, by its GUID after $, from the assets of its kind.
-    Control AssetEditor(AssetKind kind, string value, Action<string?> set)
+    Control AssetEditor(string kind, string value, Action<string?> set)
     {
-        var assets = _shell.Assets.Assets.Values.Where(a => a.Kind == kind).OrderBy(a => a.Path).ToList();
-        var names = new List<string> { Unset };
-        var guids = new List<string?> { null };
-        foreach (var a in assets)
-        {
-            names.Add(a.Subasset != "" ? $"{Path.GetFileName(a.Path)} {a.Subasset}" : Path.GetFileName(a.Path));
-            guids.Add("$" + a.Guid);
-        }
-        if (value != "" && !guids.Contains(value))
-        {
-            names.Add($"missing {value}");
-            guids.Add(value);
-        }
-        var selected = value == "" ? Unset : names[guids.IndexOf(value)];
-        return Choice(names, selected, pick => set(guids[names.IndexOf(pick)]));
+        var view = new AssetView(new AssetContext(_shell.Assets, kind, _shell.Content.RevealAsset), new ValueSink(picked => set(AssetStored(picked))));
+        view.Show(AssetShown(value));
+        return view.Control;
     }
+
+    /// <summary>A font's or a texture's attribute as its asset view shows it: the GUID without its "$", "" when unset, or text that is not one, which shows as missing.</summary>
+    internal static string AssetShown(string value) => value.StartsWith('$') ? value[1..] : value;
+
+    /// <summary>The attribute that a font's or a texture's asset view sets: "$" and the GUID, or null to unset it.</summary>
+    internal static string? AssetStored(string picked) => picked == "" ? null : "$" + picked;
 
     // A color: its text, and a swatch that opens a picker of hue, saturation, value and alpha, whose session is one
     // undo entry. A gradient's text is edited as text.
