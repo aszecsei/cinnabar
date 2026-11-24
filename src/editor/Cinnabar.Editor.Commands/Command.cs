@@ -29,6 +29,13 @@ public class Command
     /// <summary>The default key gesture, such as <c>Ctrl+Shift+P</c>. Key bindings can replace it.</summary>
     public string? Shortcut { get; init; }
 
+    /// <summary>
+    /// The scopes in which <see cref="Shortcut"/> works, by their names in <see cref="Commands.ShortcutScopes"/>, such as
+    /// the viewport for W, or null for a shortcut of the whole window. A key that the scope's control has does not reach
+    /// the window, so W in the outliner does not change the tool.
+    /// </summary>
+    public IReadOnlyList<string>? ShortcutScopes { get; init; }
+
     public Func<bool>? CanExecuteWhen { get; init; }
 
     public Func<bool>? IsCheckedWhen { get; init; }

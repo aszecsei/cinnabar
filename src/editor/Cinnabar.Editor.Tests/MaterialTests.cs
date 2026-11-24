@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Input;
+using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Maths;
@@ -370,6 +371,33 @@ public sealed class MaterialTests : IDisposable
         shell.Commands.Leave(canvas);
         Assert.True(delete.Execute());
         Assert.Empty(shell.Scene.Scene.Entities);
+    }
+
+    [Fact]
+    public void FrameSelectedAndAddNodeWithTheCanvasFocusedActOnTheGraph()
+    {
+        using var shell = NewShell(DoorScene);
+        var editor = shell.OpenMaterial(shell.Assets.Find(MaterialGuid)!)!;
+        var canvas = new GraphCanvas(shell, editor);
+        var frame = shell.Commands.Get(EditorCommands.FrameSelected);
+        var addNode = shell.Commands.Get(EditorCommands.AddNode);
+
+        // Without a focused canvas, Frame Selected is the scene's, which needs a selection, and Add Node has nothing to do.
+        shell.Selection.Set([]);
+        Assert.False(frame.CanExecute);
+        Assert.False(addNode.CanExecute);
+
+        // The canvas's F and Space are those commands, which it takes while it has the keyboard.
+        Assert.Equal([ShortcutScopes.Viewport, ShortcutScopes.Canvas], shell.KeyBindings.ScopesOf(EditorCommands.FrameSelected));
+        Assert.Contains((EditorCommands.FrameSelected, "F"), shell.KeyBindings.InScope(ShortcutScopes.Canvas));
+        Assert.Contains((EditorCommands.AddNode, "Space"), shell.KeyBindings.InScope(ShortcutScopes.Canvas));
+        shell.Commands.Focus(canvas);
+        Assert.True(frame.CanExecute);
+        Assert.True(addNode.CanExecute);
+        // The scene's Frame Selected cannot run without a selection, so this ran the canvas's.
+        Assert.True(frame.Execute());
+        shell.Commands.Leave(canvas);
+        Assert.False(addNode.CanExecute);
     }
 
     EditorShell NewShell(string? scene = null)

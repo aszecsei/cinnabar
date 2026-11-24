@@ -160,7 +160,7 @@ New geometry starts as a primitive or as a drawn polygon. Both are generators in
 
 ## Texture tools
 
-The texture tools edit faces' `Mapping`s: pure functions on a mapping in `MeshTexture` (`Cinnabar.Editor.Mesh`), which the shell runs on the selected faces of every edited mesh as one undo entry. Each directional one is a command of its own, so that a key binding can run it and the command palette has it: `texture.shiftLeft`, `texture.shiftRight`, `texture.shiftUp`, `texture.shiftDown`, `texture.rotateLeft`, `texture.rotateRight`, `texture.scaleUp`, `texture.scaleDown`. In the viewport the arrows shift, `,` and `.` rotate and `-` and `=` scale, with Shift making the step ten times and Ctrl a tenth, as the properties panel's drags do.
+The texture tools edit faces' `Mapping`s: pure functions on a mapping in `MeshTexture` (`Cinnabar.Editor.Mesh`), which the shell runs on the selected faces of every edited mesh as one undo entry. Each directional one is a command of its own, so that a key binding can run it and the command palette has it: `texture.shiftLeft`, `texture.shiftRight`, `texture.shiftUp`, `texture.shiftDown`, `texture.rotateLeft`, `texture.rotateRight`, `texture.scaleUp`, `texture.scaleDown`. In the viewport the arrows shift, `,` and `.` rotate and `-` and `=` scale. Each has two more commands, for the keys with Shift, which make the step ten times, and with Ctrl, which make it a tenth, as the properties panel's drags do: `texture.shiftLeft10` and `texture.shiftLeftFine`, and so on. These keys are the commands' shortcuts in the viewport's scope (see [Commands](shell-and-panels.md#commands)).
 
 | Tool | What it does |
 |---|---|

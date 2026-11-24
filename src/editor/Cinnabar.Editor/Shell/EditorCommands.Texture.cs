@@ -9,14 +9,24 @@ static partial class EditorCommands
     {
         var commands = shell.Commands;
         // The texture tools (see docs/editor/mesh-editing.md#texture-tools), on the selected faces.
-        TextureCommand(shell, TextureShiftLeft, "Shift Left", "move", () => shell.Mesh.Texture.ShiftTexture(1, 0), "Move the texture left on the selected faces by an eighth of a repeat. Left arrow in the viewport; Shift for ten times, Ctrl for a tenth.");
-        TextureCommand(shell, TextureShiftRight, "Shift Right", "move", () => shell.Mesh.Texture.ShiftTexture(-1, 0), "Move the texture right on the selected faces by an eighth of a repeat. Right arrow in the viewport.");
-        TextureCommand(shell, TextureShiftUp, "Shift Up", "move", () => shell.Mesh.Texture.ShiftTexture(0, 1), "Move the texture up on the selected faces by an eighth of a repeat. Up arrow in the viewport.");
-        TextureCommand(shell, TextureShiftDown, "Shift Down", "move", () => shell.Mesh.Texture.ShiftTexture(0, -1), "Move the texture down on the selected faces by an eighth of a repeat. Down arrow in the viewport.");
-        TextureCommand(shell, TextureRotateLeft, "Rotate Left", "rotate", () => shell.Mesh.Texture.RotateTexture(1), "Turn the texture on the selected faces by 15 degrees. , in the viewport.");
-        TextureCommand(shell, TextureRotateRight, "Rotate Right", "rotate", () => shell.Mesh.Texture.RotateTexture(-1), "Turn the texture on the selected faces by 15 degrees the other way. . in the viewport.");
-        TextureCommand(shell, TextureScaleUp, "Scale Up", "scale-tool", () => shell.Mesh.Texture.ScaleTexture(1), "Make the texture larger on the selected faces by a quarter. = in the viewport.");
-        TextureCommand(shell, TextureScaleDown, "Scale Down", "scale-tool", () => shell.Mesh.Texture.ScaleTexture(-1), "Make the texture smaller on the selected faces by a quarter. - in the viewport.");
+        // The directional ones have the viewport's keys: the step alone, ten times with Shift, and a tenth with Ctrl.
+        (string Id, string Label, string Icon, string Key, Func<double, bool> Run, string Description)[] directional =
+        [
+            (TextureShiftLeft, "Shift Left", "move", "Left", m => shell.Mesh.Texture.ShiftTexture(1, 0, m), "Move the texture left on the selected faces by an eighth of a repeat."),
+            (TextureShiftRight, "Shift Right", "move", "Right", m => shell.Mesh.Texture.ShiftTexture(-1, 0, m), "Move the texture right on the selected faces by an eighth of a repeat."),
+            (TextureShiftUp, "Shift Up", "move", "Up", m => shell.Mesh.Texture.ShiftTexture(0, 1, m), "Move the texture up on the selected faces by an eighth of a repeat."),
+            (TextureShiftDown, "Shift Down", "move", "Down", m => shell.Mesh.Texture.ShiftTexture(0, -1, m), "Move the texture down on the selected faces by an eighth of a repeat."),
+            (TextureRotateLeft, "Rotate Left", "rotate", "OemComma", m => shell.Mesh.Texture.RotateTexture(1, m), "Turn the texture on the selected faces by 15 degrees."),
+            (TextureRotateRight, "Rotate Right", "rotate", "OemPeriod", m => shell.Mesh.Texture.RotateTexture(-1, m), "Turn the texture on the selected faces by 15 degrees the other way."),
+            (TextureScaleUp, "Scale Up", "scale-tool", "OemPlus", m => shell.Mesh.Texture.ScaleTexture(1, m), "Make the texture larger on the selected faces by a quarter."),
+            (TextureScaleDown, "Scale Down", "scale-tool", "OemMinus", m => shell.Mesh.Texture.ScaleTexture(-1, m), "Make the texture smaller on the selected faces by a quarter."),
+        ];
+        foreach (var (id, label, icon, key, run, description) in directional)
+        {
+            TextureCommand(shell, id, label, icon, () => run(1), description, key);
+            TextureCommand(shell, id + Times10, $"{label} ×10", icon, () => run(10), $"{description} Ten times the step.", $"Shift+{key}");
+            TextureCommand(shell, id + Fine, $"{label} Fine", icon, () => run(0.1), $"{description} A tenth of the step.", $"Ctrl+{key}");
+        }
         TextureCommand(shell, TextureResetScale, "Reset Scale", "reset", shell.Mesh.Texture.ResetTextureScale, "Set the selected faces' scale from their texture's size at the project's texel density, so the dev grid's lines meet the grid again.");
         TextureCommand(shell, TextureAlignWorld, "Align World", "world", () => shell.Mesh.Texture.AlignTexture(TextureAlignment.World), "Set the selected faces' texture axes from each face's normal's nearest world axis, so neighbors across a right angle share a seam.");
         TextureCommand(shell, TextureAlignFace, "Align Face", "mesh", () => shell.Mesh.Texture.AlignTexture(TextureAlignment.Face), "Set the selected faces' texture axes from each face's own plane, with u along its longest edge.");
@@ -61,11 +71,19 @@ static partial class EditorCommands
         });
     }
 
-    static void TextureCommand(EditorShell shell, string id, string label, string icon, Func<bool> run, string description) =>
+    /// <summary>The ending of the ID of a directional texture command that takes ten steps, as Shift does in the viewport.</summary>
+    public const string Times10 = "10";
+
+    /// <summary>The ending of the ID of a directional texture command that takes a tenth of a step, as Ctrl does in the viewport.</summary>
+    public const string Fine = "Fine";
+
+    static void TextureCommand(EditorShell shell, string id, string label, string icon, Func<bool> run, string description, string? viewportKey = null) =>
         shell.Commands.Register(new Command(id, label, () => run())
         {
             Description = description,
             Icon = icon,
+            Shortcut = viewportKey,
+            ShortcutScopes = viewportKey == null ? null : [ShortcutScopes.Viewport],
             CanExecuteWhen = () => shell.Mesh.Texture.CanRunTextureTool,
         });
 }

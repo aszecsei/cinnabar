@@ -166,7 +166,7 @@ public sealed class CutsceneEditorView : DockPanel
         foreach (var id in (string[])[EditorCommands.CutsceneAddBindingSelected, EditorCommands.CutsceneSpawnPrefab, EditorCommands.CutsceneAddSlot])
         {
             var command = shell.Commands.Get(id);
-            var item = new MenuItem { Header = command.Label.Replace("Add Binding: ", "", StringComparison.Ordinal), InputGesture = command.Shortcut is { } s ? KeyGesture.Parse(s) : null };
+            var item = new MenuItem { Header = command.Label.Replace("Add Binding: ", "", StringComparison.Ordinal), InputGesture = CommandViews.ParseGesture(shell.KeyBindings.ShortcutOf(id)) };
             item.Click += (_, _) => command.Execute();
             addMenu.Items.Add(item);
             addItems.Add((item, command));

@@ -110,7 +110,7 @@ public sealed class CommandPalette : Grid
     Control Row(Command command)
     {
         var label = command.IsToggle ? $"{command.Label}{(command.IsChecked ? "  (on)" : "")}" : command.Label;
-        var shortcut = new TextBlock { Text = _views.KeyBindings.ShortcutOf(command.Id) ?? "", Classes = { "dim" } };
+        var shortcut = new TextBlock { Text = _views.KeyBindings.Describe(command.Id) ?? "", Classes = { "dim" } };
         var row = new DockPanel { Opacity = command.CanExecute ? 1 : 0.45 };
         DockPanel.SetDock(shortcut, DockSide.Right);
         row.Children.Add(shortcut);

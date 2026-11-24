@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Cinnabar.Editor.Commands;
+using Cinnabar.Editor.Shell;
 
 namespace Cinnabar.Editor.Ribbon;
 
@@ -68,6 +69,33 @@ sealed class ShortcutCommand(ICommand command, KeyGesture gesture, Func<bool> ga
     public void Execute(object? parameter) => command.Execute(parameter);
 }
 
+/// <summary>
+/// The shortcuts of a scope on its control (see <see cref="Commands.ShortcutScopes"/>), which Avalonia runs before the
+/// window's. A scope's key is the scope's: when its command cannot run now, the key does nothing, and does not reach the
+/// window, as Tab in the viewport outside a mesh does not move the keyboard. The key passes on only while the game has
+/// the keys, while a text box uses it, or while <c>keysFree</c> says the control needs it for itself, as a flight does
+/// the keys that fly.
+/// </summary>
+static class ScopeShortcuts
+{
+    public static void Attach(Control control, string scope, EditorShell shell, Func<Key, bool>? keysFree = null)
+    {
+        foreach (var (id, shortcut) in shell.KeyBindings.InScope(scope))
+        {
+            if (CommandViews.ParseGesture(shortcut) is not { } gesture)
+            {
+                continue;
+            }
+            var free = keysFree;
+            var command = new CommunityToolkit.Mvvm.Input.RelayCommand(
+                () => shell.Commands.Find(id)?.Execute(),
+                () => (free == null || free(gesture.Key))
+                    && TopLevel.GetTopLevel(control)?.FocusManager?.GetFocusedElement() is not TextBox);
+            control.KeyBindings.Add(new KeyBinding { Gesture = gesture, Command = new ShortcutCommand(command, gesture, () => shell.GameHasKeys, () => false) });
+        }
+    }
+}
+
 /// <summary>What views of commands share: one adapter per command, icons, shortcuts and tooltips.</summary>
 sealed class CommandViews(CommandRegistry commands, KeyBindings keyBindings)
 {
@@ -105,7 +133,7 @@ sealed class CommandViews(CommandRegistry commands, KeyBindings keyBindings)
 
     public string Tooltip(Command command)
     {
-        var shortcut = KeyBindings.ShortcutOf(command.Id);
+        var shortcut = KeyBindings.Describe(command.Id);
         var title = shortcut == null ? command.Label : $"{command.Label} ({shortcut})";
         return command.Description == null ? title : $"{title}\n{command.Description}";
     }

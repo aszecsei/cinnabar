@@ -12,7 +12,9 @@ static partial class EditorCommands
         // tools' are.
         commands.Register(new Command(EditMesh, "Edit Mesh", shell.Mesh.ToggleMeshMode)
         {
-            Description = "Edit the selected entities' mesh files: select their vertices, edges and faces and move them. Tab in the viewport enters and leaves.",
+            Description = "Edit the selected entities' mesh files: select their vertices, edges and faces and move them, or go back to the entities.",
+            Shortcut = "Tab",
+            ShortcutScopes = [ShortcutScopes.Viewport],
             Icon = "mesh",
             CanExecuteWhen = () => shell.Mesh.CanEditMesh,
             IsCheckedWhen = () => shell.Mesh.InMeshMode,
@@ -23,9 +25,9 @@ static partial class EditorCommands
             Icon = "select",
             CanExecuteWhen = () => shell.Mesh.InMeshMode,
         });
-        ElementCommand(shell, MeshVertices, MeshElement.Vertices, "Vertices", "vertex", "Select and move vertices. 1 in the viewport.");
-        ElementCommand(shell, MeshEdges, MeshElement.Edges, "Edges", "edge", "Select and move edges. 2 in the viewport.");
-        ElementCommand(shell, MeshFaces, MeshElement.Faces, "Faces", "face", "Select and move faces. 3 in the viewport.");
+        ElementCommand(shell, MeshVertices, MeshElement.Vertices, "Vertices", "vertex", "D1", "Select and move vertices.");
+        ElementCommand(shell, MeshEdges, MeshElement.Edges, "Edges", "edge", "D2", "Select and move edges.");
+        ElementCommand(shell, MeshFaces, MeshElement.Faces, "Faces", "face", "D3", "Select and move faces.");
         commands.Register(new Command(MeshBlock, "Block", () =>
         {
             if (shell.Mesh.MeshTool == MeshTool.Create && shell.Mesh.Tools.Primitive == PrimitiveKind.Block)
@@ -104,10 +106,12 @@ static partial class EditorCommands
         });
     }
 
-    static void ElementCommand(EditorShell shell, string id, MeshElement kind, string label, string icon, string description) =>
+    static void ElementCommand(EditorShell shell, string id, MeshElement kind, string label, string icon, string shortcut, string description) =>
         shell.Commands.Register(new Command(id, label, () => shell.Mesh.SetMeshElement(kind))
         {
             Description = description,
+            Shortcut = shortcut,
+            ShortcutScopes = [ShortcutScopes.Viewport],
             Icon = icon,
             CanExecuteWhen = () => shell.Mesh.InMeshMode,
             IsCheckedWhen = () => shell.Mesh.InMeshMode && shell.Mesh.MeshElement == kind,
@@ -193,13 +197,17 @@ static partial class EditorCommands
         });
         commands.Register(new Command(MeshGridFiner, "Finer Grid", shell.Mesh.FinerGrid)
         {
-            Description = "Halve the grid's size, down to 1/64 m. [ in the viewport.",
+            Description = "Halve the grid's size, down to 1/64 m.",
+            Shortcut = "OemOpenBrackets",
+            ShortcutScopes = [ShortcutScopes.Viewport],
             Icon = "chevron-down",
             CanExecuteWhen = () => shell.Mesh.GridSize > MeshGrid.MinSize,
         });
         commands.Register(new Command(MeshGridCoarser, "Coarser Grid", shell.Mesh.CoarserGrid)
         {
-            Description = "Double the grid's size, up to 16 m. ] in the viewport.",
+            Description = "Double the grid's size, up to 16 m.",
+            Shortcut = "OemCloseBrackets",
+            ShortcutScopes = [ShortcutScopes.Viewport],
             Icon = "collapse",
             CanExecuteWhen = () => shell.Mesh.GridSize < MeshGrid.MaxSize,
         });

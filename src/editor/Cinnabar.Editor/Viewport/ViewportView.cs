@@ -120,6 +120,7 @@ public sealed class ViewportView : Grid
         Background = Brushes.Black;
         Focusable = true;
         ClipToBounds = true;
+        ScopeShortcuts.Attach(this, Commands.ShortcutScopes.Viewport, shell, KeysFree);
         _control = new ViewportControl { Session = _session };
         Children.Add(_control);
         _guides = new FrameGuidesOverlay(_control, GuideState);
@@ -1011,53 +1012,12 @@ public sealed class ViewportView : Grid
             e.Handled = true;
             return;
         }
-        // The texture tools' keys, on the selected faces (see docs/editor/mesh-editing.md#texture-tools): Shift makes the
-        // step ten times and Ctrl a tenth.
-        if (_shell.Mesh.Texture.CanRunTextureTool && (e.KeyModifiers & ~(KeyModifiers.Shift | KeyModifiers.Control)) == 0)
-        {
-            var multiplier = e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? 10 : e.KeyModifiers.HasFlag(KeyModifiers.Control) ? 0.1 : 1;
-            var ran = e.Key switch
-            {
-                Key.Left => _shell.Mesh.Texture.ShiftTexture(1, 0, multiplier),
-                Key.Right => _shell.Mesh.Texture.ShiftTexture(-1, 0, multiplier),
-                Key.Up => _shell.Mesh.Texture.ShiftTexture(0, 1, multiplier),
-                Key.Down => _shell.Mesh.Texture.ShiftTexture(0, -1, multiplier),
-                Key.OemComma => _shell.Mesh.Texture.RotateTexture(1, multiplier),
-                Key.OemPeriod => _shell.Mesh.Texture.RotateTexture(-1, multiplier),
-                Key.OemPlus => _shell.Mesh.Texture.ScaleTexture(1, multiplier),
-                Key.OemMinus => _shell.Mesh.Texture.ScaleTexture(-1, multiplier),
-                _ => (bool?)null,
-            };
-            if (ran != null)
-            {
-                e.Handled = true;
-                return;
-            }
-        }
+        // The tools', mesh mode's and the texture tools' keys are the view's scoped shortcuts (see KeysFree), which come
+        // before this. What is left is Esc, Enter and Backspace, which the gestures and the mesh tools' points have.
         if (e.KeyModifiers != KeyModifiers.None)
         {
             return;
         }
-        var command = e.Key switch
-        {
-            Key.Q => EditorCommands.SelectTool,
-            Key.W => EditorCommands.MoveTool,
-            Key.E => EditorCommands.RotateTool,
-            Key.R => EditorCommands.ScaleTool,
-            Key.N => EditorCommands.NavPathTool,
-            Key.L => EditorCommands.LandscapeTool,
-            Key.X => EditorCommands.LocalSpace,
-            Key.F => EditorCommands.FrameSelected,
-            Key.H => EditorCommands.HideSelected,
-            // Mesh mode's keys (see docs/editor/mesh-editing.md#mesh-mode).
-            Key.Tab => EditorCommands.EditMesh,
-            Key.D1 when _shell.Mesh.InMeshMode => EditorCommands.MeshVertices,
-            Key.D2 when _shell.Mesh.InMeshMode => EditorCommands.MeshEdges,
-            Key.D3 when _shell.Mesh.InMeshMode => EditorCommands.MeshFaces,
-            Key.OemOpenBrackets => EditorCommands.MeshGridFiner,
-            Key.OemCloseBrackets => EditorCommands.MeshGridCoarser,
-            _ => null,
-        };
         if (e.Key == Key.Escape && _gesture == Gesture.Gizmo)
         {
             _shell.CancelGizmo();
@@ -1107,12 +1067,11 @@ public sealed class ViewportView : Grid
             _shell.Mesh.Tools.RemoveLastToolPoint();
             e.Handled = true;
         }
-        else if (command != null)
-        {
-            _shell.Commands.Get(command).Execute();
-            e.Handled = true;
-        }
     }
+
+    // Whether the view's scoped shortcuts may have a key (see docs/editor/shell-and-panels.md#commands): not while the game has the
+    // keys or in the Game view, and not a key that flies while it is the camera's, so that it reaches OnKeyDown's _held.
+    bool KeysFree(Key key) => !InputGoesToGame && !_viewport.IsGame && _gesture != Gesture.Fly && !_held.Contains(key);
 
     protected override void OnKeyUp(KeyEventArgs e)
     {
