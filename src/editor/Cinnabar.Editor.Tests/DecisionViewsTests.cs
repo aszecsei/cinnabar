@@ -70,7 +70,7 @@ public sealed class DecisionViewsTests : IDisposable
         _ = editor.PlanQuery();
         foreach (var node in editor.Document.Graph.Nodes)
         {
-            _ = DecisionNodeDetails.FieldsOf(editor.Technique, node.Kind);
+            _ = DecisionFields.Of(editor.Technique, node.Kind);
             if (node.Kind == "consideration")
             {
                 _ = ResponseCurve.Of(node).Handles();
