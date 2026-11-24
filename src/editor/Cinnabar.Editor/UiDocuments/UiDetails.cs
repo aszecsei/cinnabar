@@ -109,13 +109,8 @@ sealed class UiDetails : ScrollViewer
         }
         else
         {
-            _panel.Children.Add(Row("id", ValueBox(node.Id, "none", id =>
-            {
-                if (!_editor.SetId(node.Index, id))
-                {
-                    Rebuild();
-                }
-            })));
+            _panel.Children.Add(Row("id", ValueBox(node.Id, ValueFormats.Text, "none", id => _editor.SetId(node.Index, id),
+                "not an id, or another element has it")));
             if (node.Kind is not ("ui" or "template"))
             {
                 var names = node.Element.Get("style") ?? "";
@@ -177,13 +172,8 @@ sealed class UiDetails : ScrollViewer
         _panel.Children.Add(Heading($"<style> {style.Name}"));
         if (style.State == "")
         {
-            _panel.Children.Add(Row("name", ValueBox(style.Name, "", name =>
-            {
-                if (!_editor.RenameStyle(style.Name, name))
-                {
-                    Rebuild();
-                }
-            })));
+            _panel.Children.Add(Row("name", ValueBox(style.Name, ValueFormats.Text, "", name => _editor.RenameStyle(style.Name, name),
+                "not a name for a style, or another style has it")));
         }
         var takers = _editor.TakersOf(style.Name).Select(UiCascade.Label).ToList();
         _panel.Children.Add(Dim(takers.Count == 0 ? "No element takes it." : $"Taken by {string.Join(", ", takers)}"));
@@ -315,13 +305,7 @@ sealed class UiDetails : ScrollViewer
         flyout.Opened += (_, _) => _editor.BeginScrub($"Set {info.Name}");
         flyout.Closed += (_, _) => _editor.EndScrub();
         button.Flyout = flyout;
-        var panel = new DockPanel();
-        DockPanel.SetDock(button, Avalonia.Controls.Dock.Left);
-        panel.Children.Add(button);
-        var box = ValueBox(value, placeholder, commit);
-        box.Margin = new Thickness(4, 0, 0, 0);
-        panel.Children.Add(box);
-        return panel;
+        return WithSwatch(button, ValueBox(value, placeholder, commit));
     }
 
     static SelectableTextBlock ProblemText(UiProblem p) => new()

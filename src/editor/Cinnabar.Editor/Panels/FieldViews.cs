@@ -135,7 +135,11 @@ abstract class FieldView
 
     protected static void SetTooltip(Control control, string? tooltip) => ToolTip.SetTip(control, tooltip);
 
-    /// <summary>A box that edits on Enter or when it loses focus, and puts the value back on Escape.</summary>
+    /// <summary>
+    /// A box that edits on Enter or when it loses focus, and puts the value back on Escape, as <see cref="CommitBox"/>
+    /// does. <paramref name="current"/> is the value as the game last sent it. A text that the editor refuses puts it
+    /// back; the editor says why in the console.
+    /// </summary>
     protected static TextBox EditBox(bool numeric, Func<string, bool> commit, Func<string> current)
     {
         var box = new TextBox
@@ -144,62 +148,7 @@ abstract class FieldView
             TextAlignment = numeric ? TextAlignment.Right : TextAlignment.Left,
             VerticalContentAlignment = VerticalAlignment.Center,
         };
-        // What the box had when it took the focus, or after its last commit: a commit is of a text that differs from it.
-        // The value that shows is not what to compare with. It is the game's, formatted, such as 45° for a typed 45, so
-        // a box that committed on Enter and kept the focus differed from it, and committed again when it lost the
-        // focus: a second undo entry for one edit. And a focused box does not follow the value, so after a scrub of
-        // its field by the name, its old text differed too, and losing the focus put the old value back.
-        string? baseline = null;
-        var committed = false;
-        void Commit()
-        {
-            var text = box.Text ?? "";
-            if (text == (baseline ?? current()))
-            {
-                return;
-            }
-            if (commit(text))
-            {
-                baseline = text;
-                committed = true;
-            }
-            else
-            {
-                box.Text = current();
-                baseline = box.Text;
-            }
-        }
-        box.GotFocus += (_, _) =>
-        {
-            baseline = box.Text ?? "";
-            committed = false;
-        };
-        box.KeyDown += (_, e) =>
-        {
-            switch (e.Key)
-            {
-                case Key.Enter:
-                    Commit();
-                    e.Handled = true;
-                    break;
-                case Key.Escape:
-                    box.Text = current();
-                    baseline = box.Text;
-                    e.Handled = true;
-                    break;
-            }
-        };
-        box.LostFocus += (_, _) =>
-        {
-            Commit();
-            // A box that committed nothing shows the value again, which may have changed under it. One that committed
-            // keeps its text until the game's value comes, which is the next thing that it shows.
-            if (!committed)
-            {
-                box.Text = current();
-            }
-            baseline = null;
-        };
+        CommitBox.Attach(box, text => commit(text) ? Verdict.Took : Verdict.Refused(null), current);
         return box;
     }
 

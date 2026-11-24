@@ -217,13 +217,7 @@ sealed class GoapView : ScrollViewer
                 box.IsCheckedChanged += (_, _) => _editor.SetPlanValue(name, box.IsChecked == true ? 1 : 0);
                 return box;
             case "int":
-                return ValueBox(value.ToString(System.Globalization.CultureInfo.InvariantCulture), "0", text =>
-                {
-                    if (int.TryParse(text.Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var v))
-                    {
-                        _editor.SetPlanValue(name, v);
-                    }
-                });
+                return ValueBox(ValueFormats.Integer().Format(value), ValueFormats.Integer(), "0", v => _editor.SetPlanValue(name, v));
             case "enum":
                 var values = key.Values.ToList();
                 return Choice(values, value >= 0 && value < values.Count ? values[value] : null, picked => _editor.SetPlanValue(name, values.IndexOf(picked)));

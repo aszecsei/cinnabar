@@ -92,31 +92,15 @@ sealed class ParametersPanel : ScrollViewer
         return panel;
     }
 
-    bool CheckName(string old, string name)
-    {
-        if (name == old)
-        {
-            return true;
-        }
-        if (!MaterialFile.IsIdentifier(name) || _editor.Document.Graph.NameTaken(name))
-        {
-            _shell.Console.Add(Model.LogLevel.Warning, $"material: {name} is not a name, or another parameter or switch has it");
-            Rebuild();
-            return false;
-        }
-        return true;
-    }
+    // A parameter's or a switch's name: its own, or one that no other has.
+    IValueFormat<string> NameOf(string old) => ValueFormats.Text.Where(
+        text => text.Trim() == old || (MaterialFile.IsIdentifier(text.Trim()) && !_editor.Document.Graph.NameTaken(text.Trim())),
+        "not a name, or another parameter or switch has it");
 
     Control ParamView(MaterialParam p)
     {
         var panel = new StackPanel { Spacing = 2 };
-        var name = ValueBox(p.Name, "name", text =>
-        {
-            if (CheckName(p.Name, text.Trim()))
-            {
-                _editor.SetParam(p.Name, p with { Name = text.Trim() });
-            }
-        });
+        var name = ValueBox(p.Name, NameOf(p.Name), "name", text => _editor.SetParam(p.Name, p with { Name = text.Trim() }));
         var type = Choice(MaterialGraph.ParamTypes, p.Type, t => _editor.SetParam(p.Name, p with { Type = t, Value = DefaultOf(t) }));
         type.Width = 96;
         var node = SmallButton("→", "Add a node that reads it", () =>
@@ -163,29 +147,8 @@ sealed class ParametersPanel : ScrollViewer
             "float3" => 3,
             _ => 4,
         };
-        var box = ValueBox(p.Value, DefaultOf(p.Type), text =>
-        {
-            if (Numbers(text, count) is { } n)
-            {
-                _editor.SetParam(p.Name, p with { Value = n.Write() });
-            }
-            else
-            {
-                _shell.Console.Add(Model.LogLevel.Warning, $"material: {p.Name} takes {count} numbers, such as {DefaultOf(p.Type)}");
-                Rebuild();
-            }
-        });
-        if (p.Type != "color" || GraphNumbers.TryParse(p.Value) is not { } color)
-        {
-            return box;
-        }
-        var line = new DockPanel();
-        var swatch = Swatch(color.Values);
-        swatch.Margin = new Thickness(0, 0, 6, 0);
-        DockPanel.SetDock(swatch, DockSide.Left);
-        line.Children.Add(swatch);
-        line.Children.Add(box);
-        return line;
+        var box = ValueBox(p.Value, ValueFormats.Numbers(count), DefaultOf(p.Type), n => _editor.SetParam(p.Name, p with { Value = n.Write() }));
+        return p.Type == "color" && GraphNumbers.TryParse(p.Value) is { } color ? WithSwatch(Swatch(color.Values), box) : box;
     }
 
     static string DefaultOf(string type) => type switch
@@ -199,13 +162,7 @@ sealed class ParametersPanel : ScrollViewer
 
     Control SwitchView(MaterialSwitch s)
     {
-        var name = ValueBox(s.Name, "name", text =>
-        {
-            if (CheckName(s.Name, text.Trim()))
-            {
-                _editor.SetSwitch(s.Name, s with { Name = text.Trim() });
-            }
-        });
+        var name = ValueBox(s.Name, NameOf(s.Name), "name", text => _editor.SetSwitch(s.Name, s with { Name = text.Trim() }));
         var on = new CheckBox { IsChecked = s.Default, Content = "On", FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
         on.IsCheckedChanged += (_, _) => _editor.SetSwitch(s.Name, s with { Default = on.IsChecked == true });
         ToolTip.SetTip(on, "Whether the material itself has it on. Instances can turn it either way, which cooks another permutation.");

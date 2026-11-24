@@ -127,34 +127,9 @@ sealed class NodeDetails : ScrollViewer
                     _ => 4,
                 };
                 var numbers = value as GraphNumbers ?? GraphNumbers.TryParse(property.Default);
-                var box = ValueBox(numbers?.Write() ?? "", property.Default, text =>
-                {
-                    if (text.Trim() == "")
-                    {
-                        Set(null);
-                    }
-                    else if (Numbers(text, count) is { } n)
-                    {
-                        Set(n);
-                    }
-                    else
-                    {
-                        _shell.Console.Add(Model.LogLevel.Warning, $"material: {property.Name} takes {count} numbers, such as {property.Default}");
-                        _shown = "";
-                        Refresh();
-                    }
-                });
-                if (property.Kind != PropertyKind.Color || numbers == null)
-                {
-                    return box;
-                }
-                var line = new DockPanel();
-                var swatch = Swatch(numbers.Values);
-                swatch.Margin = new Thickness(0, 0, 6, 0);
-                DockPanel.SetDock(swatch, DockSide.Left);
-                line.Children.Add(swatch);
-                line.Children.Add(box);
-                return line;
+                // Empty is the default.
+                var box = ValueBox(numbers?.Write() ?? "", ValueFormats.Optional(ValueFormats.Numbers(count)), property.Default, Set);
+                return property.Kind == PropertyKind.Color && numbers != null ? WithSwatch(Swatch(numbers.Values), box) : box;
             case PropertyKind.Text:
                 return ValueBox((value as GraphText)?.Text ?? TextQuote.Unquote(property.Default) ?? "", "", text => Set(new GraphText(text)));
             case PropertyKind.Code:
@@ -198,23 +173,7 @@ sealed class NodeDetails : ScrollViewer
         }
         var watermark = MaterialCatalog.DefaultText(pin);
         var value = node.Get(pin.Name) as GraphNumbers;
-        var box = ValueBox(value?.Write() ?? "", watermark, text =>
-        {
-            if (text.Trim() == "")
-            {
-                _editor.SetField(node.Id, pin.Name, null);
-            }
-            else if (Numbers(text) is { } n)
-            {
-                _editor.SetField(node.Id, pin.Name, n);
-            }
-            else
-            {
-                _shell.Console.Add(Model.LogLevel.Warning, $"material: {pin.Name} takes a number or up to four, such as 0.5 or [1, 0, 0]");
-                _shown = "";
-                Refresh();
-            }
-        });
+        var box = ValueBox(value?.Write() ?? "", ValueFormats.Optional(ValueFormats.Numbers()), watermark, n => _editor.SetField(node.Id, pin.Name, n));
         ToolTip.SetTip(box, "A number, which fills every component, or up to four, such as [1, 0.5, 0]. Empty gives the default.");
         return value != null ? Row(name, box, SmallButton("↺", "Reset to the default", () => _editor.SetField(node.Id, pin.Name, null))) : Row(name, box);
     }

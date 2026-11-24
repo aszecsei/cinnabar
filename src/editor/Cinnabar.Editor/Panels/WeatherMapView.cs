@@ -143,12 +143,12 @@ public sealed class WeatherMapView : DockPanel
         var rows = new StackPanel { Spacing = 2 };
         var sizes = WeatherMapSession.Sizes.Select(s => s.ToString(CultureInfo.InvariantCulture)).ToList();
         rows.Children.Add(Kit.Row("Size", Kit.Choice(sizes, _generation.Size.ToString(CultureInfo.InvariantCulture), s => _generation = _generation with { Size = int.Parse(s, CultureInfo.InvariantCulture) })));
-        rows.Children.Add(Kit.Row("Seed", Number(_generation.Seed, v => _generation = _generation with { Seed = (int)v })));
-        rows.Children.Add(Kit.Row("Scale", Number(_generation.Scale, v => _generation = _generation with { Scale = Math.Clamp(v, 1, 64) })));
-        rows.Children.Add(Kit.Row("Octaves", Number(_generation.Octaves, v => _generation = _generation with { Octaves = (int)Math.Clamp(v, 1, 8) })));
-        rows.Children.Add(Kit.Row("Coverage Bias", Number(_generation.CoverageBias, v => _generation = _generation with { CoverageBias = Math.Clamp(v, -1, 1) })));
-        rows.Children.Add(Kit.Row("Precipitation Bias", Number(_generation.PrecipitationBias, v => _generation = _generation with { PrecipitationBias = Math.Clamp(v, -1, 1) })));
-        rows.Children.Add(Kit.Row("Type Bias", Number(_generation.TypeBias, v => _generation = _generation with { TypeBias = Math.Clamp(v, -1, 1) })));
+        rows.Children.Add(Kit.Row("Seed", Box(_generation.Seed, ValueFormats.Integer(), v => _generation = _generation with { Seed = v })));
+        rows.Children.Add(Kit.Row("Scale", Box(_generation.Scale, Number(1, 64), v => _generation = _generation with { Scale = v })));
+        rows.Children.Add(Kit.Row("Octaves", Box(_generation.Octaves, ValueFormats.Integer(1, 8), v => _generation = _generation with { Octaves = v })));
+        rows.Children.Add(Kit.Row("Coverage Bias", Box(_generation.CoverageBias, Number(-1, 1), v => _generation = _generation with { CoverageBias = v })));
+        rows.Children.Add(Kit.Row("Precipitation Bias", Box(_generation.PrecipitationBias, Number(-1, 1), v => _generation = _generation with { PrecipitationBias = v })));
+        rows.Children.Add(Kit.Row("Type Bias", Box(_generation.TypeBias, Number(-1, 1), v => _generation = _generation with { TypeBias = v })));
         var generate = new Button { Content = "Generate", HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center };
         ToolTip.SetTip(generate, "Fill the map from noise: cells of the scale across it, with a few that rain. Without a map, write a new one under the scene's content root and name it in the clouds, as one undo entry.");
         generate.Click += (_, _) => _session.Generate(_generation);
@@ -157,14 +157,10 @@ public sealed class WeatherMapView : DockPanel
         return rows;
     }
 
-    static Control Number(double value, Action<double> set) =>
-        Kit.ValueBox(value.ToString("0.###", CultureInfo.InvariantCulture), "", text =>
-        {
-            if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
-            {
-                set(v);
-            }
-        });
+    // A value of the generation's, which refuses one outside its range.
+    static Control Box<T>(T value, IValueFormat<T> format, Action<T> set) => Kit.ValueBox(format.Format(value), format, "", set);
+
+    static IValueFormat<double> Number(double min, double max) => ValueFormats.Number(min, max, "0.###");
 
     /// <summary>
     /// The most of the panel's height that the controls take, which scroll beyond it. While a map shows, the map is

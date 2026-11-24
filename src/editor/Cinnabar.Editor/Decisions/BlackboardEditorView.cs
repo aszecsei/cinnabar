@@ -112,7 +112,8 @@ public sealed class BlackboardEditorView : DockPanel
     {
         var (name, type, values, @default) = (key.Name, key.Type, key.Values, key.Default);
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("160,100,*,Auto"), ColumnSpacing = 6 };
-        grid.Children.Add(ValueBox(name, "name", text => _ = Rename(name, text.Trim())));
+        var rename = ValueFormats.Text.Where(text => _editor.CanRename(name, text.Trim()), "not a name for a key, or another key has it");
+        grid.Children.Add(ValueBox(name, rename, "name", text => _ = Rename(name, text.Trim())));
         var choice = Choice(BlackboardFile.Types, type, t => _editor.SetKey(name, t, t == "enum" ? ["a", "b"] : [], null));
         Grid.SetColumn(choice, 1);
         grid.Children.Add(choice);
@@ -163,12 +164,6 @@ public sealed class BlackboardEditorView : DockPanel
     {
         if (newName == name)
         {
-            return;
-        }
-        if (!_editor.CanRename(name, newName))
-        {
-            _shell.Console.Add(Model.LogLevel.Warning, $"blackboard: {newName} is not a name for a key, or another key has it");
-            Rebuild();
             return;
         }
         var decisions = _editor.DecisionsReading(name);

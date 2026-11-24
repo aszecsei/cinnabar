@@ -33,12 +33,6 @@ sealed class CutsceneDetails : ScrollViewer
             .Add(() => _editor.Changed += Refresh, () => _editor.Changed -= Refresh);
     }
 
-    void Rebuild()
-    {
-        _shown = "";
-        Refresh();
-    }
-
     void Refresh()
     {
         var block = _editor.Selected;
@@ -106,15 +100,8 @@ sealed class CutsceneDetails : ScrollViewer
                     b.SetTime(Math.Min(t, _editor.File.Length ?? t));
                     CutsceneFile.SortChildren(b.Parent!);
                 }, rate));
-                _content.Children.Add(Row("Name", ValueBox(block.Name ?? "", "name", text =>
-                {
-                    if (text.Trim().Length == 0)
-                    {
-                        Rebuild();
-                        return;
-                    }
-                    _editor.EditSelected("Rename Marker", b => b.SetName(text.Trim()));
-                })));
+                _content.Children.Add(Row("Name", ValueBox(block.Name ?? "", NotEmpty("a name"), "name", text =>
+                    _editor.EditSelected("Rename Marker", b => b.SetName(text.Trim())))));
                 _content.Children.Add(Row("Color", ValueBox(block.Get("color") is { } color ? TextQuote.Unquote(color) ?? color : "", "#f5a623", text =>
                 {
                     var hex = text.Trim();
@@ -132,27 +119,14 @@ sealed class CutsceneDetails : ScrollViewer
                 continue;
             }
             var name = key;
-            _content.Children.Add(Row(name, ValueBox(value, "value", text =>
-            {
-                if (text.Trim().Length == 0)
-                {
-                    Rebuild();
-                    return;
-                }
-                _editor.EditSelected($"Set {name}", b => b.Set(name, text.Trim()));
-            }), SmallButton("×", $"Remove {name}", () => _editor.EditSelected($"Remove {name}", b => b.Set(name, null)))));
+            _content.Children.Add(Row(name, ValueBox(value, NotEmpty("a value: the × removes the field"), "value", text =>
+                _editor.EditSelected($"Set {name}", b => b.Set(name, text.Trim()))), SmallButton("×", $"Remove {name}", () => _editor.EditSelected($"Remove {name}", b => b.Set(name, null)))));
         }
         if (block.Kind is not (CutsceneBlockKind.Key or CutsceneBlockKind.Channel or CutsceneBlockKind.Marker))
         {
-            _content.Children.Add(Row("Add", ValueBox("", "name = value", text =>
+            _content.Children.Add(Row("Add", ValueBox("", ValueFormats.Text.Where(t => Field(t) != null, "a name and a value, such as name = value"), "name = value", text =>
             {
-                var at = text.IndexOf('=');
-                var (key, value) = at > 0 ? (text[..at].Trim(), text[(at + 1)..].Trim()) : ("", "");
-                if (key.Length == 0 || value.Length == 0)
-                {
-                    Rebuild();
-                    return;
-                }
+                var (key, value) = Field(text)!.Value;
                 _editor.EditSelected($"Set {key}", b => b.Set(key, value));
             })));
         }
@@ -263,22 +237,25 @@ sealed class CutsceneDetails : ScrollViewer
         Note = () => editor.KnownPrefabs().Count == 0 ? "The asset index knows no prefab yet." : null,
     };
 
-    static string Format(int ticks) => ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    static string Format(int ticks) => ValueFormats.Ticks.Format(ticks);
+
+    // A name or a field's value, which is never empty: removing a field is the × beside it.
+    static IValueFormat<string> NotEmpty(string problem) => ValueFormats.Text.Where(t => t.Trim().Length > 0, problem);
+
+    // A typed field: a name and a value, both of them there.
+    static (string Key, string Value)? Field(string text)
+    {
+        var at = text.IndexOf('=');
+        var (key, value) = at > 0 ? (text[..at].Trim(), text[(at + 1)..].Trim()) : ("", "");
+        return key.Length == 0 || value.Length == 0 ? null : (key, value);
+    }
 
     // A time in ticks, typed or scrubbed by its name a frame a pixel.
     Control TicksRow(string name, string label, Func<CutsceneBlock, int?> read, Action<CutsceneBlock, int> write, int rate)
     {
         var block = _editor.Selected!;
         var value = read(block);
-        var row = Row(name, ValueBox(value is { } v ? Format(v) : "", "ticks", text =>
-        {
-            if (!CutsceneFile.TryParseTicks(text.Trim(), out var ticks))
-            {
-                Rebuild();
-                return;
-            }
-            _editor.EditSelected(label, b => write(b, ticks));
-        }), new TextBlock
+        var row = Row(name, ValueBox(value is { } v ? Format(v) : "", ValueFormats.Ticks, "ticks", ticks => _editor.EditSelected(label, b => write(b, ticks))), new TextBlock
         {
             Text = value is { } t ? CutsceneTime.Timecode(t, rate) : "",
             Classes = { "empty" },

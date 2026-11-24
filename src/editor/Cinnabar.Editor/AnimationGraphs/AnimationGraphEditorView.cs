@@ -61,7 +61,7 @@ public sealed class AnimationGraphEditorView : DockPanel
         var rightSplit = new GridSplitter { ResizeDirection = GridResizeDirection.Columns };
         Grid.SetColumn(rightSplit, 3);
         grid.Children.Add(rightSplit);
-        var details = new AnimationNodeDetails(shell, editor);
+        var details = new AnimationNodeDetails(editor);
         Grid.SetColumn(details, 4);
         grid.Children.Add(details);
         Children.Add(grid);

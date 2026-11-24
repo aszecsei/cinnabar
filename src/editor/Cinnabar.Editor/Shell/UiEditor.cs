@@ -45,8 +45,11 @@ public sealed class UiEditor : PreviewOwner, IGraphEditor
     // REFERENCE_HEIGHT and MIN_SCALE in lib/engine/ui/ui.odin, and ui.scale's range in lib/engine/project/project.odin.
     const double ReferenceHeight = 1080;
     const double MinScale = 0.5;
-    const double MinScaleFactor = 0.25;
-    const double MaxScaleFactor = 4;
+    internal const double MinScaleFactor = 0.25;
+    internal const double MaxScaleFactor = 4;
+
+    /// <summary>The least and the most pixels across or down a screen that the document is laid out on.</summary>
+    internal const int MinScreen = 16, MaxScreen = 16384;
     public const string ScaleKey = "ui.scale";
 
     readonly Dictionary<string, string> _bindings = [];
@@ -500,7 +503,7 @@ public sealed class UiEditor : PreviewOwner, IGraphEditor
 
     public void SetScreen(int width, int height)
     {
-        Screen = (Math.Clamp(width, 16, 16384), Math.Clamp(height, 16, 16384));
+        Screen = (Math.Clamp(width, MinScreen, MaxScreen), Math.Clamp(height, MinScreen, MaxScreen));
         Fitted = true;
         SendSettings();
         ViewChanged?.Invoke();

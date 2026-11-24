@@ -547,7 +547,8 @@ public sealed class PropertiesView : ScrollViewer
         if (document != null)
         {
             var name = new TextBox { Text = document.Name, PlaceholderText = "Name", Classes = { "title-edit" } };
-            // The entity by its ID: this document's entity is old after the first edit.
+            // The entity by its ID: this document's entity is old after the first edit. A refused rename, as while the
+            // game plays, puts the name back; the shell says why in the console.
             var id = document.Id;
             Kit.CommitOnEnterOrBlur(name, text => _shell.Edit("Rename", new Rename(id, text)));
             title = name;

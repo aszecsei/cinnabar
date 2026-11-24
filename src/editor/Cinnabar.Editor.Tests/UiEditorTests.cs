@@ -46,6 +46,58 @@ public sealed class UiEditorTests : IDisposable
             [.. nodes.Select(n => new UiLayoutNode((uint)n.Node, true, [n.X0, n.Y0, n.X1, n.Y1], [n.X0 + 1, n.Y0 + 1, n.X1 - 1, n.Y1 - 1], [0, 0, 1920, 1080]))]);
 
     [Fact]
+    public void AScreenSizeThatDoesNotParseOrIsOutOfRangePutsTheValueBackWithTheProblemAsItsTip()
+    {
+        var (shell, asset, _) = Menu();
+        using var _ = shell;
+        shell.OpenAsset(asset);
+        var editor = Assert.Single(shell.UiDocuments);
+        var box = (Avalonia.Controls.TextBox)((Avalonia.Controls.Border)UiDocuments.UiEditorView.WidthBox(editor)).Child!;
+        Assert.Equal("1920", box.Text);
+
+        foreach (var typed in new[] { "wide", "8", "1,280" })
+        {
+            box.Text = typed;
+            box.RaiseEvent(new Avalonia.Input.KeyEventArgs { RoutedEvent = Avalonia.Input.InputElement.KeyDownEvent, Key = Avalonia.Input.Key.Enter });
+            Assert.Equal("1920", box.Text);
+            Assert.Equal("a whole number from 16 to 16384", Avalonia.Controls.ToolTip.GetTip(box));
+            Assert.Equal((1920, 1080), editor.Screen);
+        }
+
+        // A width that the editor takes clears the problem.
+        box.Text = "1280";
+        box.RaiseEvent(new Avalonia.Input.KeyEventArgs { RoutedEvent = Avalonia.Input.InputElement.KeyDownEvent, Key = Avalonia.Input.Key.Enter });
+        Assert.Equal((1280, 1080), editor.Screen);
+        Assert.Equal("1280", box.Text);
+        Assert.Null(Avalonia.Controls.ToolTip.GetTip(box));
+    }
+
+    [Fact]
+    public void AScreenSizeBoxPutsBackTheSizeThatAPresetSet()
+    {
+        var (shell, asset, _) = Menu();
+        using var _ = shell;
+        shell.OpenAsset(asset);
+        var editor = Assert.Single(shell.UiDocuments);
+        var border = (Avalonia.Controls.Border)UiDocuments.UiEditorView.HeightBox(editor);
+        var box = (Avalonia.Controls.TextBox)border.Child!;
+        border.IsVisible = false;
+
+        // A preset changes the size while the box is hidden, and Custom shows it again.
+        editor.SetScreen(1280, 720);
+        border.IsVisible = true;
+        Assert.Equal("720", box.Text);
+
+        box.Text = "tall";
+        box.RaiseEvent(new Avalonia.Input.KeyEventArgs { RoutedEvent = Avalonia.Input.InputElement.KeyDownEvent, Key = Avalonia.Input.Key.Enter });
+        Assert.Equal("720", box.Text);
+        editor.SetScreen(1920, 1080);
+        box.Text = "8";
+        box.RaiseEvent(new Avalonia.Input.KeyEventArgs { RoutedEvent = Avalonia.Input.InputElement.KeyDownEvent, Key = Avalonia.Input.Key.Escape });
+        Assert.Equal("1080", box.Text);
+    }
+
+    [Fact]
     public void TheSamplesMenuOpensInItsEditorAndAnEditChangesOnlyItsLine()
     {
         var (shell, asset, text) = Menu();
