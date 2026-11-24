@@ -219,19 +219,19 @@ public sealed class SessionStateTests : IDisposable
     [Fact]
     public void EachStateIsNamedWithItsReasonOrCode()
     {
-        var run = new CookRun(new FakeProcess([]), 1);
+        var run = new ChildRun(new FakeProcess([]), 1);
         CookState[] cook =
         [
             new CookState.Stopped(), new CookState.FailedToStart("not built"), new CookState.Refused("old protocol"),
             new CookState.TimedOut(TimeSpan.FromSeconds(30)), new CookState.Exited(3), new CookState.Connecting(run, new()),
-            new CookState.Handshaking(run, new(), null!), new CookState.Linked(run, null!), new CookState.LinkLost(run, new(), "reset"),
+            new CookState.Handshaking(run, new(), null!), new CookState.Linked(run, null, new CookLink((_, _) => { })), new CookState.LinkLost(run, new(), "reset"),
         ];
-        var hostRun = new HostRun(new FakeProcess([]), 1, "shared");
+        var hostRun = new ChildRun(new FakeProcess([]), 1, "shared");
         HostState[] host =
         [
             new HostState.Waiting(), new HostState.Stopped(), new HostState.FailedToStart("not built"), new HostState.Refused("old protocol"),
             new HostState.TimedOut(TimeSpan.FromSeconds(30)), new HostState.Exited(3), new HostState.Connecting(hostRun, new()),
-            new HostState.Handshaking(hostRun, new(), null!), new HostState.Linked(hostRun, null, _ => { }, "mygame"),
+            new HostState.Handshaking(hostRun, new(), null!), new HostState.Linked(hostRun, null, new HostLink("mygame", _ => { })),
             new HostState.LinkLost(hostRun, new(), "reset"),
         ];
 
