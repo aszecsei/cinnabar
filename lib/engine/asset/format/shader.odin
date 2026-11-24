@@ -44,24 +44,13 @@ shader_layout :: proc() -> u64 {
 
 // shader_view checks a shader blob: its header, its layout and that every slice is inside it.
 shader_view :: proc(data: []byte) -> (blob: ^Shader_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Shader ||
-	   header.layout != shader_layout() ||
-	   len(data) < size_of(Shader_Blob) {
-		return
-	}
-	blob = (^Shader_Blob)(raw_data(data))
-	for s in ([?]Slice{blob.entries, blob.source_path}) {
-		if u64(s.offset) + u64(s.size) > u64(len(data)) {
-			return nil, false
-		}
-	}
-	if blob.entries.size % size_of(Shader_Entry) != 0 ||
-	   blob.entries.offset % align_of(Shader_Entry) != 0 {
+	blob = blob_open(data, .Shader, shader_layout(), Shader_Blob) or_return
+	if !slice_fits(data, blob.entries, size_of(Shader_Entry), align_of(Shader_Entry)) ||
+	   !slice_fits(data, blob.source_path, 1, 1) {
 		return nil, false
 	}
 	for e in shader_entries(data, blob) {
-		if u64(e.code.offset) + u64(e.code.size) > u64(len(data)) {
+		if !slice_fits(data, e.code, 1, 1) {
 			return nil, false
 		}
 	}
@@ -69,8 +58,7 @@ shader_view :: proc(data: []byte) -> (blob: ^Shader_Blob, ok: bool) {
 }
 
 shader_entries :: proc "contextless" (data: []byte, blob: ^Shader_Blob) -> []Shader_Entry {
-	bytes := blob_bytes(data, blob.entries)
-	return ([^]Shader_Entry)(raw_data(bytes))[:len(bytes) / size_of(Shader_Entry)]
+	return blob_records(data, blob.entries, Shader_Entry)
 }
 
 // shader_code is the bytecode of a stage for a target, or nil if the blob has no such entry.

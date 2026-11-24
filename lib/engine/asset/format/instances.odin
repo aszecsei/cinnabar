@@ -73,22 +73,13 @@ instance_set_layout :: proc() -> u64 {
 // instance_set_view checks an instance set blob: its header, its layout, its slices, and that its streams have the sizes
 // that its counts give and its cells cover its instances.
 instance_set_view :: proc(data: []byte) -> (blob: ^Instance_Set_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Instance_Set ||
-	   header.layout != instance_set_layout() ||
-	   len(data) < size_of(Instance_Set_Blob) {
-		return
-	}
-	blob = (^Instance_Set_Blob)(raw_data(data))
-	for s in ([?]Slice{blob.instances, blob.cells, blob.name, blob.source_path}) {
-		if u64(s.offset) + u64(s.size) > u64(len(data)) {
-			return nil, false
-		}
-	}
-	if blob.instances.size != blob.count * size_of(Instance) ||
-	   blob.instances.offset % BLOB_ALIGN != 0 ||
-	   blob.cells.size != blob.cell_count * size_of(Instance_Cell) ||
-	   blob.cells.offset % BLOB_ALIGN != 0 {
+	blob = blob_open(data, .Instance_Set, instance_set_layout(), Instance_Set_Blob) or_return
+	if !slice_fits(data, blob.instances, size_of(Instance), BLOB_ALIGN) ||
+	   !slice_fits(data, blob.cells, size_of(Instance_Cell), BLOB_ALIGN) ||
+	   !slice_fits(data, blob.name, 1, 1) ||
+	   !slice_fits(data, blob.source_path, 1, 1) ||
+	   blob.instances.size != blob.count * size_of(Instance) ||
+	   blob.cells.size != blob.cell_count * size_of(Instance_Cell) {
 		return nil, false
 	}
 	next: u32

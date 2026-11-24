@@ -54,23 +54,13 @@ audio_check :: proc "contextless" (blob: ^Audio_Blob, guid: Guid) -> bool {
 
 // audio_view checks a whole audio blob: its start, and that its slices are inside it.
 audio_view :: proc(data: []byte) -> (blob: ^Audio_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Audio ||
-	   header.layout != audio_layout() ||
-	   len(data) < size_of(Audio_Blob) {
-		return
-	}
-	blob = (^Audio_Blob)(raw_data(data))
-	if !audio_check(blob, header.guid) {
+	blob = blob_open(data, .Audio, audio_layout(), Audio_Blob) or_return
+	if !audio_check(blob, blob.header.guid) {
 		return nil, false
 	}
-	inside :: proc(data: []byte, s: Slice, align: int) -> bool {
-		return u64(s.offset) + u64(s.size) <= u64(len(data)) && int(s.offset) % align == 0
-	}
-	if !inside(data, blob.data, align_of(i16)) ||
-	   !inside(data, blob.source_path, 1) ||
-	   !inside(data, blob.seek, align_of(audio.Seek_Point)) ||
-	   blob.seek.size % size_of(audio.Seek_Point) != 0 {
+	if !slice_fits(data, blob.data, 1, align_of(i16)) ||
+	   !slice_fits(data, blob.source_path, 1, 1) ||
+	   !slice_fits(data, blob.seek, size_of(audio.Seek_Point), align_of(audio.Seek_Point)) {
 		return nil, false
 	}
 	return blob, true

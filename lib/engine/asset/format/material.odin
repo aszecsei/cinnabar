@@ -194,50 +194,25 @@ material_instance_layout :: proc() -> u64 {
 	return layout.hash(Material_Instance_Blob) ~ layout.hash(Material_Texture) * 31
 }
 
-@(private = "file")
-slices_inside :: proc(data: []byte, slices: []Slice) -> bool {
-	for s in slices {
-		if u64(s.offset) + u64(s.size) > u64(len(data)) {
-			return false
-		}
-	}
-	return true
-}
-
-@(private = "file")
-records_fit :: proc(s: Slice, $T: typeid) -> bool {
-	return s.size % size_of(T) == 0 && s.offset % align_of(T) == 0
-}
-
 // material_view checks a material blob: its header, its layout, and that its slices and records are inside it.
 material_view :: proc(data: []byte) -> (blob: ^Material_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Material ||
-	   header.layout != material_layout() ||
-	   len(data) < size_of(Material_Blob) {
-		return
-	}
-	blob = (^Material_Blob)(raw_data(data))
-	if !slices_inside(
-		data,
-		{blob.params, blob.switches, blob.block, blob.textures, blob.variants, blob.source_path},
-	) {
-		return nil, false
-	}
-	if !records_fit(blob.params, Material_Param) ||
-	   !records_fit(blob.switches, Slice) ||
-	   !records_fit(blob.textures, Material_Texture) ||
-	   !records_fit(blob.variants, Material_Variant) {
+	blob = blob_open(data, .Material, material_layout(), Material_Blob) or_return
+	if !slice_fits(data, blob.params, size_of(Material_Param), align_of(Material_Param)) ||
+	   !slice_fits(data, blob.switches, size_of(Slice), align_of(Slice)) ||
+	   !slice_fits(data, blob.block, 1, 1) ||
+	   !slice_fits(data, blob.textures, size_of(Material_Texture), align_of(Material_Texture)) ||
+	   !slice_fits(data, blob.variants, size_of(Material_Variant), align_of(Material_Variant)) ||
+	   !slice_fits(data, blob.source_path, 1, 1) {
 		return nil, false
 	}
 	for v in material_variants(data, blob) {
-		slices_inside(data, {v.code}) or_return
+		slice_fits(data, v.code, 1, 1) or_return
 	}
 	for p in material_params(data, blob) {
-		slices_inside(data, {p.name}) or_return
+		slice_fits(data, p.name, 1, 1) or_return
 	}
 	for s in material_switches(data, blob) {
-		slices_inside(data, {s}) or_return
+		slice_fits(data, s, 1, 1) or_return
 	}
 	if !textures_inside(material_textures(data, blob), blob.block.size) {
 		return nil, false
@@ -246,15 +221,15 @@ material_view :: proc(data: []byte) -> (blob: ^Material_Blob, ok: bool) {
 }
 
 material_instance_view :: proc(data: []byte) -> (blob: ^Material_Instance_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Material_Instance ||
-	   header.layout != material_instance_layout() ||
-	   len(data) < size_of(Material_Instance_Blob) {
-		return
-	}
-	blob = (^Material_Instance_Blob)(raw_data(data))
-	if !slices_inside(data, {blob.block, blob.textures, blob.source_path}) ||
-	   !records_fit(blob.textures, Material_Texture) {
+	blob = blob_open(
+		data,
+		.Material_Instance,
+		material_instance_layout(),
+		Material_Instance_Blob,
+	) or_return
+	if !slice_fits(data, blob.block, 1, 1) ||
+	   !slice_fits(data, blob.textures, size_of(Material_Texture), align_of(Material_Texture)) ||
+	   !slice_fits(data, blob.source_path, 1, 1) {
 		return nil, false
 	}
 	if !textures_inside(instance_textures(data, blob), blob.block.size) {
@@ -274,37 +249,32 @@ textures_inside :: proc(textures: []Material_Texture, block_size: u32) -> bool {
 }
 
 material_params :: proc "contextless" (data: []byte, blob: ^Material_Blob) -> []Material_Param {
-	bytes := blob_bytes(data, blob.params)
-	return ([^]Material_Param)(raw_data(bytes))[:len(bytes) / size_of(Material_Param)]
+	return blob_records(data, blob.params, Material_Param)
 }
 
 material_switches :: proc "contextless" (data: []byte, blob: ^Material_Blob) -> []Slice {
-	bytes := blob_bytes(data, blob.switches)
-	return ([^]Slice)(raw_data(bytes))[:len(bytes) / size_of(Slice)]
+	return blob_records(data, blob.switches, Slice)
 }
 
 material_textures :: proc "contextless" (
 	data: []byte,
 	blob: ^Material_Blob,
 ) -> []Material_Texture {
-	bytes := blob_bytes(data, blob.textures)
-	return ([^]Material_Texture)(raw_data(bytes))[:len(bytes) / size_of(Material_Texture)]
+	return blob_records(data, blob.textures, Material_Texture)
 }
 
 material_variants :: proc "contextless" (
 	data: []byte,
 	blob: ^Material_Blob,
 ) -> []Material_Variant {
-	bytes := blob_bytes(data, blob.variants)
-	return ([^]Material_Variant)(raw_data(bytes))[:len(bytes) / size_of(Material_Variant)]
+	return blob_records(data, blob.variants, Material_Variant)
 }
 
 instance_textures :: proc "contextless" (
 	data: []byte,
 	blob: ^Material_Instance_Blob,
 ) -> []Material_Texture {
-	bytes := blob_bytes(data, blob.textures)
-	return ([^]Material_Texture)(raw_data(bytes))[:len(bytes) / size_of(Material_Texture)]
+	return blob_records(data, blob.textures, Material_Texture)
 }
 
 // material_code is a variant's bytecode, or nil if the material has no such variant.

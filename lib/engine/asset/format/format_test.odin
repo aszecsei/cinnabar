@@ -120,6 +120,50 @@ script_view_rejects_bad_blobs :: proc(t: ^testing.T) {
 }
 
 @(test)
+slices_fit_inside_their_blob_in_whole_aligned_records :: proc(t: ^testing.T) {
+	data := make([]byte, 64, context.temp_allocator)
+	testing.expect(t, slice_fits(data, {0, 64}, 8, 8))
+	testing.expect(t, slice_fits(data, {64, 0}, 8, 8))
+	testing.expect(t, !slice_fits(data, {60, 8}, 4, 4))
+	testing.expect(t, !slice_fits(data, {65, 0}, 1, 1))
+	// The end is summed in 64 bits, so an offset and a size that wrap in 32 bits are past the end.
+	testing.expect(t, !slice_fits(data, {max(u32), 2}, 1, 1))
+	testing.expect(t, !slice_fits(data, {0, 12}, 8, 4))
+	testing.expect(t, !slice_fits(data, {4, 8}, 8, 8))
+	testing.expect(t, slice_fits(data, {3, 16}, 16, 1))
+}
+
+@(test)
+blob_records_are_whole_records_of_a_slice :: proc(t: ^testing.T) {
+	values := [?]u32{1, 2, 3, 4}
+	data := mem.slice_to_bytes(values[:])
+	records := blob_records(data, {4, 8}, u32)
+	testing.expect_value(t, len(records), 2)
+	testing.expect_value(t, records[0], 2)
+	testing.expect_value(t, records[1], 3)
+	testing.expect_value(t, len(blob_records(data, {0, 0}, u32)), 0)
+}
+
+@(test)
+blob_open_checks_the_magic_kind_layout_and_size :: proc(t: ^testing.T) {
+	data := aligned(script_write({source_path = "x.luau"}, context.temp_allocator))
+	blob, ok := blob_open(data, .Script, script_layout(), Script_Blob)
+	testing.expect(t, ok)
+	testing.expect(t, rawptr(blob) == raw_data(data))
+
+	_, ok = blob_open(data, .Shader, script_layout(), Script_Blob)
+	testing.expect(t, !ok)
+	_, ok = blob_open(data, .Script, script_layout() + 1, Script_Blob)
+	testing.expect(t, !ok)
+	_, ok = blob_open(data[:size_of(Script_Blob) - 1], .Script, script_layout(), Script_Blob)
+	testing.expect(t, !ok)
+
+	(^Blob_Header)(raw_data(data)).magic += 1
+	_, ok = blob_open(data, .Script, script_layout(), Script_Blob)
+	testing.expect(t, !ok)
+}
+
+@(test)
 shader_blobs_round_trip :: proc(t: ^testing.T) {
 	guid := guid_parse(TEST_GUID) or_else {}
 	entries := []Shader_Code{{.Vertex, .DXIL, {1, 2, 3}}, {.Pixel, .DXIL, {4, 5}}}

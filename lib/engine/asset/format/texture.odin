@@ -411,14 +411,12 @@ texture_tail_size :: proc "contextless" (
 
 // texture_levels is a virtual texture's levels, empty for any other texture.
 texture_levels :: proc "contextless" (data: []byte, blob: ^Texture_Blob) -> []Texture_Level {
-	bytes := blob_bytes(data, blob.levels)
-	return ([^]Texture_Level)(raw_data(bytes))[:len(bytes) / size_of(Texture_Level)]
+	return blob_records(data, blob.levels, Texture_Level)
 }
 
 // texture_pages is a virtual texture's page table, empty for any other texture.
 texture_pages :: proc "contextless" (data: []byte, blob: ^Texture_Blob) -> []Texture_Page {
-	bytes := blob_bytes(data, blob.pages)
-	return ([^]Texture_Page)(raw_data(bytes))[:len(bytes) / size_of(Texture_Page)]
+	return blob_records(data, blob.pages, Texture_Page)
 }
 
 // texture_tail is a virtual texture's mips from tail_mip on, empty for any other texture.
@@ -501,13 +499,7 @@ texture_page_strip :: proc(
 // texture_head_size is how many of a blob's first bytes a reader needs, from at least its first size_of(Texture_Blob)
 // bytes: the head of a virtual texture. It is false for any other blob, which a reader needs the whole of.
 texture_head_size :: proc(start: []byte) -> (size: u64, ok: bool) {
-	header := blob_header(start) or_return
-	if header.kind != .Texture ||
-	   header.layout != texture_layout() ||
-	   len(start) < size_of(Texture_Blob) {
-		return
-	}
-	blob := (^Texture_Blob)(raw_data(start))
+	blob := blob_open(start, .Texture, texture_layout(), Texture_Blob) or_return
 	if .Virtual not_in blob.flags ||
 	   blob.head_size < size_of(Texture_Blob) ||
 	   blob.head_size > blob.file_size {
@@ -520,15 +512,9 @@ texture_head_size :: proc(start: []byte) -> (size: u64, ok: bool) {
 // its mips are the size that its format, size, mip count and layer count give. A virtual texture's head, which is all
 // that a reader of it holds, is checked as well: its levels, its page table, and its tail (see texture_view_virtual).
 texture_view :: proc(data: []byte) -> (blob: ^Texture_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Texture ||
-	   header.layout != texture_layout() ||
-	   len(data) < size_of(Texture_Blob) {
-		return
-	}
-	blob = (^Texture_Blob)(raw_data(data))
+	blob = blob_open(data, .Texture, texture_layout(), Texture_Blob) or_return
 	for s in ([?]Slice{blob.mips, blob.source_path, blob.levels, blob.pages, blob.tail}) {
-		if u64(s.offset) + u64(s.size) > u64(len(data)) {
+		if !slice_fits(data, s, 1, 1) {
 			return nil, false
 		}
 	}

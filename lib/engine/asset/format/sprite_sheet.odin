@@ -78,24 +78,11 @@ sprite_sheet_layout :: proc() -> u64 {
 // sprite_sheet_view checks a sprite sheet blob: its header, its layout, that its slices are inside it, that each frame
 // is inside the atlas, and that each animation's frames are frames of the sheet.
 sprite_sheet_view :: proc(data: []byte) -> (blob: ^Sprite_Sheet_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Sprite_Sheet ||
-	   header.layout != sprite_sheet_layout() ||
-	   len(data) < size_of(Sprite_Sheet_Blob) {
-		return
-	}
-	blob = (^Sprite_Sheet_Blob)(raw_data(data))
-	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return(
-			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
-			int(s.size) % size == 0 &&
-			int(s.offset) % align == 0 \
-		)
-	}
-	if !inside(data, blob.frames, size_of(Sprite_Frame), align_of(Sprite_Frame)) ||
-	   !inside(data, blob.animations, size_of(Sprite_Animation), align_of(Sprite_Animation)) ||
-	   !inside(data, blob.frame_indices, size_of(u16), align_of(u16)) ||
-	   !inside(data, blob.source_path, 1, 1) {
+	blob = blob_open(data, .Sprite_Sheet, sprite_sheet_layout(), Sprite_Sheet_Blob) or_return
+	if !slice_fits(data, blob.frames, size_of(Sprite_Frame), align_of(Sprite_Frame)) ||
+	   !slice_fits(data, blob.animations, size_of(Sprite_Animation), align_of(Sprite_Animation)) ||
+	   !slice_fits(data, blob.frame_indices, size_of(u16), align_of(u16)) ||
+	   !slice_fits(data, blob.source_path, 1, 1) {
 		return nil, false
 	}
 	if blob.pixels_per_unit <= 0 || blob.atlas_size.x == 0 || blob.atlas_size.y == 0 {
@@ -111,7 +98,7 @@ sprite_sheet_view :: proc(data: []byte) -> (blob: ^Sprite_Sheet_Blob, ok: bool) 
 		if u32(f.rect.x) + u32(f.rect.z) > blob.atlas_size.x ||
 		   u32(f.rect.y) + u32(f.rect.w) > blob.atlas_size.y ||
 		   f.duration < 0 ||
-		   !inside(data, f.name, 1, 1) {
+		   !slice_fits(data, f.name, 1, 1) {
 			return nil, false
 		}
 	}
@@ -119,7 +106,7 @@ sprite_sheet_view :: proc(data: []byte) -> (blob: ^Sprite_Sheet_Blob, ok: bool) 
 		if u64(a.first) + u64(a.count) > u64(len(indices)) ||
 		   a.count == 0 ||
 		   a.rate < 0 ||
-		   !inside(data, a.name, 1, 1) {
+		   !slice_fits(data, a.name, 1, 1) {
 			return nil, false
 		}
 	}
@@ -135,24 +122,21 @@ sprite_sheet_frames :: proc "contextless" (
 	data: []byte,
 	blob: ^Sprite_Sheet_Blob,
 ) -> []Sprite_Frame {
-	bytes := blob_bytes(data, blob.frames)
-	return ([^]Sprite_Frame)(raw_data(bytes))[:len(bytes) / size_of(Sprite_Frame)]
+	return blob_records(data, blob.frames, Sprite_Frame)
 }
 
 sprite_sheet_animations :: proc "contextless" (
 	data: []byte,
 	blob: ^Sprite_Sheet_Blob,
 ) -> []Sprite_Animation {
-	bytes := blob_bytes(data, blob.animations)
-	return ([^]Sprite_Animation)(raw_data(bytes))[:len(bytes) / size_of(Sprite_Animation)]
+	return blob_records(data, blob.animations, Sprite_Animation)
 }
 
 sprite_sheet_frame_indices :: proc "contextless" (
 	data: []byte,
 	blob: ^Sprite_Sheet_Blob,
 ) -> []u16 {
-	bytes := blob_bytes(data, blob.frame_indices)
-	return ([^]u16)(raw_data(bytes))[:len(bytes) / size_of(u16)]
+	return blob_records(data, blob.frame_indices, u16)
 }
 
 // sprite_sheet_find_frame is the index of the frame of a name.

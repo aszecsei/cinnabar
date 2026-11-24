@@ -10,6 +10,8 @@ Compiled blobs use offsets instead of pointers. The runtime can map a blob and u
 
 Every blob starts with a header: the magic `CNB1`, the asset kind, the layout hash of the kind's structures, the cache key and the GUID. The runtime rejects a blob whose layout hash differs from its own, and the cooker reads the key to find blobs that are up to date. The runtime loads blobs at 16-byte alignment.
 
+Each kind's `<kind>_view` checks a blob before the runtime uses it. It starts with `format.blob_open`, which checks the header, the kind, the layout hash and the size. Then it checks each slice with `format.slice_fits`: the slice must be inside the blob, its size must be a whole number of records, and its offset must be a multiple of the alignment that the view gives. Then it does the kind's own checks. The kind's accessors read a checked slice as records through `format.blob_records`.
+
 A script blob holds:
 
 | Part | Contents |

@@ -772,23 +772,12 @@ ui_layout :: proc() -> u64 {
 // ui_view checks a UI document's blob: its header, its layout, that its slices and ranges are inside it, that its
 // nodes are a tree in order, and that its attributes and styles are ones that this build knows.
 ui_view :: proc(data: []byte) -> (blob: ^Ui_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Ui || header.layout != ui_layout() || len(data) < size_of(Ui_Blob) {
-		return
-	}
-	blob = (^Ui_Blob)(raw_data(data))
-	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return(
-			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
-			int(s.size) % size == 0 &&
-			int(s.offset) % align == 0 \
-		)
-	}
-	if !inside(data, blob.nodes, size_of(Ui_Node), align_of(Ui_Node)) ||
-	   !inside(data, blob.styles, size_of(Ui_Style), align_of(Ui_Style)) ||
-	   !inside(data, blob.props, size_of(Ui_Prop), align_of(Ui_Prop)) ||
-	   !inside(data, blob.style_refs, size_of(u32), align_of(u32)) ||
-	   !inside(data, blob.source_path, 1, 1) {
+	blob = blob_open(data, .Ui, ui_layout(), Ui_Blob) or_return
+	if !slice_fits(data, blob.nodes, size_of(Ui_Node), align_of(Ui_Node)) ||
+	   !slice_fits(data, blob.styles, size_of(Ui_Style), align_of(Ui_Style)) ||
+	   !slice_fits(data, blob.props, size_of(Ui_Prop), align_of(Ui_Prop)) ||
+	   !slice_fits(data, blob.style_refs, size_of(u32), align_of(u32)) ||
+	   !slice_fits(data, blob.source_path, 1, 1) {
 		return nil, false
 	}
 	nodes, styles, props, refs :=
@@ -800,7 +789,7 @@ ui_view :: proc(data: []byte) -> (blob: ^Ui_Blob, ok: bool) {
 		return u64(r.first) + u64(r.count) <= u64(count)
 	}
 	for p in props {
-		if !inside(data, p.value, 1, 1) || p.attr > max(Ui_Attr) {
+		if !slice_fits(data, p.value, 1, 1) || p.attr > max(Ui_Attr) {
 			return nil, false
 		}
 	}
@@ -810,7 +799,7 @@ ui_view :: proc(data: []byte) -> (blob: ^Ui_Blob, ok: bool) {
 		}
 	}
 	for s in styles {
-		if !inside(data, s.name, 1, 1) || !in_range(s.props, len(props)) {
+		if !slice_fits(data, s.name, 1, 1) || !in_range(s.props, len(props)) {
 			return nil, false
 		}
 		for v in s.variants {
@@ -827,7 +816,7 @@ ui_view :: proc(data: []byte) -> (blob: ^Ui_Blob, ok: bool) {
 	}
 	for n, i in nodes {
 		if n.element > max(Ui_Element) ||
-		   !inside(data, n.id, 1, 1) ||
+		   !slice_fits(data, n.id, 1, 1) ||
 		   !in_range(n.props, len(props)) ||
 		   !in_range(n.styles, len(refs)) {
 			return nil, false
@@ -844,23 +833,19 @@ ui_view :: proc(data: []byte) -> (blob: ^Ui_Blob, ok: bool) {
 }
 
 ui_nodes :: proc "contextless" (data: []byte, blob: ^Ui_Blob) -> []Ui_Node {
-	bytes := blob_bytes(data, blob.nodes)
-	return ([^]Ui_Node)(raw_data(bytes))[:len(bytes) / size_of(Ui_Node)]
+	return blob_records(data, blob.nodes, Ui_Node)
 }
 
 ui_styles :: proc "contextless" (data: []byte, blob: ^Ui_Blob) -> []Ui_Style {
-	bytes := blob_bytes(data, blob.styles)
-	return ([^]Ui_Style)(raw_data(bytes))[:len(bytes) / size_of(Ui_Style)]
+	return blob_records(data, blob.styles, Ui_Style)
 }
 
 ui_props :: proc "contextless" (data: []byte, blob: ^Ui_Blob) -> []Ui_Prop {
-	bytes := blob_bytes(data, blob.props)
-	return ([^]Ui_Prop)(raw_data(bytes))[:len(bytes) / size_of(Ui_Prop)]
+	return blob_records(data, blob.props, Ui_Prop)
 }
 
 ui_style_refs :: proc "contextless" (data: []byte, blob: ^Ui_Blob) -> []u32 {
-	bytes := blob_bytes(data, blob.style_refs)
-	return ([^]u32)(raw_data(bytes))[:len(bytes) / size_of(u32)]
+	return blob_records(data, blob.style_refs, u32)
 }
 
 // ui_range gives the records of a range.

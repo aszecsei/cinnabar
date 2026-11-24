@@ -99,24 +99,11 @@ blackboard_layout :: proc() -> u64 {
 // blackboard_view checks a blackboard blob: its header, its layout, that its slices are inside it, and that each key
 // lies inside the values and its enum names inside the names.
 blackboard_view :: proc(data: []byte) -> (blob: ^Blackboard_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Blackboard ||
-	   header.layout != blackboard_layout() ||
-	   len(data) < size_of(Blackboard_Blob) {
-		return
-	}
-	blob = (^Blackboard_Blob)(raw_data(data))
-	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return(
-			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
-			int(s.size) % size == 0 &&
-			int(s.offset) % align == 0 \
-		)
-	}
-	if !inside(data, blob.keys, size_of(Blackboard_Key), align_of(Blackboard_Key)) ||
-	   !inside(data, blob.enum_names, size_of(Slice), align_of(Slice)) ||
-	   !inside(data, blob.defaults, 1, 8) ||
-	   !inside(data, blob.source_path, 1, 1) ||
+	blob = blob_open(data, .Blackboard, blackboard_layout(), Blackboard_Blob) or_return
+	if !slice_fits(data, blob.keys, size_of(Blackboard_Key), align_of(Blackboard_Key)) ||
+	   !slice_fits(data, blob.enum_names, size_of(Slice), align_of(Slice)) ||
+	   !slice_fits(data, blob.defaults, 1, 8) ||
+	   !slice_fits(data, blob.source_path, 1, 1) ||
 	   blob.values_size > MAX_BLACKBOARD_SIZE ||
 	   blob.values_size % 8 != 0 ||
 	   blob.defaults.size != blob.values_size {
@@ -129,7 +116,7 @@ blackboard_view :: proc(data: []byte) -> (blob: ^Blackboard_Blob, ok: bool) {
 	}
 	for k in keys {
 		if k.type > .Vector ||
-		   !inside(data, k.name, 1, 1) ||
+		   !slice_fits(data, k.name, 1, 1) ||
 		   int(k.offset) % blackboard_type_align(k.type) != 0 ||
 		   u64(k.offset) + u64(blackboard_type_size(k.type)) > u64(blob.values_size) ||
 		   u64(k.first_enum) + u64(k.enum_count) > u64(len(names)) ||
@@ -138,7 +125,7 @@ blackboard_view :: proc(data: []byte) -> (blob: ^Blackboard_Blob, ok: bool) {
 		}
 	}
 	for n in names {
-		if !inside(data, n, 1, 1) {
+		if !slice_fits(data, n, 1, 1) {
 			return nil, false
 		}
 	}
@@ -146,13 +133,11 @@ blackboard_view :: proc(data: []byte) -> (blob: ^Blackboard_Blob, ok: bool) {
 }
 
 blackboard_keys :: proc "contextless" (data: []byte, blob: ^Blackboard_Blob) -> []Blackboard_Key {
-	bytes := blob_bytes(data, blob.keys)
-	return ([^]Blackboard_Key)(raw_data(bytes))[:len(bytes) / size_of(Blackboard_Key)]
+	return blob_records(data, blob.keys, Blackboard_Key)
 }
 
 blackboard_enum_names :: proc "contextless" (data: []byte, blob: ^Blackboard_Blob) -> []Slice {
-	bytes := blob_bytes(data, blob.enum_names)
-	return ([^]Slice)(raw_data(bytes))[:len(bytes) / size_of(Slice)]
+	return blob_records(data, blob.enum_names, Slice)
 }
 
 // blackboard_find is the slot of the key whose name has the hash, or false.

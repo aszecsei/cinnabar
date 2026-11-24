@@ -170,31 +170,28 @@ decision_layout :: proc() -> u64 {
 // every index between its records is in range. It does not check slots against a blackboard: decision_check does,
 // with the blackboard's blob.
 decision_view :: proc(data: []byte) -> (blob: ^Decision_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Decision ||
-	   header.layout != decision_layout() ||
-	   len(data) < size_of(Decision_Blob) {
-		return
-	}
-	blob = (^Decision_Blob)(raw_data(data))
-	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return(
-			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
-			int(s.size) % size == 0 &&
-			int(s.offset) % align == 0 \
-		)
-	}
+	blob = blob_open(data, .Decision, decision_layout(), Decision_Blob) or_return
 	if blob.technique > max(Decision_Technique) ||
 	   blob.state_size > MAX_DECISION_STATE ||
-	   !inside(data, blob.nodes, size_of(Decision_Node), align_of(Decision_Node)) ||
-	   !inside(data, blob.conditions, size_of(Decision_Condition), align_of(Decision_Condition)) ||
-	   !inside(data, blob.ops, size_of(Decision_Op), align_of(Decision_Op)) ||
-	   !inside(data, blob.constants, size_of(Decision_Constant), align_of(Decision_Constant)) ||
-	   !inside(data, blob.actions, size_of(Decision_Action), align_of(Decision_Action)) ||
-	   !inside(data, blob.args, size_of(Decision_Arg), align_of(Decision_Arg)) ||
-	   !inside(data, blob.writes, size_of(Decision_Write), align_of(Decision_Write)) ||
-	   !inside(data, blob.technique_data, 1, 16) ||
-	   !inside(data, blob.source_path, 1, 1) {
+	   !slice_fits(data, blob.nodes, size_of(Decision_Node), align_of(Decision_Node)) ||
+	   !slice_fits(
+			   data,
+			   blob.conditions,
+			   size_of(Decision_Condition),
+			   align_of(Decision_Condition),
+		   ) ||
+	   !slice_fits(data, blob.ops, size_of(Decision_Op), align_of(Decision_Op)) ||
+	   !slice_fits(
+			   data,
+			   blob.constants,
+			   size_of(Decision_Constant),
+			   align_of(Decision_Constant),
+		   ) ||
+	   !slice_fits(data, blob.actions, size_of(Decision_Action), align_of(Decision_Action)) ||
+	   !slice_fits(data, blob.args, size_of(Decision_Arg), align_of(Decision_Arg)) ||
+	   !slice_fits(data, blob.writes, size_of(Decision_Write), align_of(Decision_Write)) ||
+	   !slice_fits(data, blob.technique_data, 1, 16) ||
+	   !slice_fits(data, blob.source_path, 1, 1) {
 		return nil, false
 	}
 	range :: proc(first, count: u32, length: int) -> bool {
@@ -210,7 +207,7 @@ decision_view :: proc(data: []byte) -> (blob: ^Decision_Blob, ok: bool) {
 	args := decision_args(data, blob)
 	writes := decision_writes(data, blob)
 	for n in decision_nodes(data, blob) {
-		if !inside(data, n.kind, 1, 1) ||
+		if !slice_fits(data, n.kind, 1, 1) ||
 		   !optional(n.condition, len(conditions)) ||
 		   !optional(n.action, len(actions)) ||
 		   !range(n.first_write, n.write_count, len(writes)) {
@@ -229,17 +226,17 @@ decision_view :: proc(data: []byte) -> (blob: ^Decision_Blob, ok: bool) {
 		}
 	}
 	for c in constants {
-		if c.type > max(Blackboard_Type) || !inside(data, c.text, 1, 1) {
+		if c.type > max(Blackboard_Type) || !slice_fits(data, c.text, 1, 1) {
 			return nil, false
 		}
 	}
 	for a in actions {
-		if !inside(data, a.name, 1, 1) || !range(a.first_arg, a.arg_count, len(args)) {
+		if !slice_fits(data, a.name, 1, 1) || !range(a.first_arg, a.arg_count, len(args)) {
 			return nil, false
 		}
 	}
 	for a in args {
-		if !inside(data, a.name, 1, 1) ||
+		if !slice_fits(data, a.name, 1, 1) ||
 		   a.source > max(Decision_Source) ||
 		   a.type > max(Blackboard_Type) ||
 		   (a.source == .Constant && int(a.index) >= len(constants)) {
@@ -288,44 +285,37 @@ decision_check :: proc(
 }
 
 decision_nodes :: proc "contextless" (data: []byte, blob: ^Decision_Blob) -> []Decision_Node {
-	bytes := blob_bytes(data, blob.nodes)
-	return ([^]Decision_Node)(raw_data(bytes))[:len(bytes) / size_of(Decision_Node)]
+	return blob_records(data, blob.nodes, Decision_Node)
 }
 
 decision_conditions :: proc "contextless" (
 	data: []byte,
 	blob: ^Decision_Blob,
 ) -> []Decision_Condition {
-	bytes := blob_bytes(data, blob.conditions)
-	return ([^]Decision_Condition)(raw_data(bytes))[:len(bytes) / size_of(Decision_Condition)]
+	return blob_records(data, blob.conditions, Decision_Condition)
 }
 
 decision_ops :: proc "contextless" (data: []byte, blob: ^Decision_Blob) -> []Decision_Op {
-	bytes := blob_bytes(data, blob.ops)
-	return ([^]Decision_Op)(raw_data(bytes))[:len(bytes) / size_of(Decision_Op)]
+	return blob_records(data, blob.ops, Decision_Op)
 }
 
 decision_constants :: proc "contextless" (
 	data: []byte,
 	blob: ^Decision_Blob,
 ) -> []Decision_Constant {
-	bytes := blob_bytes(data, blob.constants)
-	return ([^]Decision_Constant)(raw_data(bytes))[:len(bytes) / size_of(Decision_Constant)]
+	return blob_records(data, blob.constants, Decision_Constant)
 }
 
 decision_actions :: proc "contextless" (data: []byte, blob: ^Decision_Blob) -> []Decision_Action {
-	bytes := blob_bytes(data, blob.actions)
-	return ([^]Decision_Action)(raw_data(bytes))[:len(bytes) / size_of(Decision_Action)]
+	return blob_records(data, blob.actions, Decision_Action)
 }
 
 decision_args :: proc "contextless" (data: []byte, blob: ^Decision_Blob) -> []Decision_Arg {
-	bytes := blob_bytes(data, blob.args)
-	return ([^]Decision_Arg)(raw_data(bytes))[:len(bytes) / size_of(Decision_Arg)]
+	return blob_records(data, blob.args, Decision_Arg)
 }
 
 decision_writes :: proc "contextless" (data: []byte, blob: ^Decision_Blob) -> []Decision_Write {
-	bytes := blob_bytes(data, blob.writes)
-	return ([^]Decision_Write)(raw_data(bytes))[:len(bytes) / size_of(Decision_Write)]
+	return blob_records(data, blob.writes, Decision_Write)
 }
 
 decision_technique_data :: proc "contextless" (data: []byte, blob: ^Decision_Blob) -> []byte {
@@ -382,22 +372,16 @@ Decision_Contents :: struct {
 // decision_write builds a decision blob.
 decision_write :: proc(contents: Decision_Contents, allocator := context.allocator) -> []byte {
 	buffer := make([dynamic]byte, size_of(Decision_Blob), allocator)
-	records :: proc(buffer: ^[dynamic]byte, $T: typeid, count: int) -> Slice {
-		return reserve_bytes(buffer, count * size_of(T), align_of(T))
-	}
-	put :: proc(buffer: ^[dynamic]byte, s: Slice, index: int, record: ^$T) {
-		mem.copy(&buffer[int(s.offset) + index * size_of(T)], record, size_of(T))
-	}
 	text :: proc(buffer: ^[dynamic]byte, s: string) -> Slice {
 		return append_bytes(buffer, transmute([]byte)s)
 	}
-	nodes := records(&buffer, Decision_Node, len(contents.nodes))
-	conditions := records(&buffer, Decision_Condition, len(contents.conditions))
-	ops := records(&buffer, Decision_Op, len(contents.ops))
-	constants := records(&buffer, Decision_Constant, len(contents.constants))
-	actions := records(&buffer, Decision_Action, len(contents.actions))
-	args := records(&buffer, Decision_Arg, len(contents.args))
-	writes := records(&buffer, Decision_Write, len(contents.writes))
+	nodes := reserve_records(&buffer, Decision_Node, len(contents.nodes))
+	conditions := reserve_records(&buffer, Decision_Condition, len(contents.conditions))
+	ops := reserve_records(&buffer, Decision_Op, len(contents.ops))
+	constants := reserve_records(&buffer, Decision_Constant, len(contents.constants))
+	actions := reserve_records(&buffer, Decision_Action, len(contents.actions))
+	args := reserve_records(&buffer, Decision_Arg, len(contents.args))
+	writes := reserve_records(&buffer, Decision_Write, len(contents.writes))
 	technique_data := reserve_bytes(&buffer, len(contents.technique_data), 16)
 	copy(buffer[technique_data.offset:], contents.technique_data)
 	for n, i in contents.nodes {
@@ -409,15 +393,15 @@ decision_write :: proc(contents: Decision_Contents, allocator := context.allocat
 			first_write = n.first_write,
 			write_count = n.write_count,
 		}
-		put(&buffer, nodes, i, &record)
+		put_record(&buffer, nodes, i, &record)
 	}
 	for c, i in contents.conditions {
 		c := c
-		put(&buffer, conditions, i, &c)
+		put_record(&buffer, conditions, i, &c)
 	}
 	for o, i in contents.ops {
 		o := o
-		put(&buffer, ops, i, &o)
+		put_record(&buffer, ops, i, &o)
 	}
 	for c, i in contents.constants {
 		record := Decision_Constant {
@@ -425,7 +409,7 @@ decision_write :: proc(contents: Decision_Contents, allocator := context.allocat
 			text  = text(&buffer, c.text),
 			value = c.value,
 		}
-		put(&buffer, constants, i, &record)
+		put_record(&buffer, constants, i, &record)
 	}
 	for a, i in contents.actions {
 		record := Decision_Action {
@@ -434,7 +418,7 @@ decision_write :: proc(contents: Decision_Contents, allocator := context.allocat
 			first_arg = a.first_arg,
 			arg_count = a.arg_count,
 		}
-		put(&buffer, actions, i, &record)
+		put_record(&buffer, actions, i, &record)
 	}
 	for a, i in contents.args {
 		record := Decision_Arg {
@@ -444,11 +428,11 @@ decision_write :: proc(contents: Decision_Contents, allocator := context.allocat
 			index  = a.index,
 			type   = a.type,
 		}
-		put(&buffer, args, i, &record)
+		put_record(&buffer, args, i, &record)
 	}
 	for w, i in contents.writes {
 		w := w
-		put(&buffer, writes, i, &w)
+		put_record(&buffer, writes, i, &w)
 	}
 	source_path := text(&buffer, contents.source_path)
 	blob := Decision_Blob {

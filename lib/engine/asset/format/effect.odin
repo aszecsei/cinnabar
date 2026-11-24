@@ -119,29 +119,16 @@ effect_layout :: proc() -> u64 {
 
 // effect_view checks an effect blob: its header, its layout, and that its slices and records are inside it.
 effect_view :: proc(data: []byte) -> (blob: ^Effect_Blob, ok: bool) {
-	header := blob_header(data) or_return
-	if header.kind != .Effect ||
-	   header.layout != effect_layout() ||
-	   len(data) < size_of(Effect_Blob) {
-		return
-	}
-	blob = (^Effect_Blob)(raw_data(data))
-	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return(
-			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
-			int(s.size) % size == 0 &&
-			int(s.offset) % align == 0 \
-		)
-	}
-	if !inside(data, blob.emitters, size_of(Effect_Emitter), align_of(Effect_Emitter)) ||
-	   !inside(data, blob.curves, size_of(Effect_Curve_Row), align_of(Effect_Curve_Row)) ||
-	   !inside(data, blob.source_path, 1, 1) {
+	blob = blob_open(data, .Effect, effect_layout(), Effect_Blob) or_return
+	if !slice_fits(data, blob.emitters, size_of(Effect_Emitter), align_of(Effect_Emitter)) ||
+	   !slice_fits(data, blob.curves, size_of(Effect_Curve_Row), align_of(Effect_Curve_Row)) ||
+	   !slice_fits(data, blob.source_path, 1, 1) {
 		return nil, false
 	}
 	rows := u32(len(effect_curves(data, blob)))
 	for e in effect_emitters(data, blob) {
-		if !inside(data, e.name, 1, 1) ||
-		   !inside(data, e.modules, size_of(Effect_Module), align_of(Effect_Module)) {
+		if !slice_fits(data, e.name, 1, 1) ||
+		   !slice_fits(data, e.modules, size_of(Effect_Module), align_of(Effect_Module)) {
 			return nil, false
 		}
 		if e.curves + len(Effect_Curve) > rows ||
@@ -160,18 +147,15 @@ effect_view :: proc(data: []byte) -> (blob: ^Effect_Blob, ok: bool) {
 }
 
 effect_emitters :: proc "contextless" (data: []byte, blob: ^Effect_Blob) -> []Effect_Emitter {
-	bytes := blob_bytes(data, blob.emitters)
-	return ([^]Effect_Emitter)(raw_data(bytes))[:len(bytes) / size_of(Effect_Emitter)]
+	return blob_records(data, blob.emitters, Effect_Emitter)
 }
 
 effect_modules :: proc "contextless" (data: []byte, e: Effect_Emitter) -> []Effect_Module {
-	bytes := blob_bytes(data, e.modules)
-	return ([^]Effect_Module)(raw_data(bytes))[:len(bytes) / size_of(Effect_Module)]
+	return blob_records(data, e.modules, Effect_Module)
 }
 
 effect_curves :: proc "contextless" (data: []byte, blob: ^Effect_Blob) -> []Effect_Curve_Row {
-	bytes := blob_bytes(data, blob.curves)
-	return ([^]Effect_Curve_Row)(raw_data(bytes))[:len(bytes) / size_of(Effect_Curve_Row)]
+	return blob_records(data, blob.curves, Effect_Curve_Row)
 }
 
 // Effect_Emitter_Contents is an emitter as effect_write takes it: its record, whose name, modules and curves come from
