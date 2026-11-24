@@ -183,7 +183,6 @@ public sealed partial class EditorShell
             ActiveViewport = viewport;
         }
         SettingsViewport = viewport;
-        Commands.InvalidateAll();
         ActiveViewportChanged?.Invoke();
         LooksChanged();
         // The viewport commands show the settings of the viewport that they act on.
@@ -228,7 +227,6 @@ public sealed partial class EditorShell
         // The gizmo keeps its size on screen, so a new frame size changes it.
         SendGizmo();
         SendCaptureSource(resend: false);
-        Commands.InvalidateAll();
         ViewportsChanged?.Invoke();
     }
 
@@ -280,7 +278,6 @@ public sealed partial class EditorShell
         {
             SceneViews = views;
             SaveViewportFile();
-            Commands.InvalidateAll();
             SceneViewsChanged?.Invoke();
         }
         return true;
@@ -295,6 +292,9 @@ public sealed partial class EditorShell
 
     /// <summary>The scene view that the Projection and 2D View commands act on: the settings viewport, or the active one when that is the Game view.</summary>
     public EditorViewport ProjectionViewport => SettingsViewport.HasCamera ? SettingsViewport : ActiveViewport;
+
+    /// <summary>A scene view's camera may have a new projection: one chosen, or a turn to look along an axis.</summary>
+    public event Action? CameraProjectionChanged;
 
     /// <summary>
     /// Sets a scene view's projection, perspective or orthographic, the one place that chooses it: the camera changes
@@ -314,7 +314,7 @@ public sealed partial class EditorShell
         {
             SaveViewportFile();
         }
-        Commands.InvalidateAll();
+        CameraProjectionChanged?.Invoke();
         return true;
     }
 
@@ -365,7 +365,7 @@ public sealed partial class EditorShell
             viewport.Turn = null;
             turn.Step(viewport.Camera, CameraTurn.Duration);
         }
-        Commands.InvalidateAll();
+        CameraProjectionChanged?.Invoke();
         return true;
     }
 
@@ -532,6 +532,5 @@ public sealed partial class EditorShell
         viewport.Guides = guides;
         SaveViewportFile();
         GuidesChanged?.Invoke(viewport);
-        Commands.InvalidateAll();
     }
 }

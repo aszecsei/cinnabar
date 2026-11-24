@@ -104,7 +104,6 @@ public sealed partial class EditorShell
         Landscape.CancelStroke();
         Landscape.Sync();
         SendGizmo();
-        Commands.InvalidateAll();
         ModeChanged?.Invoke();
         // Which sublevels the world has follows the mode: the editor's choice in Edit, and the active set outside it.
         SublevelsChanged?.Invoke();

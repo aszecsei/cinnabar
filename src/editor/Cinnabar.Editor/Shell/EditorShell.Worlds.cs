@@ -65,7 +65,6 @@ public sealed partial class EditorShell
     public void SetPreview(WorldPreview preview)
     {
         Preview = preview;
-        Commands.InvalidateAll();
         WorldStateChanged?.Invoke();
         SendWorldView();
     }

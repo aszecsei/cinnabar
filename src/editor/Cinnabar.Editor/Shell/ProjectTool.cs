@@ -29,6 +29,9 @@ public sealed class ProjectTool(string toolPath, string workingDirectory, StartP
     /// <summary>A line of the tool's output.</summary>
     public event Action<string>? Output;
 
+    /// <summary>A run started: <see cref="Current"/> is <see cref="Running"/>.</summary>
+    public event Action? Started;
+
     /// <summary>A run ended: its command and the tool's exit code, which is 0 when it did what it was asked.</summary>
     public event Action<string, int>? Finished;
 
@@ -54,6 +57,7 @@ public sealed class ProjectTool(string toolPath, string workingDirectory, StartP
         }
         var running = new Running(command, process);
         Current = running;
+        Started?.Invoke();
         process.Output += line => Post(() =>
         {
             if (Current == running)

@@ -185,7 +185,6 @@ public sealed class UiEditor : PreviewOwner, IGraphEditor
             SelectionChanged?.Invoke();
         }
         Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
         // A color picker's steps check too, a moment after the last, so the canvas follows the picker.
         Checks.Schedule();
     }

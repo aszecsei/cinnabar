@@ -20,8 +20,7 @@ public sealed class SceneVisibility(
     EditorSettings settings,
     ConsoleLog console,
     Func<IReadOnlyList<(uint Number, string Path)>> scenes,
-    Action<string, string, string> write,
-    Action changed)
+    Action<string, string, string> write)
 {
     public const string FileName = "scene-views.json";
 
@@ -103,7 +102,6 @@ public sealed class SceneVisibility(
         }
         Save();
         Send();
-        changed();
         Changed?.Invoke();
     }
 

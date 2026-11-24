@@ -289,4 +289,32 @@ public sealed class CutsceneEditorTests : IDisposable
         shell.Workspaces.Switch(shell.Workspaces.Find("general")!);
         Assert.NotNull(FindDocument(shell, editor));
     }
+
+    [Fact]
+    public void AScrubOfThePlayheadRefreshesTheCommandsOncePerTurnAndAClosedTabNoMore()
+    {
+        var (shell, editor, _) = Intro();
+        using var _ = shell;
+        var save = shell.Commands.Get(EditorCommands.Save);
+        shell.Commands.Flush();
+        var changes = 0;
+        save.Changed += () => changes++;
+
+        for (var frame = 1; frame <= 30; frame++)
+        {
+            editor.SetPlayhead(frame * editor.FrameTicks);
+        }
+        Assert.Equal(30 * editor.FrameTicks, editor.Playhead);
+        Assert.Equal(0, changes);
+        shell.Commands.Flush();
+        Assert.Equal(1, changes);
+
+        // The tab that closed is no longer observed: its playhead asks for nothing.
+        shell.CloseGraph(editor, discard: true);
+        shell.Commands.Flush();
+        changes = 0;
+        editor.SetPlayheadFromGame(0);
+        shell.Commands.Flush();
+        Assert.Equal(0, changes);
+    }
 }

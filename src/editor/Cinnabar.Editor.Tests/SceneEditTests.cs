@@ -90,6 +90,8 @@ public sealed class SceneEditTests : IDisposable
 
         var edit = shell.TryBeginEdit("Move Door", "the gizmo")!;
         edit.Preview(new Rename(1, "Dragged"));
+        // The views learn on the dispatcher's next turn, which the test runs.
+        shell.Commands.Flush();
         Assert.True(invalidated > 0);
         Assert.False(save.CanExecute);
         Assert.False(saveAs.CanExecute);
@@ -101,6 +103,7 @@ public sealed class SceneEditTests : IDisposable
 
         invalidated = 0;
         edit.Cancel();
+        shell.Commands.Flush();
         Assert.True(invalidated > 0);
         Assert.True(save.CanExecute);
         Assert.True(saveAs.CanExecute);

@@ -46,13 +46,16 @@ public sealed partial class EditorShell
         return File.Exists(path) ? (File.GetLastWriteTimeUtc(path) - DateTime.UnixEpoch).Ticks * 100 : 0;
     }
 
+    /// <summary>What Undo follows changed: the scene, or a cutscene that was keyed.</summary>
+    public event Action? UndoTargetChanged;
+
     // The one writer of what was edited last: each committed scene edit, and each key.
     internal void Edited(UndoTarget target)
     {
         if (target != _undoTarget)
         {
             _undoTarget = target;
-            Commands.InvalidateAll();
+            UndoTargetChanged?.Invoke();
         }
     }
 

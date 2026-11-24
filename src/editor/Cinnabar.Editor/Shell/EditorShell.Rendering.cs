@@ -64,7 +64,6 @@ public sealed partial class EditorShell
         viewport.Settings = settings;
         SendViewportSettings(viewport);
         SaveViewportFile();
-        Commands.InvalidateAll();
         ViewportSettingsChanged?.Invoke();
     }
 

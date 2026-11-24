@@ -18,4 +18,7 @@ public interface IGraphEditor : IDisposable
 
     /// <summary>The checks of the unsaved text.</summary>
     ICookChecks Checks { get; }
+
+    /// <summary>The editor's document or its own state changed, which the shell's commands may read.</summary>
+    event Action? Changed;
 }

@@ -56,7 +56,6 @@ public sealed partial class EditorShell
             c.Group.Length > 0 ? c.Group : "Commands",
             GameCommandPrefix + c.Id)));
         RibbonChanged?.Invoke();
-        Commands.InvalidateAll();
     }
 
     /// <summary>Runs a game command in the game, with the selection that the game has.</summary>

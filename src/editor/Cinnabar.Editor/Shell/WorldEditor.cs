@@ -56,7 +56,6 @@ public sealed class WorldEditor : IGraphEditor
     void OnDocumentChanged()
     {
         Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
         _shell.OnWorldChanged();
         if (!Document.InTransaction)
         {

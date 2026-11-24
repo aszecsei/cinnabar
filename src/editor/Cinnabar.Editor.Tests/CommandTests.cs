@@ -187,4 +187,68 @@ public class CommandTests
         commands.Refresh(canvas);
         Assert.Equal(3, changes);
     }
+
+    [Fact]
+    public void RequestsBeforeTheDispatchersTurnRefreshTheCommandsOnce()
+    {
+        var posted = new List<Action>();
+        var commands = new CommandRegistry(posted.Add);
+        var save = commands.Register(new Command("scene.save", "Save", () => { }));
+        var changes = 0;
+        save.Changed += () => changes++;
+        var owner = (Action?)null;
+        commands.InvalidateOn(h => owner += h);
+
+        for (var i = 0; i < 5; i++)
+        {
+            owner!();
+        }
+        commands.RequestInvalidate();
+        // One turn is posted for all of them, and nothing is refreshed before it runs.
+        Assert.Single(posted);
+        Assert.Equal(0, changes);
+        posted[0]();
+        Assert.Equal(1, changes);
+        // A run of the turn again, as Flush after it, refreshes nothing more.
+        commands.Flush();
+        Assert.Equal(1, changes);
+
+        // A request after the turn posts another.
+        owner!();
+        Assert.Equal(2, posted.Count);
+        posted[1]();
+        Assert.Equal(2, changes);
+    }
+
+    [Fact]
+    public void AClosedRegistryRunsNoRefreshThatWaitsAndPostsNoOther()
+    {
+        var posted = new List<Action>();
+        var commands = new CommandRegistry(posted.Add);
+        var save = commands.Register(new Command("scene.save", "Save", () => { }));
+        var changes = 0;
+        save.Changed += () => changes++;
+
+        commands.RequestInvalidate();
+        commands.Close();
+        posted[0]();
+        commands.RequestInvalidate();
+
+        Assert.Single(posted);
+        Assert.Equal(0, changes);
+    }
+
+    [Fact]
+    public void WithoutAPostARequestRefreshesAtOnce()
+    {
+        var commands = new CommandRegistry();
+        var save = commands.Register(new Command("scene.save", "Save", () => { }));
+        var changes = 0;
+        save.Changed += () => changes++;
+
+        commands.RequestInvalidate();
+        commands.RequestInvalidate();
+
+        Assert.Equal(2, changes);
+    }
 }

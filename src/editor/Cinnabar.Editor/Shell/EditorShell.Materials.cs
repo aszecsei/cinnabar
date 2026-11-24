@@ -109,6 +109,7 @@ public sealed partial class EditorShell
         var editor = kind.Create(this, document, previewId);
         // The document's activation reads the list, so the editor is in it first.
         _graphEditors.Add(editor);
+        ObserveCommandState(editor, observe: true);
         if (Host.Linked && editor is PreviewOwner owner)
         {
             owner.SendPreview();
@@ -181,7 +182,6 @@ public sealed partial class EditorShell
             ActiveGraphEditor = active;
             CutscenePreview.OnActivated(active as CutsceneEditor);
             EndBindingPickFor(active as CutsceneEditor, null);
-            Commands.InvalidateAll();
             GraphEditorsChanged?.Invoke();
         }
     }
@@ -208,6 +208,7 @@ public sealed partial class EditorShell
         {
             return;
         }
+        ObserveCommandState(editor, observe: false);
         (editor as PreviewOwner)?.ClosePreview();
         kind.OnClosed(this, editor);
         _discarding.Remove(editor);
@@ -216,7 +217,6 @@ public sealed partial class EditorShell
         {
             ActiveGraphEditor = null;
         }
-        Commands.InvalidateAll();
         GraphEditorsChanged?.Invoke();
         SendWorldView();
     }

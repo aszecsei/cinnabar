@@ -33,7 +33,6 @@ public sealed partial class Keying
         _shell.PreviewValues.Follow();
         FollowWatches();
         Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
     }
 
     /// <summary>The entity that a binding would possess for a handle, or null for one of no scene, or of a scene with no GUID yet.</summary>

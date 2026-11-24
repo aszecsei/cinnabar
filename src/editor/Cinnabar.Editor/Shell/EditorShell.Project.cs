@@ -113,8 +113,11 @@ public sealed partial class EditorShell
         {
             Console.Add(LogLevel.Error, $"project: cannot write {path}: {e.Message}");
         }
-        Commands.InvalidateAll();
+        ProjectSettingsChanged?.Invoke();
     }
+
+    /// <summary>The editor wrote the project's settings file, as a quality preset or an output mode.</summary>
+    public event Action? ProjectSettingsChanged;
 
     static string? Label(string? name) => OutputModes.FirstOrDefault(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase)).Label;
 
@@ -129,8 +132,11 @@ public sealed partial class EditorShell
         {
             Console.Add(LogLevel.Error, $"project: cannot write {path}: {e.Message}");
         }
-        Commands.InvalidateAll();
+        ProjectSettingsChanged?.Invoke();
     }
+
+    /// <summary>A game window opened or closed (see <see cref="RunGame"/>).</summary>
+    public event Action? GameWindowChanged;
 
     /// <summary>
     /// Opens the game in its own window, as <c>just dev</c> does, with the scene that it loads itself, the editor's content
@@ -151,7 +157,7 @@ public sealed partial class EditorShell
                     _gameWindow = null;
                     process.Dispose();
                     Console.Add(code == 0 ? LogLevel.Info : LogLevel.Warning, $"game window: exited with code {code}");
-                    Commands.InvalidateAll();
+                    GameWindowChanged?.Invoke();
                 }
             });
         }
@@ -159,7 +165,7 @@ public sealed partial class EditorShell
         {
             Console.Add(LogLevel.Error, $"game window: cannot start {_options.HostPath}: {e.Message}");
         }
-        Commands.InvalidateAll();
+        GameWindowChanged?.Invoke();
     }
 
     /// <summary>
@@ -179,7 +185,6 @@ public sealed partial class EditorShell
             Console.Add(code == 0 ? LogLevel.Info : LogLevel.Error, code == 0
                 ? command == "export" ? $"project: exported to {Path.Combine(ProjectDirectory, "build", "release")}" : $"project: {command} done"
                 : $"project: {command} failed with code {code}");
-            Commands.InvalidateAll();
         };
     }
 
@@ -190,14 +195,12 @@ public sealed partial class EditorShell
     public void BuildProject()
     {
         Builder.Run("build", ProjectDirectory);
-        Commands.InvalidateAll();
     }
 
     /// <summary>Writes a release into the project's <c>build/release</c>, as <c>cinnabar export</c> does. Save the scene first: the export cooks the files.</summary>
     public void ExportProject()
     {
         Builder.Run("export", ProjectDirectory);
-        Commands.InvalidateAll();
     }
 
     /// <summary>The window asks for another project's folder and opens it in a new editor.</summary>
@@ -210,6 +213,6 @@ public sealed partial class EditorShell
         var process = _gameWindow;
         _gameWindow = null;
         process?.Dispose();
-        Commands.InvalidateAll();
+        GameWindowChanged?.Invoke();
     }
 }

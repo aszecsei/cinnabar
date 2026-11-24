@@ -120,7 +120,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
         _entityBindings = BindingsOfEntities(_shell.Selection.Entities);
         EndStalePick();
         Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
         if (!Document.InTransaction)
         {
             Checks.Schedule();
@@ -164,7 +163,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
         Replace(next);
         EndStalePick();
         Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
         SelectBoundEntities();
     }
 
@@ -300,7 +298,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
         _playhead = at;
         PlayheadChanged?.Invoke();
         _shell.CutscenePreview.OnPlayheadMoved(this);
-        _shell.Commands.InvalidateAll();
         return true;
     }
 
@@ -321,7 +318,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
             {
                 _snap = value;
                 Changed?.Invoke();
-                _shell.Commands.InvalidateAll();
             }
         }
     }
@@ -337,7 +333,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
                 _showFrames = value;
                 SaveView();
                 Changed?.Invoke();
-                _shell.Commands.InvalidateAll();
             }
         }
     }
@@ -363,7 +358,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
         {
             SaveView();
             Changed?.Invoke();
-            _shell.Commands.InvalidateAll();
         }
     }
 
@@ -383,7 +377,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
         {
             SaveView();
             Changed?.Invoke();
-            _shell.Commands.InvalidateAll();
             _shell.CutscenePreview.OnMixChanged(this);
         }
     }
@@ -418,7 +411,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
             field = value;
             SaveView();
             Changed?.Invoke();
-            _shell.Commands.InvalidateAll();
             _shell.CutscenePreview.OnMixChanged(this);
         }
     }
@@ -514,7 +506,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     void LoopChanged(bool plays = true)
     {
         Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
         if (plays)
         {
             _shell.CutscenePreview.OnLoopChanged(this);
@@ -646,7 +637,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
             Replace(kept);
         }
         Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
     }
 
     /// <summary>The track of the primary selection: the selected track, or the track of a selected section, event or key.</summary>
@@ -660,6 +650,9 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
 
     /// <summary>Which pane has the keyboard. F, Delete and the tangent commands act on the curve editor while it does.</summary>
     public CutscenePane KeyboardPane => _pane;
+
+    /// <summary><see cref="KeyboardPane"/> changed.</summary>
+    public event Action? KeyboardPaneChanged;
 
     /// <summary>
     /// The one writer of <see cref="KeyboardPane"/>, which each pane's view calls as the focus moves. When neither pane
@@ -677,7 +670,7 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
             EndNudge();
             EndShuttleHold();
         }
-        _shell.Commands.InvalidateAll();
+        KeyboardPaneChanged?.Invoke();
     }
 
     /// <summary>A pane lost the keyboard to something outside it: nothing has it, unless the other pane took it first.</summary>
@@ -731,7 +724,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
                     SetKeyboardPane(CutscenePane.Timeline);
                 }
                 Changed?.Invoke();
-                _shell.Commands.InvalidateAll();
             }
         }
     }
@@ -749,7 +741,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
             {
                 _valueSnap = value;
                 Changed?.Invoke();
-                _shell.Commands.InvalidateAll();
             }
         }
     }
@@ -764,7 +755,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
             {
                 _curvesNormalized = value;
                 Changed?.Invoke();
-                _shell.Commands.InvalidateAll();
             }
         }
     }
@@ -1036,7 +1026,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
         if (CutsceneEdits.Copy(File, _selection) is { } clip)
         {
             _shell.CutsceneClipboard = clip with { Source = Guid };
-            _shell.Commands.InvalidateAll();
         }
     }
 
@@ -1052,7 +1041,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
         Own(() => Document.Edit("Cut", f => CutsceneEdits.Delete(f, paths, ripple: false, _locked)));
         Replace([]);
         Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
     }
 
     /// <summary>
@@ -1342,7 +1330,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
         {
             Replace([]);
             Changed?.Invoke();
-            _shell.Commands.InvalidateAll();
         }
     }
 
@@ -1685,7 +1672,6 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
         Own(() => Document.Edit("Delete Binding", f => CutsceneBindings.Remove(f, id)));
         Replace([]);
         Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
     }
 
     /// <summary>

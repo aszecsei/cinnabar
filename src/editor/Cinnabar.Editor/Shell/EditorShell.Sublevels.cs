@@ -184,7 +184,6 @@ public sealed partial class EditorShell
     void OnSublevelsChanged()
     {
         SyncSublevelCommands();
-        Commands.InvalidateAll();
         SublevelsChanged?.Invoke();
     }
 
