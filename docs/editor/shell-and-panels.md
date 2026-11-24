@@ -136,6 +136,15 @@ Every box in the panels and the asset editors that edits a value commits in the 
 - **Refusals:** a text that does not parse, a number outside the range that the setter takes, or a value that the setter refuses, such as a name that another has, is not set. The box puts the value back and shows the problem as its tip until the next commit or Escape. The panel does not build again for it, and the box writes nothing to the console. A setter that says why itself still does, as a field of the properties panel and the UI editor's id and style name do.
 - **Whose value:** in the properties panel, the value is the host's, and the box keeps what the user types while the host's values arrive. A box over a value that other controls change too, such as the UI editor's custom screen size, which its presets set, reads the editor's value, and shows it again when it shows again. Elsewhere, the value is what the box started with, and then each text that it committed, since the panel builds again when its document changes.
 
+### Details panels
+
+The details of the material, animation graph, decision, UI and cutscene editors show the selected node, element or block as rows. Each is a `DetailsPanel` (in `Panels/DetailsPanel.cs`), which builds its rows in one way:
+
+- **Built when what they show changes:** each panel has a key of what its rows depend on, such as the node's fields and its problems. The panel builds the rows again only when the key changes, so a box keeps its focus while a drag moves its node. A change that the key does not have, such as a cook that renames a material function, builds the rows again anyway.
+- **Held during a drag:** the UI editor holds its rows while a drag or a picker's session is open, and the cutscene editor holds a block's rows while a drag edits it. The rows build when the drag ends.
+- **One build at a time:** a build never starts inside another (`RebuildGate`), as in the properties panel. A problem from the cook daemon can arrive while the user types in a box. The build that it starts clears the rows, which takes the focus from the box, so the box commits its text. The build that the commit asks for runs after the first one ends, and the rows are built once.
+- **Problems:** the details panels, the asset editors' side panels and the content browser's details show a problem in one way (`Kit.ProblemText`): an error or a warning colour, after its line, and its column if it has one, where the panel shows it. In the content browser, a click on a problem opens its file.
+
 ### Outliner
 
 - The outliner is a virtualized list of the visible rows of the tree, indented by depth. A tree control with one item per entity does not scale to tens of thousands of entities.

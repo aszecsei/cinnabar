@@ -16,106 +16,68 @@ namespace Cinnabar.Editor.Materials;
 /// The material editor's details: the selected node's properties and the values of its inputs that no link gives, with
 /// its problems. Without a selected node, the material's problems that are on no node.
 /// </summary>
-sealed class NodeDetails : ScrollViewer
+sealed class NodeDetails : DetailsPanel
 {
-    // A subclass takes ScrollViewer's template only by its style key.
-    protected override Type StyleKeyOverride => typeof(ScrollViewer);
-
     readonly EditorShell _shell;
     readonly MaterialEditor _editor;
-    readonly StackPanel _content = new() { Margin = new Thickness(8), Spacing = 2 };
-    string _shown = "";
 
     public NodeDetails(EditorShell shell, MaterialEditor editor)
     {
         _shell = shell;
         _editor = editor;
-        Content = _content;
-        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-        new ViewSubscriptions(this, attached: Refresh)
+        Subscriptions
             .Add(() => _editor.SelectionChanged += Refresh, () => _editor.SelectionChanged -= Refresh)
             .Add(() => _editor.Changed += Refresh, () => _editor.Changed -= Refresh)
             .Add(() => _editor.ProblemsChanged += Refresh, () => _editor.ProblemsChanged -= Refresh)
+            // A function node names its function from the content, which a cook changes.
             .Add(() => _shell.Assets.Changed += Rebuild, () => _shell.Assets.Changed -= Rebuild);
     }
 
-    // A function node names its function from the content, which a cook changes.
-    void Rebuild()
-    {
-        _shown = "";
-        Refresh();
-    }
-
-    // The panel builds again only when what it shows changed, so a box keeps its focus while a drag moves the node.
-    void Refresh()
+    protected override string ShownKey()
     {
         var node = _editor.SelectedNode;
         var graph = _editor.Document.Graph;
-        var shown = node == null
+        return node == null
             ? "none|" + string.Join("|", _editor.Problems.Select(p => p.Text))
             : $"{node.Id}|{node.Kind}|{string.Join(",", node.Fields.Select(f => f.Name + "=" + f.Value.Write()))}|{graph.Shading}"
                 + $"|{string.Join(",", graph.Params.Select(p => p.Name + p.Type))}|{string.Join(",", graph.Switches.Select(s => s.Name))}"
                 + $"|{string.Join("|", _editor.Problems.Where(p => p.Node == node.Id).Select(p => p.Text))}";
-        if (shown == _shown)
-        {
-            return;
-        }
-        _shown = shown;
-        _content.Children.Clear();
+    }
+
+    protected override void Fill()
+    {
+        var node = _editor.SelectedNode;
+        var graph = _editor.Document.Graph;
         if (node == null)
         {
-            _content.Children.Add(Dim("Select a node to see its properties and the values of its inputs."));
-            var general = _editor.Problems.Where(p => p.Node == null).ToList();
-            if (general.Count > 0)
-            {
-                _content.Children.Add(Heading("Problems"));
-                AddProblems(general);
-            }
+            Rows.Add(Dim("Select a node to see its properties and the values of its inputs."));
+            AddProblems(_editor.Problems.Where(p => p.Node == null));
             return;
         }
         var kind = _editor.Catalog.Kind(node.Kind);
-        _content.Children.Add(new TextBlock { Text = _editor.Label(node.Id), FontSize = 15, FontWeight = FontWeight.SemiBold });
+        Rows.Add(new TextBlock { Text = _editor.Label(node.Id), FontSize = 15, FontWeight = FontWeight.SemiBold });
         if (kind != null)
         {
-            _content.Children.Add(Dim(kind.Description));
+            Rows.Add(Dim(kind.Description));
         }
         if (kind is { Properties.Length: > 0 })
         {
-            _content.Children.Add(Heading("Properties"));
+            Rows.Add(Heading("Properties"));
             foreach (var p in kind.Properties)
             {
-                _content.Children.Add(Row(MaterialEditor.Humanize(p.Name), PropertyEditor(node, p)));
+                Rows.Add(Row(MaterialEditor.Humanize(p.Name), PropertyEditor(node, p)));
             }
         }
         var (inputs, _) = _editor.Catalog.PinsOf(graph, node);
         if (inputs.Count > 0)
         {
-            _content.Children.Add(Heading("Inputs"));
+            Rows.Add(Heading("Inputs"));
             foreach (var pin in inputs)
             {
-                _content.Children.Add(InputRow(node, pin));
+                Rows.Add(InputRow(node, pin));
             }
         }
-        var problems = _editor.Problems.Where(p => p.Node == node.Id).ToList();
-        if (problems.Count > 0)
-        {
-            _content.Children.Add(Heading("Problems"));
-            AddProblems(problems);
-        }
-    }
-
-    void AddProblems(IEnumerable<GraphProblem> problems)
-    {
-        foreach (var p in problems)
-        {
-            _content.Children.Add(new SelectableTextBlock
-            {
-                Text = p.Text,
-                Classes = { p.Error ? "error" : "warning" },
-                TextWrapping = TextWrapping.Wrap,
-                FontSize = 12,
-            });
-        }
+        AddProblems(_editor.Problems.Where(p => p.Node == node.Id));
     }
 
     Control PropertyEditor(GraphNode node, NodeProperty property)

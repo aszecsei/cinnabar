@@ -158,6 +158,36 @@ static class Kit
 
     public static TextBlock Dim(string text) => new() { Text = text, Classes = { "empty" }, TextWrapping = TextWrapping.Wrap };
 
+    /// <summary>A problem as every panel shows it, after its <paramref name="place"/>, such as <see cref="LinePlace"/>.</summary>
+    public static TextBlock ProblemText(IProblem problem, string place = "") => ProblemText(place + problem.Text, problem.Error);
+
+    /// <summary>
+    /// A problem's text in the error or the warning colour. With <paramref name="open"/>, a click opens where it is,
+    /// and the text cannot be selected, as a selectable text takes the press.
+    /// </summary>
+    public static TextBlock ProblemText(string text, bool error, Action? open = null)
+    {
+        var block = open == null ? new SelectableTextBlock() : new TextBlock { Cursor = new Cursor(StandardCursorType.Hand) };
+        block.Text = text;
+        block.Classes.Add(error ? "error" : "warning");
+        block.Foreground = error ? Palette.ErrorBrush : Palette.WarningBrush;
+        block.TextWrapping = TextWrapping.Wrap;
+        block.FontSize = 12;
+        if (open != null)
+        {
+            block.PointerPressed += (_, e) =>
+            {
+                open();
+                e.Handled = true;
+            };
+        }
+        return block;
+    }
+
+    /// <summary>A problem's line in a text, and its column if it has one, as its place: "Line 3: ", or nothing for one on no line.</summary>
+    public static string LinePlace(int line, int column = 0) =>
+        line <= 0 ? "" : column > 0 ? $"Line {line}, column {column}: " : $"Line {line}: ";
+
     /// <summary>A row of a name and a control, as the properties panel's fields are.</summary>
     public static Grid Row(string name, Control value, params Control[] after)
     {

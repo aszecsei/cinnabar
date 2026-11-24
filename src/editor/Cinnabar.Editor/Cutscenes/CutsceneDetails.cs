@@ -15,101 +15,91 @@ namespace Cinnabar.Editor.Cutscenes;
 /// The details strip of a cutscene (see docs/editor/cutscene-editor.md#the-tab): the selected block's fields, with a
 /// row for each of its settings. A time's name scrubs it a frame a pixel, in one undo entry, and Esc cancels the drag.
 /// </summary>
-sealed class CutsceneDetails : ScrollViewer
+sealed class CutsceneDetails : DetailsPanel
 {
     readonly CutsceneEditor _editor;
-    readonly StackPanel _content = new() { Margin = new Thickness(8), Spacing = 2, MaxWidth = 520, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left };
-    string _shown = "";
-
-    // A subclass takes ScrollViewer's template only by its style key.
-    protected override Type StyleKeyOverride => typeof(ScrollViewer);
 
     public CutsceneDetails(CutsceneEditor editor)
+        : base(new StackPanel { Margin = new Thickness(8), Spacing = 2, MaxWidth = 520, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left })
     {
         _editor = editor;
-        Content = _content;
-        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-        new ViewSubscriptions(this, attached: Refresh)
-            .Add(() => _editor.Changed += Refresh, () => _editor.Changed -= Refresh);
+        Subscriptions.Add(() => _editor.Changed += Refresh, () => _editor.Changed -= Refresh);
     }
 
-    void Refresh()
+    // A drag shows in the outline and the toolbar. Its own rows build again only when it ends.
+    protected override bool Holds => _editor.Document.InTransaction && _editor.Selected != null;
+
+    protected override string ShownKey()
     {
         var block = _editor.Selected;
-        // A drag shows in the outline and the toolbar. Its own rows build again only when it ends.
-        if (_editor.Document.InTransaction && block != null)
-        {
-            return;
-        }
         // A binding's state and whether a delete can remove it depend on the scenes and the other blocks.
         var binding = block?.Kind == CutsceneBlockKind.Binding ? BindingKey(block) : "";
-        var shown = block == null ? "" : $"{_editor.Selection}#{string.Join("\n", block.LineTexts)}#{_editor.File.Rate}{binding}";
-        if (shown == _shown)
-        {
-            return;
-        }
-        _shown = shown;
-        _content.Children.Clear();
+        return block == null ? "" : $"{_editor.Selection}#{string.Join("\n", block.LineTexts)}#{_editor.File.Rate}{binding}";
+    }
+
+    protected override void Fill()
+    {
+        var block = _editor.Selected;
         if (block == null)
         {
-            _content.Children.Add(Dim("Select a row, a section, an event, a key or a marker to see its details."));
+            Rows.Add(Dim("Select a row, a section, an event, a key or a marker to see its details."));
             return;
         }
         var rate = _editor.File.Rate;
-        _content.Children.Add(Heading(block.Kind.ToString()));
+        Rows.Add(Heading(block.Kind.ToString()));
         if (block.Id is { } id)
         {
-            _content.Children.Add(Row("ID", new TextBlock { Text = id.ToString(System.Globalization.CultureInfo.InvariantCulture), FontSize = 12 }));
+            Rows.Add(Row("ID", new TextBlock { Text = id.ToString(System.Globalization.CultureInfo.InvariantCulture), FontSize = 12 }));
         }
         switch (block.Kind)
         {
             case CutsceneBlockKind.Binding or CutsceneBlockKind.Track:
                 if (block.TrackKind is { } kind)
                 {
-                    _content.Children.Add(Row("Kind", new TextBlock { Text = kind, FontSize = 12 }));
+                    Rows.Add(Row("Kind", new TextBlock { Text = kind, FontSize = 12 }));
                 }
-                _content.Children.Add(Row("Name", ValueBox(block.Name ?? "", "name", text =>
+                Rows.Add(Row("Name", ValueBox(block.Name ?? "", "name", text =>
                     _editor.EditSelected("Rename", b => b.SetName(text.Trim())))));
                 if (block.Kind == CutsceneBlockKind.Binding)
                 {
                     AddBindingRows(block);
                     if (block.Id is { } camera && _editor.IsCamera(block))
                     {
-                        _content.Children.Add(new CutsceneLensRows(_editor, camera));
+                        Rows.Add(new CutsceneLensRows(_editor, camera));
                     }
                 }
                 break;
             case CutsceneBlockKind.Section or CutsceneBlockKind.Range:
-                _content.Children.Add(TicksRow("Start", "Move Start", b => b.Start, (b, t) => b.SetSpan(t, b.End ?? t + 1), rate));
-                _content.Children.Add(TicksRow("End", "Move End", b => b.End, (b, t) => b.SetSpan(b.Start ?? 0, t), rate));
+                Rows.Add(TicksRow("Start", "Move Start", b => b.Start, (b, t) => b.SetSpan(t, b.End ?? t + 1), rate));
+                Rows.Add(TicksRow("End", "Move End", b => b.End, (b, t) => b.SetSpan(b.Start ?? 0, t), rate));
                 break;
             case CutsceneBlockKind.Trigger:
-                _content.Children.Add(TicksRow("Time", "Move Trigger", b => b.Start, (b, t) => b.SetTime(t), rate));
+                Rows.Add(TicksRow("Time", "Move Trigger", b => b.Start, (b, t) => b.SetTime(t), rate));
                 break;
             case CutsceneBlockKind.Key:
-                _content.Children.Add(TicksRow("Time", "Move Key", b => b.Start, (b, t) => b.SetTime(t), rate));
-                _content.Children.Add(Row("Value", ValueBox(block.KeyValue ?? "", "value", text =>
+                Rows.Add(TicksRow("Time", "Move Key", b => b.Start, (b, t) => b.SetTime(t), rate));
+                Rows.Add(Row("Value", ValueBox(block.KeyValue ?? "", "value", text =>
                     _editor.EditSelected("Set Key Value", b => b.SetKeyValue(text)))));
-                _content.Children.Add(Row("Interpolation", ValueBox(block.KeyInterpolation ?? "", "linear", text =>
+                Rows.Add(Row("Interpolation", ValueBox(block.KeyInterpolation ?? "", "linear", text =>
                     _editor.EditSelected("Set Interpolation", b => b.SetKeyInterpolation(text)))));
                 break;
             case CutsceneBlockKind.Marker:
                 // The markers stay in time order, as the editor keeps them.
-                _content.Children.Add(TicksRow("Time", "Move Marker", b => b.Start, (b, t) =>
+                Rows.Add(TicksRow("Time", "Move Marker", b => b.Start, (b, t) =>
                 {
                     b.SetTime(Math.Min(t, _editor.File.Length ?? t));
                     CutsceneFile.SortChildren(b.Parent!);
                 }, rate));
-                _content.Children.Add(Row("Name", ValueBox(block.Name ?? "", NotEmpty("a name"), "name", text =>
+                Rows.Add(Row("Name", ValueBox(block.Name ?? "", NotEmpty("a name"), "name", text =>
                     _editor.EditSelected("Rename Marker", b => b.SetName(text.Trim())))));
-                _content.Children.Add(Row("Color", ValueBox(block.Get("color") is { } color ? TextQuote.Unquote(color) ?? color : "", "#f5a623", text =>
+                Rows.Add(Row("Color", ValueBox(block.Get("color") is { } color ? TextQuote.Unquote(color) ?? color : "", "#f5a623", text =>
                 {
                     var hex = text.Trim();
                     _editor.EditSelected("Set Marker Color", b => b.Set("color", hex.Length == 0 ? null : TextQuote.Quote(hex.StartsWith('#') ? hex : "#" + hex)));
                 })));
                 break;
             case CutsceneBlockKind.Cutscene:
-                _content.Children.Add(TicksRow("length", "Set Length", b => _editor.File.Length, (b, t) => b.Set("length", Format(Math.Max(t, 1))), rate));
+                Rows.Add(TicksRow("length", "Set Length", b => _editor.File.Length, (b, t) => b.Set("length", Format(Math.Max(t, 1))), rate));
                 break;
         }
         foreach (var (key, value) in block.Fields)
@@ -119,12 +109,12 @@ sealed class CutsceneDetails : ScrollViewer
                 continue;
             }
             var name = key;
-            _content.Children.Add(Row(name, ValueBox(value, NotEmpty("a value: the × removes the field"), "value", text =>
+            Rows.Add(Row(name, ValueBox(value, NotEmpty("a value: the × removes the field"), "value", text =>
                 _editor.EditSelected($"Set {name}", b => b.Set(name, text.Trim()))), SmallButton("×", $"Remove {name}", () => _editor.EditSelected($"Remove {name}", b => b.Set(name, null)))));
         }
         if (block.Kind is not (CutsceneBlockKind.Key or CutsceneBlockKind.Channel or CutsceneBlockKind.Marker))
         {
-            _content.Children.Add(Row("Add", ValueBox("", ValueFormats.Text.Where(t => Field(t) != null, "a name and a value, such as name = value"), "name = value", text =>
+            Rows.Add(Row("Add", ValueBox("", ValueFormats.Text.Where(t => Field(t) != null, "a name and a value, such as name = value"), "name = value", text =>
             {
                 var (key, value) = Field(text)!.Value;
                 _editor.EditSelected($"Set {key}", b => b.Set(key, value));
@@ -159,10 +149,10 @@ sealed class CutsceneDetails : ScrollViewer
             _ => "Binds",
         };
         var target = info.TargetName ?? (info.Kind == CutsceneBindingKind.Provided && _editor.StandInOf(id) == null ? "none" : "?");
-        _content.Children.Add(Row(what, new TextBlock { Text = target, FontSize = 12 }));
+        Rows.Add(Row(what, new TextBlock { Text = target, FontSize = 12 }));
         if (info.Kind == CutsceneBindingKind.Provided)
         {
-            _content.Children.Add(Dim($"A script gives this binding's entity when it plays the cutscene, as bindings = {{ [\"{block.Name}\"] = entity }}. "
+            Rows.Add(Dim($"A script gives this binding's entity when it plays the cutscene, as bindings = {{ [\"{block.Name}\"] = entity }}. "
                 + "The stand-in is yours, for the preview, and is not saved in the cutscene."));
             var use = SmallButton("Use Selection", _editor.StandInRefusal() ?? "Preview the slot with the selected entity.", _editor.StandInSelection);
             use.IsEnabled = _editor.StandInRefusal() == null;
@@ -171,11 +161,11 @@ sealed class CutsceneDetails : ScrollViewer
             ToolTip.SetTip(prefab, "Preview the slot with a prefab that the preview spawns.");
             var clear = SmallButton("Clear", "Preview the slot with nothing: its tracks do nothing.", () => _editor.SetStandIn(id, null));
             clear.IsEnabled = _editor.StandInOf(id) != null;
-            _content.Children.Add(Row("", use, prefab, clear));
+            Rows.Add(Row("", use, prefab, clear));
         }
         if (info.Reason is { } reason)
         {
-            _content.Children.Add(Dim(info.State == CutsceneBindingState.NotLoaded ? $"Not loaded: {reason}" : $"Broken: {reason}"));
+            Rows.Add(Dim(info.State == CutsceneBindingState.NotLoaded ? $"Not loaded: {reason}" : $"Broken: {reason}"));
         }
         if (info.Kind == CutsceneBindingKind.Possessed && info.State == CutsceneBindingState.Broken)
         {
@@ -190,14 +180,14 @@ sealed class CutsceneDetails : ScrollViewer
                     }
                 });
             pick.IsEnabled = armed || _editor.PickRefusal() == null;
-            _content.Children.Add(Row("Fix", pick));
+            Rows.Add(Row("Fix", pick));
             if (armed)
             {
-                _content.Children.Add(Dim("Select the entity for the binding to possess, in the viewport or the Outliner."));
+                Rows.Add(Dim("Select the entity for the binding to possess, in the viewport or the Outliner."));
             }
             foreach (var candidate in _editor.CandidatesOf(block))
             {
-                _content.Children.Add(Row("", SmallButton($"{candidate.Name} in {candidate.Scene}", "Point the binding at this entity, which has its name.",
+                Rows.Add(Row("", SmallButton($"{candidate.Name} in {candidate.Scene}", "Point the binding at this entity, which has its name.",
                     () => _editor.RebindTo(id, candidate.Entity))));
             }
         }
@@ -217,11 +207,11 @@ sealed class CutsceneDetails : ScrollViewer
         }
         if (converts.Count > 0)
         {
-            _content.Children.Add(Row("Convert to", converts[0], [.. converts.Skip(1)]));
+            Rows.Add(Row("Convert to", converts[0], [.. converts.Skip(1)]));
         }
         if (_editor.DeleteBindingRefusal() is { } deleteRefusal)
         {
-            _content.Children.Add(Dim($"Delete: {deleteRefusal}"));
+            Rows.Add(Dim($"Delete: {deleteRefusal}"));
         }
     }
 
