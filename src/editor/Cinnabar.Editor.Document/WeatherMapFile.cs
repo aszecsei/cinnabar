@@ -12,10 +12,7 @@ public static class WeatherMapFile
 
     /// <summary>The `.meta` file of a new weather map with a GUID: the daemon's comment, the GUID, and its import settings.</summary>
     public static string MetaText(string guid) =>
-        "# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).\n" +
-        $"guid = {guid}\n" +
-        $"usage = {Usage}\n" +
-        "\n[mip_map]\nenabled = false\n";
+        MetaFile.New(guid).Set("usage", Usage).Set("mip_map.enabled", "false").Text();
 
     /// <summary>A new asset's GUID, 32 hex digits as the daemon writes them.</summary>
     public static string NewGuid() => Guid.NewGuid().ToString("N");

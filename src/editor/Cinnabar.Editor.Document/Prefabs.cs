@@ -76,10 +76,10 @@ public sealed class PrefabDocument(string path, string guid, Scene scene, string
     public void Save()
     {
         var text = SceneFile.Write(Scene);
-        var meta = Path + ".meta";
+        var meta = Path + MetaFile.Extension;
         if (!File.Exists(meta))
         {
-            SceneDocument.WriteAtomically(meta, $"guid = {Guid}\n");
+            SceneDocument.WriteAtomically(meta, MetaFile.New(Guid).Text());
         }
         SceneDocument.WriteAtomically(Path, text);
         SavedText = text;

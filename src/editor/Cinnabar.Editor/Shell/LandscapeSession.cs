@@ -444,7 +444,7 @@ public sealed partial class LandscapeSession(EditorShell shell)
         {
             try
             {
-                var meta = map.Path + ".meta";
+                var meta = map.Path + MetaFile.Extension;
                 if (map.SavedRevision == null && !File.Exists(meta))
                 {
                     SceneDocument.WriteAtomically(meta, map.Kind == LandscapeMapKind.Layers ? LayersMeta(map.Guid) : MaskMeta(map.Guid));
@@ -465,13 +465,11 @@ public sealed partial class LandscapeSession(EditorShell shell)
 
     /// <summary>A new hole mask's <c>.meta</c>: a mask, with box mips and clamped, as docs/rendering/surfaces.md#holes asks.</summary>
     public static string MaskMeta(string guid) =>
-        "# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).\n" +
-        $"guid = {guid}\nusage = mask\n\n[mip_map]\nkernel = box\n\n[sampler]\nwrap = clamp\n";
+        MetaFile.New(guid).Set("usage", "mask").Set("mip_map.kernel", "box").Set("sampler.wrap", "clamp").Text();
 
     /// <summary>A new layer map's <c>.meta</c>: a data texture, its weights as they are, clamped.</summary>
     public static string LayersMeta(string guid) =>
-        "# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).\n" +
-        $"guid = {guid}\nusage = data\n\n[sampler]\nwrap = clamp\n";
+        MetaFile.New(guid).Set("usage", "data").Set("sampler.wrap", "clamp").Text();
 
     /// <summary>Lets go of each saved map whose cooked blob is current, so the host draws the blob.</summary>
     internal void ReleaseCooked()
