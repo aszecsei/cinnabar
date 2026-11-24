@@ -18,7 +18,7 @@ namespace Cinnabar.Editor.UiDocuments;
 /// itself has a clear button; what it takes from its styles or its parent shows dim, with where from, until it is set.
 /// With a style selected, the style's attributes.
 /// </summary>
-sealed class UiDetails : ScrollViewer
+sealed class UiDetails : DetailsPanel
 {
     // The attributes' groups, as docs/content/kinds/ui-documents.md#attributes has them.
     static readonly (string Name, string[] Attributes)[] Groups =
@@ -45,45 +45,25 @@ sealed class UiDetails : ScrollViewer
 
     readonly EditorShell _shell;
     readonly UiEditor _editor;
-    readonly StackPanel _panel = new() { Margin = new Thickness(8), Spacing = 2 };
-    string _shown = "";
-
-    // A subclass takes ScrollViewer's template only by its style key.
-    protected override Type StyleKeyOverride => typeof(ScrollViewer);
-
     public UiDetails(EditorShell shell, UiEditor editor)
     {
         _shell = shell;
         _editor = editor;
-        Content = _panel;
-        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-        new ViewSubscriptions(this, attached: Refresh)
+        Subscriptions
             .Add(() => _editor.Changed += Refresh, () => _editor.Changed -= Refresh)
             .Add(() => _editor.SelectionChanged += Refresh, () => _editor.SelectionChanged -= Refresh)
             .Add(() => _editor.ProblemsChanged += Rebuild, () => _editor.ProblemsChanged -= Rebuild)
             .Add(() => _shell.Assets.Changed += Rebuild, () => _shell.Assets.Changed -= Rebuild);
     }
 
-    void Rebuild()
-    {
-        _shown = "";
-        Refresh();
-    }
+    // A drag or a picker's session keeps its controls, so the one being used is not built again under it.
+    protected override bool Holds => _editor.Document.InTransaction;
 
-    void Refresh()
+    protected override string ShownKey() =>
+        $"{_editor.File.Text.GetHashCode()}:{_editor.SelectedNode}:{_editor.SelectedStyle}:{string.Join(',', _editor.States)}:{_editor.Problems.Count}";
+
+    protected override void Fill()
     {
-        // A drag or a picker's session keeps its controls, so the one being used is not built again under it.
-        if (_editor.Document.InTransaction)
-        {
-            return;
-        }
-        var shown = $"{_editor.File.Text.GetHashCode()}:{_editor.SelectedNode}:{_editor.SelectedStyle}:{string.Join(',', _editor.States)}:{_editor.Problems.Count}";
-        if (shown == _shown)
-        {
-            return;
-        }
-        _shown = shown;
-        _panel.Children.Clear();
         if (_editor.SelectedStyle is { } style && _editor.File.Style(style) is { } s)
         {
             ShowStyle(s);
@@ -94,7 +74,7 @@ sealed class UiDetails : ScrollViewer
         }
         else
         {
-            _panel.Children.Add(Dim("Select an element on the canvas or in the tree, or a style."));
+            Rows.Add(Dim("Select an element on the canvas or in the tree, or a style."));
         }
     }
 
@@ -102,14 +82,14 @@ sealed class UiDetails : ScrollViewer
 
     void ShowNode(UiNode node)
     {
-        _panel.Children.Add(Heading(UiCascade.Label(node)));
+        Rows.Add(Heading(UiCascade.Label(node)));
         if (node.ButtonText)
         {
-            _panel.Children.Add(Dim("A button's text is a text of its own, which takes the text style."));
+            Rows.Add(Dim("A button's text is a text of its own, which takes the text style."));
         }
         else
         {
-            _panel.Children.Add(Row("id", ValueBox(node.Id, ValueFormats.Text, "none", id => _editor.SetId(node.Index, id),
+            Rows.Add(Row("id", ValueBox(node.Id, ValueFormats.Text, "none", id => _editor.SetId(node.Index, id),
                 "not an id, or another element has it")));
             if (node.Kind is not ("ui" or "template"))
             {
@@ -123,32 +103,32 @@ sealed class UiDetails : ScrollViewer
                 }
                 var add = new Button { Content = "+", Flyout = menu, Classes = { "field-button" }, IsEnabled = menu.Items.Count > 0 };
                 ToolTip.SetTip(add, "Add a style to the element's");
-                _panel.Children.Add(Row("style", ValueBox(names, "none", list => _editor.SetStyles(node.Index, list.Split(' ', StringSplitOptions.RemoveEmptyEntries))), add));
+                Rows.Add(Row("style", ValueBox(names, "none", list => _editor.SetStyles(node.Index, list.Split(' ', StringSplitOptions.RemoveEmptyEntries))), add));
             }
             var takes = _editor.File.StylesOf(node);
             if (takes.Count > 0)
             {
-                _panel.Children.Add(Dim($"Takes {string.Join(", ", takes.Select(t => t.Name))}"));
+                Rows.Add(Dim($"Takes {string.Join(", ", takes.Select(t => t.Name))}"));
             }
         }
         if (node.Kind != "template")
         {
-            _panel.Children.Add(States());
+            Rows.Add(States());
         }
         foreach (var p in _editor.Problems.Where(p => p.Node == node.Index))
         {
-            _panel.Children.Add(ProblemText(p));
+            Rows.Add(ProblemText(p, LinePlace(p.Line, p.Column)));
         }
         if (node.Kind == "template")
         {
-            _panel.Children.Add(Dim("A template takes only an id. Its element is what scripts copy with Ui.add."));
+            Rows.Add(Dim("A template takes only an id. Its element is what scripts copy with Ui.add."));
             return;
         }
         var values = _editor.Values(node.Index);
         var attributes = Attributes.Where(a => a.Elements.Contains(node.Kind)).ToList();
         if (attributes.Count == 0)
         {
-            _panel.Children.Add(Dim("The attributes come from the cook daemon, once it links."));
+            Rows.Add(Dim("The attributes come from the cook daemon, once it links."));
         }
         ShowGroups(attributes, name => values.GetValueOrDefault(name), (name, value) => _editor.SetAttribute(node.Index, name, value), node.Index, null);
     }
@@ -169,17 +149,17 @@ sealed class UiDetails : ScrollViewer
 
     void ShowStyle(UiStyle style)
     {
-        _panel.Children.Add(Heading($"<style> {style.Name}"));
+        Rows.Add(Heading($"<style> {style.Name}"));
         if (style.State == "")
         {
-            _panel.Children.Add(Row("name", ValueBox(style.Name, ValueFormats.Text, "", name => _editor.RenameStyle(style.Name, name),
+            Rows.Add(Row("name", ValueBox(style.Name, ValueFormats.Text, "", name => _editor.RenameStyle(style.Name, name),
                 "not a name for a style, or another style has it")));
         }
         var takers = _editor.TakersOf(style.Name).Select(UiCascade.Label).ToList();
-        _panel.Children.Add(Dim(takers.Count == 0 ? "No element takes it." : $"Taken by {string.Join(", ", takers)}"));
+        Rows.Add(Dim(takers.Count == 0 ? "No element takes it." : $"Taken by {string.Join(", ", takers)}"));
         foreach (var p in _editor.Problems.Where(p => p.Style == style.Name))
         {
-            _panel.Children.Add(ProblemText(p));
+            Rows.Add(ProblemText(p, LinePlace(p.Line, p.Column)));
         }
         var own = style.Element.Attributes.Where(a => !UiCascade.NotValues.Contains(a.Name)).ToDictionary(a => a.Name, a => new UiValue(a.Value, UiSource.Own, ""));
         ShowGroups([.. Attributes], name => own.GetValueOrDefault(name), (name, value) => _editor.SetStyleAttribute(style.Name, name, value), null, style.Name);
@@ -194,10 +174,10 @@ sealed class UiDetails : ScrollViewer
             {
                 continue;
             }
-            _panel.Children.Add(Heading(group));
+            Rows.Add(Heading(group));
             foreach (var a in rows)
             {
-                _panel.Children.Add(AttributeRow(a, value(a.Name), v => set(a.Name, v), node, style));
+                Rows.Add(AttributeRow(a, value(a.Name), v => set(a.Name, v), node, style));
             }
         }
     }
@@ -301,14 +281,6 @@ sealed class UiDetails : ScrollViewer
         button.Flyout = flyout;
         return WithSwatch(button, ValueBox(value, placeholder, commit));
     }
-
-    static SelectableTextBlock ProblemText(UiProblem p) => new()
-    {
-        Text = p.Line > 0 ? $"{p.Line}:{p.Column}: {p.Text}" : p.Text,
-        Classes = { p.Error ? "error" : "warning" },
-        TextWrapping = TextWrapping.Wrap,
-        FontSize = 12,
-    };
 }
 
 /// <summary>A UI document's colors as the cooker reads them: #rgb, #rgba, #rrggbb, #rrggbbaa, or none.</summary>

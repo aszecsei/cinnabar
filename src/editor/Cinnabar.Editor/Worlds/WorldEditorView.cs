@@ -109,9 +109,7 @@ public sealed class WorldEditorView : DockPanel
         _rows.Children.Add(button);
         foreach (var p in _editor.Problems.Where(p => p.Line == 0 || _editor.SceneAt(p.Line) == null))
         {
-            var problem = AnimationGraphs.AnimationGraphPanel.ProblemText(p);
-            problem.Text = p.Line > 0 ? $"Line {p.Line}: {p.Text}" : p.Text;
-            _rows.Children.Add(problem);
+            _rows.Children.Add(ProblemText(p, LinePlace(p.Line)));
         }
     }
 
@@ -146,7 +144,7 @@ public sealed class WorldEditorView : DockPanel
         var column = new StackPanel { Spacing = 2, Children = { grid } };
         foreach (var problem in _editor.ProblemsOf(scene))
         {
-            column.Children.Add(AnimationGraphs.AnimationGraphPanel.ProblemText(problem));
+            column.Children.Add(ProblemText(problem));
         }
         return column;
     }

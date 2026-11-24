@@ -177,12 +177,7 @@ sealed class DecisionPanel : ScrollViewer
             _content.Children.Add(Heading("Problems"));
             foreach (var p in problems)
             {
-                var text = AnimationGraphs.AnimationGraphPanel.ProblemText(p);
-                if (p.Line > 0)
-                {
-                    text.Text = $"Line {p.Line}: {p.Text}";
-                }
-                _content.Children.Add(text);
+                _content.Children.Add(ProblemText(p, LinePlace(p.Line)));
             }
         }
     }

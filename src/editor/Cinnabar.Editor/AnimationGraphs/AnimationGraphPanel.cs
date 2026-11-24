@@ -120,14 +120,6 @@ sealed class AnimationGraphPanel : ScrollViewer
         }
     }
 
-    public static SelectableTextBlock ProblemText(GraphProblem p) => new()
-    {
-        Text = p.Text,
-        Classes = { p.Error ? "error" : "warning" },
-        TextWrapping = TextWrapping.Wrap,
-        FontSize = 12,
-    };
-
     const string NotAName = "not a name, or another has it";
 
     Control ParamView(AnimationGraphParam p)

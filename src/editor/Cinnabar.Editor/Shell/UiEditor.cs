@@ -9,7 +9,7 @@ using PreviewMesh = Cinnabar.Editor.Link.Protocol.PreviewMesh;
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>A problem of a UI document's text: on a node, on a style, or on the document, at its line and column.</summary>
-public sealed record UiProblem(int? Node, string? Style, string Text, bool Error, int Line = 0, int Column = 0);
+public sealed record UiProblem(int? Node, string? Style, string Text, bool Error, int Line = 0, int Column = 0) : Panels.IProblem;
 
 /// <summary>
 /// An open UI document in the UI editor (see docs/editor/ui-editor.md#ui-editor): its document, the selected element or

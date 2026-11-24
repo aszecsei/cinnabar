@@ -102,9 +102,7 @@ public sealed class BlackboardEditorView : DockPanel
         _rows.Children.Add(button);
         foreach (var p in _editor.Problems.Where(p => _editor.Keys.All(k => !_editor.ProblemsOf(k).Contains(p))))
         {
-            var text = AnimationGraphs.AnimationGraphPanel.ProblemText(p);
-            text.Text = p.Line > 0 ? $"Line {p.Line}: {p.Text}" : p.Text;
-            _rows.Children.Add(text);
+            _rows.Children.Add(ProblemText(p, LinePlace(p.Line)));
         }
     }
 
@@ -142,7 +140,7 @@ public sealed class BlackboardEditorView : DockPanel
         }
         foreach (var problem in _editor.ProblemsOf(key))
         {
-            value.Children.Add(AnimationGraphs.AnimationGraphPanel.ProblemText(problem));
+            value.Children.Add(ProblemText(problem));
         }
         Grid.SetColumn(value, 2);
         grid.Children.Add(value);

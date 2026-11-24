@@ -19,61 +19,45 @@ namespace Cinnabar.Editor.Decisions;
 /// list, and a condition is a text box that completes the blackboard's keys. A utility, GOAP or HTN node shows each
 /// field of its kind, whether the file writes it or not.
 /// </summary>
-sealed class DecisionNodeDetails : ScrollViewer
+sealed class DecisionNodeDetails : DetailsPanel
 {
-    // A subclass takes ScrollViewer's template only by its style key.
-    protected override Type StyleKeyOverride => typeof(ScrollViewer);
-
     // What an argument's list offers for a value that is not a key.
     const string Constant = "Constant";
 
     readonly EditorShell _shell;
     readonly DecisionEditor _editor;
-    readonly StackPanel _content = new() { Margin = new Thickness(8), Spacing = 2 };
-    string _shown = "";
-
     public DecisionNodeDetails(EditorShell shell, DecisionEditor editor)
     {
         _shell = shell;
         _editor = editor;
-        Content = _content;
-        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-        new ViewSubscriptions(this, attached: Refresh)
+        Subscriptions
             .Add(() => _editor.SelectionChanged += Refresh, () => _editor.SelectionChanged -= Refresh)
             .Add(() => _editor.Changed += Refresh, () => _editor.Changed -= Refresh)
             .Add(() => _editor.CatalogChanged += Refresh, () => _editor.CatalogChanged -= Refresh)
             .Add(() => _editor.ProblemsChanged += Refresh, () => _editor.ProblemsChanged -= Refresh);
     }
 
-    void Rebuild()
-    {
-        _shown = "";
-        Refresh();
-    }
-
-    // The panel builds again only when what it shows changed, so a box keeps its focus while a drag moves the node.
-    void Refresh()
+    protected override string ShownKey()
     {
         var node = _editor.SelectedNode;
-        var shown = node == null
+        return node == null
             ? "none"
             : $"{node.Id}|{node.Kind}|{string.Join(",", node.Fields.Where(f => f.Key != "position").Select(f => f.Key + "=" + f.Value))}"
                 + $"|{string.Join(",", node.Writes.Select(w => w.Key + "=" + w.Value))}"
                 + $"|{string.Join(",", _editor.Keys.Select(k => k.Name + k.Type))}|{string.Join(",", _editor.Actions.Select(a => a.Name + a.Params.Count))}"
                 + $"|{string.Join("|", _editor.Problems.Where(p => p.Node == node.Id).Select(p => p.Text))}";
-        if (shown == _shown)
-        {
-            return;
-        }
-        _shown = shown;
-        _content.Children.Clear();
+    }
+
+    protected override void Fill()
+    {
+        var node = _editor.SelectedNode;
         if (node == null)
         {
-            _content.Children.Add(Dim("Select a node to see its fields. On a canvas, a drag from a node's foot to a node makes it a child, and Space, Tab or a right click adds a node."));
+            Rows.Add(Dim("Select a node to see its fields. On a canvas, a drag from a node's foot to a node makes it a child, and Space, Tab or a right click adds a node."));
             return;
         }
-        _content.Children.Add(new TextBlock { Text = _editor.Label(node.Id), FontSize = 15, FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
-        _content.Children.Add(new TextBlock { Text = $"node {node.Id} · {node.Kind}", Classes = { "dim" }, FontSize = 11 });
+        Rows.Add(new TextBlock { Text = _editor.Label(node.Id), FontSize = 15, FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
+        Rows.Add(new TextBlock { Text = $"node {node.Id} · {node.Kind}", Classes = { "dim" }, FontSize = 11 });
         if (_editor.Technique == "behavior_tree")
         {
             ShowTreeNode(node);
@@ -86,15 +70,7 @@ sealed class DecisionNodeDetails : ScrollViewer
         {
             ShowFields(node);
         }
-        var problems = _editor.Problems.Where(p => p.Node == node.Id).ToList();
-        if (problems.Count > 0)
-        {
-            _content.Children.Add(Heading("Problems"));
-            foreach (var p in problems)
-            {
-                _content.Children.Add(AnimationGraphs.AnimationGraphPanel.ProblemText(p));
-            }
-        }
+        AddProblems(_editor.Problems.Where(p => p.Node == node.Id));
     }
 
     Control TextField(DecisionNode node, string key, string watermark) =>
@@ -114,7 +90,7 @@ sealed class DecisionNodeDetails : ScrollViewer
         {
             case TreeShape.Composite:
                 var children = node.Ids("children");
-                _content.Children.Add(Row("Children", new TextBlock
+                Rows.Add(Row("Children", new TextBlock
                 {
                     Text = children.Count == 0 ? "None: drag from its foot to a node" : string.Join(", ", children.Select(_editor.Label)),
                     TextWrapping = TextWrapping.Wrap,
@@ -122,33 +98,33 @@ sealed class DecisionNodeDetails : ScrollViewer
                 }));
                 if (node.Kind == "parallel")
                 {
-                    _content.Children.Add(Row("Policy", ChoiceField(node, "policy", ["one", "all"], "")));
+                    Rows.Add(Row("Policy", ChoiceField(node, "policy", ["one", "all"], "")));
                 }
                 break;
             case TreeShape.Action:
                 ShowAction(node);
                 break;
             case TreeShape.Wait:
-                _content.Children.Add(Row("Seconds", TimeField(node, "seconds")));
+                Rows.Add(Row("Seconds", TimeField(node, "seconds")));
                 break;
             case TreeShape.Set:
                 ShowWrites(node);
                 break;
             case TreeShape.Condition:
-                _content.Children.Add(Row("Condition", ConditionField(node, "condition")));
+                Rows.Add(Row("Condition", ConditionField(node, "condition")));
                 break;
             default:
                 ShowFields(node);
                 return;
         }
-        _content.Children.Add(Heading("Decorators"));
-        _content.Children.Add(Row("When", ConditionField(node, "when")));
-        _content.Children.Add(Row("Abort", ChoiceField(node, "abort", ["none", "self", "lower", "both"], "none")));
-        _content.Children.Add(Row("Cooldown", TimeField(node, "cooldown")));
-        _content.Children.Add(Row("Time limit", TimeField(node, "time_limit")));
-        _content.Children.Add(Row("Repeat", TextField(node, "repeat", "a count, or forever")));
-        _content.Children.Add(Row("Invert", ChoiceField(node, "invert", ["false", "true"], "false")));
-        _content.Children.Add(Row("Force", ChoiceField(node, "force", ["", "succeed", "fail"], "")));
+        Rows.Add(Heading("Decorators"));
+        Rows.Add(Row("When", ConditionField(node, "when")));
+        Rows.Add(Row("Abort", ChoiceField(node, "abort", ["none", "self", "lower", "both"], "none")));
+        Rows.Add(Row("Cooldown", TimeField(node, "cooldown")));
+        Rows.Add(Row("Time limit", TimeField(node, "time_limit")));
+        Rows.Add(Row("Repeat", TextField(node, "repeat", "a count, or forever")));
+        Rows.Add(Row("Invert", ChoiceField(node, "invert", ["false", "true"], "false")));
+        Rows.Add(Row("Force", ChoiceField(node, "force", ["", "succeed", "fail"], "")));
     }
 
     // A time is seconds, or a float or an int key, which the box completes.
@@ -189,7 +165,7 @@ sealed class DecisionNodeDetails : ScrollViewer
         if (reference == null)
         {
             // Text that is not a reference stays as it is, to be mended by hand.
-            _content.Children.Add(Row("Action", ValueBox(text, "name(argument = value)", t => _editor.SetField(id, "action", t))));
+            Rows.Add(Row("Action", ValueBox(text, "name(argument = value)", t => _editor.SetField(id, "action", t))));
             if (text != "")
             {
                 return;
@@ -201,7 +177,7 @@ sealed class DecisionNodeDetails : ScrollViewer
         {
             names.Add(name);
         }
-        _content.Children.Add(Row("Action", Choice(names, name, picked =>
+        Rows.Add(Row("Action", Choice(names, name, picked =>
         {
             // Another action keeps the arguments that it has parameters for.
             var action = actions.FirstOrDefault(a => a.Name == picked);
@@ -215,18 +191,18 @@ sealed class DecisionNodeDetails : ScrollViewer
         var known = actions.FirstOrDefault(a => a.Name == reference.Name);
         if (known == null)
         {
-            _content.Children.Add(Dim("Neither the game nor a script defines this action, so the agent's decision fails to start it."));
+            Rows.Add(Dim("Neither the game nor a script defines this action, so the agent's decision fails to start it."));
         }
         var parameters = known?.Params ?? [];
         foreach (var (param, type) in parameters)
         {
-            _content.Children.Add(Row(param, ArgumentField(id, reference, param, type)));
+            Rows.Add(Row(param, ArgumentField(id, reference, param, type)));
         }
         // An argument that the action has no parameter for is warned about at run time, so it shows, to be removed.
         foreach (var (arg, value) in reference.Arguments.Where(a => parameters.All(p => p.Name != a.Name)))
         {
             var remove = SmallButton("×", "Remove it", () => _editor.SetField(id, "action", reference.With(arg, null).Write()));
-            _content.Children.Add(Row(arg, new TextBlock { Text = value, Classes = { "warning" }, VerticalAlignment = VerticalAlignment.Center }, remove));
+            Rows.Add(Row(arg, new TextBlock { Text = value, Classes = { "warning" }, VerticalAlignment = VerticalAlignment.Center }, remove));
         }
     }
 
@@ -267,7 +243,7 @@ sealed class DecisionNodeDetails : ScrollViewer
         var id = node.Id;
         var writes = node.Writes.ToList();
         var keys = _editor.Keys.Select(k => k.Name).ToList();
-        _content.Children.Add(Heading("Writes"));
+        Rows.Add(Heading("Writes"));
         for (var i = 0; i < writes.Count; i++)
         {
             var at = i;
@@ -292,11 +268,11 @@ sealed class DecisionNodeDetails : ScrollViewer
             row.Children.Add(choice);
             row.Children.Add(remove);
             row.Children.Add(box);
-            _content.Children.Add(row);
+            Rows.Add(row);
         }
         if (_editor.Keys.FirstOrDefault() is { } first)
         {
-            _content.Children.Add(SmallButton("Add Write", "Write another key when the node runs", () =>
+            Rows.Add(SmallButton("Add Write", "Write another key when the node runs", () =>
                 _editor.SetWrites(id, [.. writes, (first.Name, first.Default ?? DefaultOf(first.Type, first.Values))])));
         }
     }
@@ -365,7 +341,7 @@ sealed class DecisionNodeDetails : ScrollViewer
                         "methods" => "None: drag from its foot to a method",
                         _ => "None: drag from its foot to a task or an action",
                     };
-                    _content.Children.Add(Row(key, new TextBlock
+                    Rows.Add(Row(key, new TextBlock
                     {
                         Text = ids.Count == 0 ? none : string.Join(", ", ids.Select(c => $"{_editor.Label(c)} {c}")),
                         TextWrapping = TextWrapping.Wrap,
@@ -375,7 +351,7 @@ sealed class DecisionNodeDetails : ScrollViewer
                 case "curve":
                     var curve = node.Get("curve") ?? "linear";
                     var kinds = ResponseCurve.Kinds.Contains(curve) ? ResponseCurve.Kinds : [.. ResponseCurve.Kinds, curve];
-                    _content.Children.Add(Row("curve", Choice(kinds, curve, picked => _editor.SetCurveKind(id, picked))));
+                    Rows.Add(Row("curve", Choice(kinds, curve, picked => _editor.SetCurveKind(id, picked))));
                     break;
                 case "exponent" when node.Get("curve") is "linear" or "step" or null:
                 case "points" when node.Get("curve") != "table":
@@ -384,13 +360,13 @@ sealed class DecisionNodeDetails : ScrollViewer
                     ShowWrites(node);
                     break;
                 default:
-                    _content.Children.Add(Row(key.Replace('_', ' '), DecisionKeysField(node, key)));
+                    Rows.Add(Row(key.Replace('_', ' '), DecisionKeysField(node, key)));
                     break;
             }
         }
         foreach (var (key, _) in node.Fields.Where(f => f.Key != "position" && !fields.Contains(f.Key)).DistinctBy(f => f.Key).ToList())
         {
-            _content.Children.Add(Row(key.Replace('_', ' '), DecisionKeysField(node, key)));
+            Rows.Add(Row(key.Replace('_', ' '), DecisionKeysField(node, key)));
         }
     }
 
@@ -399,11 +375,11 @@ sealed class DecisionNodeDetails : ScrollViewer
     {
         foreach (var (key, _) in node.Fields.Where(f => f.Key != "position").DistinctBy(f => f.Key).ToList())
         {
-            _content.Children.Add(Row(key.Replace('_', ' '), DecisionKeysField(node, key)));
+            Rows.Add(Row(key.Replace('_', ' '), DecisionKeysField(node, key)));
         }
         foreach (var (key, value) in node.Writes)
         {
-            _content.Children.Add(Row($"set {key}", new TextBlock { Text = value, VerticalAlignment = VerticalAlignment.Center }));
+            Rows.Add(Row($"set {key}", new TextBlock { Text = value, VerticalAlignment = VerticalAlignment.Center }));
         }
     }
 

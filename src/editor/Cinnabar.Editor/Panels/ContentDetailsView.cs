@@ -281,22 +281,10 @@ sealed class ContentDetailsView : StackPanel
         foreach (var p in problems)
         {
             var place = p.File == "" ? "" : p.Line > 0 ? $"{Path.GetFileName(p.File)}:{p.Line}: " : $"{Path.GetFileName(p.File)}: ";
-            var text = new TextBlock
-            {
-                Text = place + p.Text,
-                Classes = { p.Error ? "error" : "warning" },
-                Foreground = p.Error ? Palette.ErrorBrush : Palette.WarningBrush,
-                TextWrapping = TextWrapping.Wrap,
-            };
+            var text = Kit.ProblemText(place + p.Text, p.Error, p.File == "" ? null : () => shell.OpenScript(p.File, p.Line));
             if (p.File != "")
             {
-                text.Cursor = new Cursor(StandardCursorType.Hand);
                 ToolTip.SetTip(text, $"Open {p.File}");
-                text.PointerPressed += (_, e) =>
-                {
-                    shell.OpenScript(p.File, p.Line);
-                    e.Handled = true;
-                };
             }
             list.Children.Add(text);
         }
