@@ -8,36 +8,12 @@ namespace Cinnabar.Editor.Mesh;
 /// <see cref="MeshOperation"/>s, so the document keeps no history of its own. It is dirty when its data is not the
 /// saved snapshot: an undo back to the saved snapshot makes it clean again, since snapshots are immutable and shared.
 /// </summary>
-public sealed class MeshDocument
+public sealed class MeshDocument(string path, string guid, MeshData data, bool saved = true)
+    : LiveSnapshotAsset<MeshData>(guid, path, data, saved ? new SavedSnapshot<MeshData>.At(data) : new SavedSnapshot<MeshData>.NoFile())
 {
-    public MeshDocument(string path, string guid, MeshData data, bool saved = true)
-    {
-        Path = System.IO.Path.GetFullPath(path);
-        Guid = guid;
-        Data = data;
-        Saved = saved ? data : null;
-    }
-
-    /// <summary>The file's full path.</summary>
-    public string Path { get; private set; }
-
-    /// <summary>The asset's GUID, as 32 lowercase hex digits.</summary>
-    public string Guid { get; }
-
-    public MeshData Data { get; internal set; }
-
-    /// <summary>The snapshot that the file has, or null for a mesh whose file has none of the data, such as a new mesh.</summary>
-    public MeshData? Saved { get; private set; }
+    public MeshData Data { get => Current; internal set => Current = value; }
 
     public string Title => System.IO.Path.GetFileName(Path);
-
-    public bool IsDirty => !ReferenceEquals(Data, Saved);
-
-    /// <summary>
-    /// The host draws the mesh from the editor's data: it was sent as a live mesh and not let go of. A mesh that is
-    /// saved and cooked is let go of, and drawn from its blob, until the next edit.
-    /// </summary>
-    public bool IsLive { get; set; }
 
     /// <summary>Reads and parses a mesh file. The document is null when the file cannot be read or has an error.</summary>
     public static (MeshDocument? Document, IReadOnlyList<MeshFileProblem> Problems) Open(string path, string guid)
@@ -55,15 +31,7 @@ public sealed class MeshDocument
         return (mesh == null ? null : new MeshDocument(path, guid, mesh), problems);
     }
 
-    /// <summary>Writes the mesh to its file, through a temporary file, and the data becomes the saved snapshot.</summary>
-    public void Save()
-    {
-        SceneDocument.WriteAtomically(Path, MeshFile.Write(Data));
-        Saved = Data;
-    }
-
-    /// <summary>The mesh's file moved, as when the content browser moves or renames it. Nothing is written.</summary>
-    public void Move(string path) => Path = System.IO.Path.GetFullPath(path);
+    protected override byte[] Encode(MeshData snapshot) => Utf8Text.Encode(MeshFile.Write(snapshot));
 }
 
 /// <summary>
@@ -125,15 +93,9 @@ public sealed class MeshSet
 /// entry keeps the first snapshot before and the last after. It has nothing for the host's world: the shell sends
 /// the mesh itself as a live mesh instead.
 /// </summary>
-public sealed record MeshOperation(string Guid, MeshData Before, MeshData After, MeshSet Meshes) : Operation(0)
+public sealed record MeshOperation(string Guid, MeshData Before, MeshData After, MeshSet Meshes) : SnapshotOperation<MeshData>(Before, After)
 {
-    public override Operation Apply(Scene scene)
-    {
-        Meshes.Set(Guid, After);
-        return this with { Before = After, After = Before };
-    }
-
-    public override Link.Protocol.Operation? ToWire() => null;
+    protected override void Restore(MeshData snapshot) => Meshes.Set(Guid, snapshot);
 
     public override bool IsReplacedBy(Operation later) => later is MeshOperation m && m.Guid == Guid;
 }

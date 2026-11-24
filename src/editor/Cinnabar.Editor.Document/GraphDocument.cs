@@ -272,7 +272,7 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
         {
             throw new InvalidOperationException($"\"{_transaction}\" is still open");
         }
-        SceneDocument.WriteAtomically(Path, Text);
+        AtomicFile.Write(Path, Text);
         SavedPosition = Position;
         _merge = null;
         Changed?.Invoke();

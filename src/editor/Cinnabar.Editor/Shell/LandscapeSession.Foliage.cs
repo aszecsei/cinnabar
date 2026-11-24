@@ -1,7 +1,6 @@
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Model;
-using AssetStatus = Cinnabar.Editor.Link.Cook.AssetStatus;
 using Wire = Cinnabar.Editor.Link.Protocol;
 
 namespace Cinnabar.Editor.Shell;
@@ -244,7 +243,7 @@ public sealed partial class LandscapeSession
         {
             path = Path.Combine(directory, $"{name}_{n}{InstancesFile.Extension}");
         }
-        var set = new FoliageSet(System.Guid.NewGuid().ToString("N"), path, []);
+        var set = new FoliageSet(System.Guid.NewGuid().ToString("N"), path);
         AddSet(set);
         return set;
     }
@@ -267,7 +266,7 @@ public sealed partial class LandscapeSession
     // The whole set goes to the host at each change: a set is small next to a map.
     void SendSet(FoliageSet set)
     {
-        set.IsLive = true;
+        set.Sent();
         var instances = set.Instances;
         var positions = new float[instances.Count * 3];
         var rotations = new float[instances.Count * 4];
@@ -285,9 +284,8 @@ public sealed partial class LandscapeSession
 
     void ReleaseSet(FoliageSet set)
     {
-        if (set.IsLive)
+        if (set.Release())
         {
-            set.IsLive = false;
             shell.Host.Send(new Wire.ReleaseLiveInstances(Convert.FromHexString(set.Guid)));
         }
     }
@@ -296,36 +294,14 @@ public sealed partial class LandscapeSession
     bool SaveSets()
     {
         var named = shell.Scene?.Expanded.Flat.Entities.Where(e => e.Components.Any(c => c.Id == InstancedMeshRendererId)).Select(InstancesOf).ToHashSet() ?? [];
-        var ok = true;
-        foreach (var set in _sets.Values.Where(s => s.IsDirty && named.Contains(s.Guid)).ToList())
-        {
-            try
-            {
-                var meta = set.Path + MetaFile.Extension;
-                if (set.Saved == null && !File.Exists(meta))
-                {
-                    SceneDocument.WriteAtomically(meta, MetaFile.New(set.Guid).Text());
-                }
-                set.Save();
-                shell.Console.Add(LogLevel.Info, $"landscape: saved {set.Path}");
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                shell.Console.Add(LogLevel.Error, $"landscape: cannot save {set.Path}: {e.Message}");
-                ok = false;
-            }
-        }
-        return ok;
+        return SnapshotSaves.SaveDirty(_sets.Values.Where(s => named.Contains(s.Guid)), "landscape", shell.Console);
     }
 
     void ReleaseCookedSets()
     {
-        foreach (var set in _sets.Values)
+        foreach (var set in SnapshotSaves.Cooked(_sets.Values, shell.Assets))
         {
-            if (set.IsLive && !set.IsDirty && shell.Assets.Find(set.Guid) is { Status: AssetStatus.Current })
-            {
-                ReleaseSet(set);
-            }
+            ReleaseSet(set);
         }
     }
 

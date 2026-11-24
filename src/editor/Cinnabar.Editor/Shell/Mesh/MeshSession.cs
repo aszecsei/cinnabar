@@ -3,7 +3,6 @@ using Cinnabar.Editor.Mesh;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using AssetKind = Cinnabar.Editor.Link.Cook.AssetKind;
-using AssetStatus = Cinnabar.Editor.Link.Cook.AssetStatus;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -135,27 +134,7 @@ public sealed partial class MeshSession
     /// <summary>Saves every dirty mesh document, through temporary files. A failure goes to the console.</summary>
     public bool SaveMeshes()
     {
-        var ok = true;
-        foreach (var document in Meshes.Documents.Where(d => d.IsDirty).ToList())
-        {
-            try
-            {
-                // A new mesh's .meta file, with its GUID, is the editor's to write, so the scene's reference resolves
-                // at the daemon's next pass. The daemon owns it from then on.
-                var meta = document.Path + MetaFile.Extension;
-                if (document.Saved == null && !File.Exists(meta))
-                {
-                    SceneDocument.WriteAtomically(meta, MetaFile.New(document.Guid).Text());
-                }
-                document.Save();
-                _shell.Console.Add(LogLevel.Info, $"mesh: saved {document.Path}");
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                _shell.Console.Add(LogLevel.Error, $"mesh: cannot save {document.Path}: {e.Message}");
-                ok = false;
-            }
-        }
+        var ok = SnapshotSaves.SaveDirty(Meshes.Documents, "mesh", _shell.Console);
         MeshesChanged?.Invoke();
         return ok;
     }
@@ -171,17 +150,16 @@ public sealed partial class MeshSession
 
     void SendLiveMesh(MeshDocument document)
     {
-        document.IsLive = true;
+        document.Sent();
         _shell.Host.Send(LiveMeshes.Mesh(document.Guid, document.Data));
     }
 
     void ReleaseLiveMesh(MeshDocument document)
     {
-        if (!document.IsLive)
+        if (!document.Release())
         {
             return;
         }
-        document.IsLive = false;
         _shell.Host.Send(LiveMeshes.Release(document.Guid));
     }
 
@@ -211,12 +189,9 @@ public sealed partial class MeshSession
 
     void ReleaseCookedMeshes()
     {
-        foreach (var document in Meshes.Documents)
+        foreach (var document in SnapshotSaves.Cooked(Meshes.Documents, _shell.Assets))
         {
-            if (document.IsLive && !document.IsDirty && _shell.Assets.Find(document.Guid) is { Status: AssetStatus.Current })
-            {
-                ReleaseLiveMesh(document);
-            }
+            ReleaseLiveMesh(document);
         }
     }
 

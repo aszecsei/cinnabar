@@ -161,7 +161,7 @@ public static partial class PrefabEdits
             }
             prefab.Entities.Add(copy);
         }
-        var document2 = new PrefabDocument(path, guid, prefab, null);
+        var document2 = new PrefabDocument(path, guid, prefab, new SavedSnapshot<Scene>.NoFile());
         var instance = new SceneEntity(id) { Prefab = guid, Parent = root.Parent, ParentPath = root.ParentPath };
         instance.Components.AddRange(root.Components.Where(c => c.Id is SceneEdits.TransformId or SceneEdits.LocalTransformId).Select(c => c.Copy()));
         // The rest of the scene names the tree's entities by their paths in the instance.

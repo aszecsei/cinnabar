@@ -77,21 +77,15 @@ public static class InstancesFile
 /// GUID, and its instances, a snapshot that each edit replaces. The scene's undo stack holds its strokes, as
 /// <see cref="FoliageOperation"/>s. It is dirty while its instances are not the snapshot that the file has.
 /// </summary>
-public sealed class FoliageSet(string guid, string path, IReadOnlyList<FoliageInstance> instances)
+public sealed class FoliageSet(string guid, string path, IReadOnlyList<FoliageInstance> instances, SavedSnapshot<IReadOnlyList<FoliageInstance>> saved)
+    : LiveSnapshotAsset<IReadOnlyList<FoliageInstance>>(guid, path, instances, saved)
 {
-    public string Guid { get; } = guid;
+    /// <summary>A new set, which has no file until it is saved.</summary>
+    public FoliageSet(string guid, string path) : this(guid, path, [], new SavedSnapshot<IReadOnlyList<FoliageInstance>>.NoFile())
+    {
+    }
 
-    public string Path { get; } = System.IO.Path.GetFullPath(path);
-
-    public IReadOnlyList<FoliageInstance> Instances { get; private set; } = instances;
-
-    /// <summary>The snapshot that the file has, or null for a set with no file yet.</summary>
-    public IReadOnlyList<FoliageInstance>? Saved { get; private set; }
-
-    public bool IsDirty => !ReferenceEquals(Instances, Saved);
-
-    /// <summary>The host draws the set from the editor's instances, as a live instance set.</summary>
-    public bool IsLive { get; set; }
+    public IReadOnlyList<FoliageInstance> Instances => Current;
 
     /// <summary>The instances changed: by a stroke's step, an undo or a redo.</summary>
     public event Action<FoliageSet>? Changed;
@@ -99,16 +93,11 @@ public sealed class FoliageSet(string guid, string path, IReadOnlyList<FoliageIn
     /// <summary>Sets the instances to a snapshot.</summary>
     public void Set(IReadOnlyList<FoliageInstance> instances)
     {
-        Instances = instances;
+        Current = instances;
         Changed?.Invoke(this);
     }
 
-    /// <summary>Writes the set to its file, through a temporary file, and the file has this snapshot.</summary>
-    public void Save()
-    {
-        SceneDocument.WriteAtomically(Path, InstancesFile.Write(Instances));
-        Saved = Instances;
-    }
+    protected override byte[] Encode(IReadOnlyList<FoliageInstance> snapshot) => Utf8Text.Encode(InstancesFile.Write(snapshot));
 
     /// <summary>A set from its file, or null with the reason when it cannot be read.</summary>
     public static (FoliageSet? Set, string? Problem) Open(string guid, string path)
@@ -127,9 +116,7 @@ public sealed class FoliageSet(string guid, string path, IReadOnlyList<FoliageIn
         {
             return (null, $"line {problem!.Value.Line}: {problem.Value.Message}");
         }
-        var set = new FoliageSet(guid, path, instances);
-        set.Saved = set.Instances;
-        return (set, null);
+        return (new FoliageSet(guid, path, instances, new SavedSnapshot<IReadOnlyList<FoliageInstance>>.At(instances)), null);
     }
 }
 
@@ -137,13 +124,8 @@ public sealed class FoliageSet(string guid, string path, IReadOnlyList<FoliageIn
 /// A stroke on a foliage set, on the scene's undo stack: it sets the set's instances to the snapshot after the stroke,
 /// and its inverse to the one before. The shell sends the set to the host as a live instance set.
 /// </summary>
-public sealed record FoliageOperation(FoliageSet Set, IReadOnlyList<FoliageInstance> Before, IReadOnlyList<FoliageInstance> After) : Operation(0)
+public sealed record FoliageOperation(FoliageSet Set, IReadOnlyList<FoliageInstance> Before, IReadOnlyList<FoliageInstance> After)
+    : SnapshotOperation<IReadOnlyList<FoliageInstance>>(Before, After)
 {
-    public override Operation Apply(Scene scene)
-    {
-        Set.Set(After);
-        return this with { Before = After, After = Before };
-    }
-
-    public override Link.Protocol.Operation? ToWire() => null;
+    protected override void Restore(IReadOnlyList<FoliageInstance> snapshot) => Set.Set(snapshot);
 }

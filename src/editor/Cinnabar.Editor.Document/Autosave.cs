@@ -38,7 +38,7 @@ public sealed class Autosave(string directory)
         return true;
     }
 
-    public void Write(SceneDocument document) => SceneDocument.WriteAtomically(PathOf(document.Path), SceneFile.Write(document.Scene));
+    public void Write(SceneDocument document) => AtomicFile.Write(PathOf(document.Path), SceneFile.Write(document.Scene));
 
     /// <summary>The autosave of a scene file, if there is one that is newer than the file.</summary>
     public string? Newer(string scenePath)

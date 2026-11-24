@@ -2,7 +2,6 @@ using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Tools;
-using AssetStatus = Cinnabar.Editor.Link.Cook.AssetStatus;
 using Wire = Cinnabar.Editor.Link.Protocol;
 
 namespace Cinnabar.Editor.Shell;
@@ -411,7 +410,7 @@ public sealed partial class LandscapeSession(EditorShell shell)
 
     void SendWhole(LandscapeMap map)
     {
-        map.IsLive = true;
+        map.Sent();
         shell.Host.Send(new Wire.LiveTexture(Convert.FromHexString(map.Guid),
             map.Kind switch
             {
@@ -424,9 +423,8 @@ public sealed partial class LandscapeSession(EditorShell shell)
 
     void Release(LandscapeMap map)
     {
-        if (map.IsLive)
+        if (map.Release())
         {
-            map.IsLive = false;
             shell.Host.Send(new Wire.ReleaseLiveTexture(Convert.FromHexString(map.Guid)));
         }
     }
@@ -437,49 +435,20 @@ public sealed partial class LandscapeSession(EditorShell shell)
     /// </summary>
     public bool SaveMaps()
     {
-        var ok = true;
         var named = shell.Scene?.Expanded.Flat.Entities.Select(LandscapeSurface.Of).OfType<LandscapeSurface>()
             .SelectMany(s => new[] { s.HeightMap, s.HoleMask, s.LayerMap }).ToHashSet() ?? [];
-        foreach (var map in _maps.Values.Where(m => m.IsDirty && named.Contains(m.Guid)).ToList())
-        {
-            try
-            {
-                var meta = map.Path + MetaFile.Extension;
-                if (map.SavedRevision == null && !File.Exists(meta))
-                {
-                    SceneDocument.WriteAtomically(meta, map.Kind == LandscapeMapKind.Layers ? LayersMeta(map.Guid) : MaskMeta(map.Guid));
-                }
-                map.Save();
-                shell.Console.Add(LogLevel.Info, $"landscape: saved {map.Path}");
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                shell.Console.Add(LogLevel.Error, $"landscape: cannot save {map.Path}: {e.Message}");
-                ok = false;
-            }
-        }
+        var ok = SnapshotSaves.SaveDirty(_maps.Values.Where(m => named.Contains(m.Guid)), "landscape", shell.Console);
         ok = SaveSets() && ok;
         Changed?.Invoke();
         return ok;
     }
 
-    /// <summary>A new hole mask's <c>.meta</c>: a mask, with box mips and clamped, as docs/rendering/surfaces.md#holes asks.</summary>
-    public static string MaskMeta(string guid) =>
-        MetaFile.New(guid).Set("usage", "mask").Set("mip_map.kernel", "box").Set("sampler.wrap", "clamp").Text();
-
-    /// <summary>A new layer map's <c>.meta</c>: a data texture, its weights as they are, clamped.</summary>
-    public static string LayersMeta(string guid) =>
-        MetaFile.New(guid).Set("usage", "data").Set("sampler.wrap", "clamp").Text();
-
     /// <summary>Lets go of each saved map whose cooked blob is current, so the host draws the blob.</summary>
     internal void ReleaseCooked()
     {
-        foreach (var map in _maps.Values)
+        foreach (var map in SnapshotSaves.Cooked(_maps.Values, shell.Assets))
         {
-            if (map.IsLive && !map.IsDirty && shell.Assets.Find(map.Guid) is { Status: AssetStatus.Current })
-            {
-                Release(map);
-            }
+            Release(map);
         }
         ReleaseCookedSets();
     }
