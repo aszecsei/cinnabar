@@ -103,7 +103,6 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor, IGraphCan
         _selection.Prune(id => File.Find(id) != null);
         GatherProblems();
         Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
         if (!Document.InTransaction)
         {
             Checks.Schedule();

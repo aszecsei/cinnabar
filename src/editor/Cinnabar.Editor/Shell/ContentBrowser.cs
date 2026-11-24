@@ -25,7 +25,6 @@ public sealed class ContentBrowser
         CookSession cook,
         ConsoleLog console,
         Func<Func<Task<OperationResult?>>, Task<bool>> movingScene,
-        Action changed,
         string tagsPath)
     {
         this.assets = assets;
@@ -37,7 +36,6 @@ public sealed class ContentBrowser
         Draft = new ImportSettingsDraft(assets);
         // The draft follows the selection first, so what else hears of the selection sees it.
         Model.ContextChanged += FollowSelection;
-        Model.ContextChanged += changed;
     }
 
     /// <summary>The project's tags for its assets.</summary>

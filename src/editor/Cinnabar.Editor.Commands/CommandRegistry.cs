@@ -4,12 +4,37 @@ namespace Cinnabar.Editor.Commands;
 /// Every command, by ID. The ribbon, menus, shortcuts and the command palette all run commands from it. A command that
 /// a scope takes runs the scope's action (see <see cref="ICommandScope"/>): the focused scope's first, then those of
 /// <see cref="AddScope"/> in order.
+/// <para>
+/// Owners of state that commands depend on raise only their own change events. The registry observes them (see
+/// <see cref="InvalidateOn"/>) and asks every command again at most once per dispatcher turn.
+/// </para>
 /// </summary>
 public sealed class CommandRegistry
 {
     readonly Dictionary<string, Command> _commands = [];
     readonly List<ICommandScope> _scopes = [];
+    readonly Action<Action> _post;
     ICommandScope? _focused;
+    RefreshState _refresh = RefreshState.Idle;
+
+    enum RefreshState
+    {
+        /// <summary>No refresh waits.</summary>
+        Idle,
+        /// <summary>A refresh is posted and has not run.</summary>
+        Queued,
+        /// <summary>The owner closed: nothing is posted again, and a refresh that waits does nothing.</summary>
+        Closed,
+    }
+
+    /// <param name="post">
+    /// Runs an action on a later dispatcher turn, such as the UI thread's post. The default runs it at once, so each
+    /// request refreshes the commands straight away.
+    /// </param>
+    public CommandRegistry(Action<Action>? post = null)
+    {
+        _post = post ?? (action => action());
+    }
 
     public IEnumerable<Command> All => _commands.Values;
 
@@ -39,9 +64,47 @@ public sealed class CommandRegistry
     public Command Get(string id) =>
         Find(id) ?? throw new KeyNotFoundException($"no command {id}");
 
-    /// <summary>State that many commands depend on has changed, such as the host's state.</summary>
-    public void InvalidateAll()
+    /// <summary>
+    /// Observes an owner's change event: <paramref name="subscribe"/> gets the handler to add, and each raise requests a
+    /// refresh, as <c>InvalidateOn(h =&gt; Layout.Changed += h)</c>.
+    /// </summary>
+    public void InvalidateOn(Action<Action> subscribe) => subscribe(RequestInvalidate);
+
+    /// <summary>
+    /// State that many commands depend on has changed. Views ask the commands again on a later dispatcher turn, once for
+    /// all the requests before it.
+    /// </summary>
+    public void RequestInvalidate()
     {
+        if (_refresh == RefreshState.Idle)
+        {
+            _refresh = RefreshState.Queued;
+            _post(Flush);
+        }
+    }
+
+    /// <summary>Runs the refresh that waits, if one does: as the dispatcher does, or a test that has no dispatcher.</summary>
+    public void Flush()
+    {
+        if (_refresh == RefreshState.Queued)
+        {
+            _refresh = RefreshState.Idle;
+            InvalidateAll();
+        }
+    }
+
+    /// <summary>
+    /// The owner closed: a refresh that waits does nothing, no request posts another, and a change of scope refreshes
+    /// nothing, since the commands read an owner that is gone.
+    /// </summary>
+    public void Close() => _refresh = RefreshState.Closed;
+
+    void InvalidateAll()
+    {
+        if (_refresh == RefreshState.Closed)
+        {
+            return;
+        }
         foreach (var command in _commands.Values)
         {
             command.Invalidate();

@@ -56,7 +56,6 @@ public sealed partial class EditorShell
             old.OnPickChanged();
         }
         owner.OnPickChanged();
-        Commands.InvalidateAll();
     }
 
     /// <summary>
@@ -109,7 +108,20 @@ public sealed partial class EditorShell
     /// What the timeline's last copy or cut holds, which a paste in the tab of the cutscene that it came from puts at its
     /// playhead (see docs/editor/cutscene-editor.md#copy-and-paste). The editor keeps it, not the system's clipboard.
     /// </summary>
-    public CutsceneClip? CutsceneClipboard { get; internal set; }
+    public CutsceneClip? CutsceneClipboard
+    {
+        get => _cutsceneClipboard;
+        internal set
+        {
+            _cutsceneClipboard = value;
+            CutsceneClipboardChanged?.Invoke();
+        }
+    }
+
+    CutsceneClip? _cutsceneClipboard;
+
+    /// <summary>A copy or a cut changed what <see cref="CutsceneClipboard"/> holds.</summary>
+    public event Action? CutsceneClipboardChanged;
 
     /// <summary>
     /// Whether a channel is of a property track whose field steps, as an integer, a bool or an enum does

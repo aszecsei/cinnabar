@@ -188,7 +188,6 @@ public sealed class ViewLooks
         }
         _looks[viewport] = next;
         Changed?.Invoke(viewport);
-        _shell.Commands.InvalidateAll();
     }
 
     // A look as it is once the game is told it: when the preview is live for its owner and the game has not heard it for

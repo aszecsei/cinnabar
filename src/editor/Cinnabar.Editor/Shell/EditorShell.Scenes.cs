@@ -213,7 +213,6 @@ public sealed partial class EditorShell
         _scenes.Add(document);
         Scene = document;
         ReportExpansion();
-        Commands.InvalidateAll();
         SceneChanged?.Invoke();
         Visibility.Load();
         SendAddedScene(document);
@@ -251,7 +250,6 @@ public sealed partial class EditorShell
             Scene = _scenes[^1];
         }
         ProblemsChanged?.Invoke();
-        Commands.InvalidateAll();
         SceneChanged?.Invoke();
         Visibility.Load();
         SendRemovedScene(document);
@@ -276,7 +274,6 @@ public sealed partial class EditorShell
         {
             Selection.Set([]);
         }
-        Commands.InvalidateAll();
         SceneChanged?.Invoke();
         Landscape.Sync();
         SendGizmo();
@@ -493,6 +490,9 @@ public sealed partial class EditorShell
     /// <summary>The active scene's open undo entry and its owner, or null when none is open.</summary>
     public SceneEdit? OpenEdit { get; private set; }
 
+    /// <summary>An undo entry opened or ended: Save waits while one is open.</summary>
+    public event Action? OpenEditChanged;
+
     /// <summary>
     /// Opens an undo entry of the active scene that a drag previews its steps in, and gives its owner the token that
     /// previews, commits and cancels it. Null without a scene, while the game plays, or while another entry is open: the
@@ -507,8 +507,7 @@ public sealed partial class EditorShell
         }
         Scene.Begin(label);
         OpenEdit = new SceneEdit(this, Scene, label, owner, commitIfInterrupted);
-        // Save waits while an entry is open.
-        Commands.InvalidateAll();
+        OpenEditChanged?.Invoke();
         return OpenEdit;
     }
 
@@ -525,7 +524,7 @@ public sealed partial class EditorShell
         {
             Edited(UndoTarget.Scene.Instance);
         }
-        Commands.InvalidateAll();
+        OpenEditChanged?.Invoke();
         edit.RaiseEnded(commit);
     }
 
@@ -734,7 +733,6 @@ public sealed partial class EditorShell
         _problems.Clear();
         ProblemsChanged?.Invoke();
         ReportExpansion();
-        Commands.InvalidateAll();
         SceneChanged?.Invoke();
         Visibility.Load();
         SendScene();
@@ -757,7 +755,6 @@ public sealed partial class EditorShell
             Scene = document;
         }
         ReportExpansion();
-        Commands.InvalidateAll();
         SceneChanged?.Invoke();
         SendScene();
     }
@@ -795,7 +792,6 @@ public sealed partial class EditorShell
     void OnDocumentChanged(SceneDocument document)
     {
         Landscape.Sync();
-        Commands.InvalidateAll();
         SceneChanged?.Invoke();
         SendGizmo();
         // Undo back to the file's state leaves nothing to restore, so its autosave goes.

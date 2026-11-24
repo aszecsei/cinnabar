@@ -153,7 +153,8 @@ public sealed class AnimationGraphEditorTests : IDisposable
         editor.Select([1]);
         var starts = editor.MoveStarts();
         editor.BeginMove();
-        // The ribbon learns at the drag's start, before any step.
+        // The ribbon learns at the drag's start, before any step, on the dispatcher's next turn.
+        shell.Commands.Flush();
         Assert.True(invalidated > 0);
         Assert.False(save.CanExecute);
         editor.MoveSelected(starts, new Vec2(40, 80));
@@ -173,6 +174,7 @@ public sealed class AnimationGraphEditorTests : IDisposable
         Assert.False(save.CanExecute);
         invalidated = 0;
         editor.EndMove();
+        shell.Commands.Flush();
         Assert.True(invalidated > 0);
         Assert.True(save.CanExecute);
         Assert.False(editor.Document.IsDirty);

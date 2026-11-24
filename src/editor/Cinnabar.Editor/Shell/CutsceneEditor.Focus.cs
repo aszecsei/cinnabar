@@ -100,7 +100,6 @@ public sealed partial class CutsceneEditor
         }
         _focusArmed = (view, binding, camera.Serial);
         Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
         return null;
     }
 
@@ -113,7 +112,6 @@ public sealed partial class CutsceneEditor
         }
         _focusArmed = null;
         Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
         return ArmedLooks(armed);
     }
 

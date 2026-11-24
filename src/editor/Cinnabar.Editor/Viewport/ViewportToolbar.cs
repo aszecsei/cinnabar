@@ -218,11 +218,7 @@ public sealed class ViewportToolbar : StackPanel
         var exposure = menu.Submenu(menu.Items, () => Settings.ExposureOffset == 0 ? "Exposure" : $"Exposure ({Settings.ExposureOffset:+0.#;-0.#} stops)");
         Commands(menu, exposure.Items, EditorCommands.ExposureUp, EditorCommands.ExposureDown, EditorCommands.ExposureReset);
         menu.Items.Add(new Separator());
-        menu.Check(menu.Items, "Frame Statistics", () => _viewport.Session.ShowStats, () =>
-        {
-            _viewport.Session.ShowStats = !_viewport.Session.ShowStats;
-            _shell.Commands.InvalidateAll();
-        }, "Show the frame rates and the adapter over this viewport.");
+        menu.Check(menu.Items, "Frame Statistics", () => _viewport.Session.ShowStats, () => _viewport.Session.ShowStats = !_viewport.Session.ShowStats, "Show the frame rates and the adapter over this viewport.");
         Toggle(ViewportOptions.ShadingStats);
         return menu;
     }

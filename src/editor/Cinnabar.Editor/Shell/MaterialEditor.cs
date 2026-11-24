@@ -90,7 +90,6 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor, IGraphCanvasEdi
         // A node that undo or a delete took is no longer selected.
         _selection.Prune(id => Document.Graph.Find(id) != null);
         Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
         if (!Document.InTransaction)
         {
             Checks.Schedule();

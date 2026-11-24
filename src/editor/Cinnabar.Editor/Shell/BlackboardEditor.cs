@@ -51,7 +51,6 @@ public sealed class BlackboardEditor : IGraphEditor
     void OnDocumentChanged()
     {
         Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
         _shell.OnBlackboardChanged(Guid);
         if (!Document.InTransaction)
         {

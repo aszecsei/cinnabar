@@ -84,7 +84,6 @@ public sealed partial class EditorShell
     void OnToolsChanged()
     {
         SendGizmo();
-        Commands.InvalidateAll();
         ToolsChanged?.Invoke();
     }
 

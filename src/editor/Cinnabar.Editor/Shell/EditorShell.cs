@@ -20,7 +20,12 @@ namespace Cinnabar.Editor.Shell;
 public sealed partial class EditorShell : IDisposable, IMeshHost
 {
     public EditorSettings Settings { get; }
-    public CommandRegistry Commands { get; } = new();
+    /// <summary>
+    /// Every command. Views ask them again on a later turn of the thread that built the shell, after the owners' change
+    /// events that <see cref="WireCommandRefresh"/> observes. A shell built with no synchronization context, as in tests,
+    /// refreshes them only at <see cref="CommandRegistry.Flush"/>.
+    /// </summary>
+    public CommandRegistry Commands { get; }
     public EditorContext Context { get; } = new();
     public MeshSession Mesh { get; }
     /// <summary>The landscape tools' brushes and the maps they paint (see docs/editor/landscape.md).</summary>
@@ -79,7 +84,6 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         {
             RibbonTabRequested?.Invoke(tab);
         }
-        Commands.InvalidateAll();
     }
 
     public event Action? PaletteRequested;
@@ -90,6 +94,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     {
         _options = options;
         Settings = settings;
+        Commands = new CommandRegistry(PostToCurrentContext());
         _previewSlots = new PreviewSlots(PreviewOwners);
         Mesh = new MeshSession(this);
         Landscape = new LandscapeSession(this);
@@ -105,12 +110,12 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Keying = new Keying(this);
         WireKeying();
         Watches = new EntityWatches(Selection, Host);
-        Visibility = new SceneVisibility(World, Selection, Host, settings, Console, () => [.. _scenes.Select(s => (s.Number, s.Path))], WriteSetting, Commands.InvalidateAll);
+        Visibility = new SceneVisibility(World, Selection, Host, settings, Console, () => [.. _scenes.Select(s => (s.Number, s.Path))], WriteSetting);
         Cook = new CookSession(options.Cook, Assets);
         Builder = new ProjectTool(ProjectLayout.Tool(options.EngineRoot), options.EngineRoot, ChildProcess.Start);
         WireTool();
         PreviewCooker = Cook;
-        Content = new ContentBrowser(Assets, Cook, Console, MovingScene, Commands.InvalidateAll, ProjectTags.PathFor(options.ProjectPath));
+        Content = new ContentBrowser(Assets, Cook, Console, MovingScene, ProjectTags.PathFor(options.ProjectPath));
         WireCook();
         Mesh.Subscribe();
         // A saved map is let go of once its cooked blob is current, as a saved mesh is.
@@ -184,12 +189,10 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         World.TypesChanged += UpdateWorldCamera;
         // An entity that comes back, as an undone delete does, gets a new handle, which the game must hide again.
         World.EntitiesChanged += Visibility.Send;
-        Layout.Changed += Commands.InvalidateAll;
         Layout.ActiveDocumentChanged += OnActiveDocumentChanged;
         Layout.DocumentClosing = OnDocumentClosing;
         Layout.DocumentClosed += OnDocumentClosed;
-        // Commands such as Delete act on the selected entities.
-        Selection.Changed += (_, _) => Commands.InvalidateAll();
+        WireCommandRefresh();
 
         EditorCommands.Register(this);
         LoadSublevelChoice();
@@ -223,6 +226,10 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     }
 
     public void RequestPalette() => PaletteRequested?.Invoke();
+
+    /// <summary>Posts to the context of the thread that builds the shell: the UI thread's, or none in a test.</summary>
+    static Action<Action> PostToCurrentContext() =>
+        SynchronizationContext.Current is { } context ? action => context.Post(_ => action(), null) : _ => { };
 
     GizmoController IMeshHost.Gizmos => _gizmo;
 
@@ -275,7 +282,6 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
             }
         }
         Context.Set("host.running", Host.State is HostState.Running);
-        Commands.InvalidateAll();
     }
 
     /// <summary>
@@ -342,6 +348,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
 
     public void Dispose()
     {
+        Commands.Close();
         StopAutomation();
         StopGame();
         Builder.Dispose();

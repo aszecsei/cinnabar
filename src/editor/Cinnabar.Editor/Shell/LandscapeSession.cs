@@ -158,7 +158,6 @@ public sealed partial class LandscapeSession(EditorShell shell) : IViewportTool
     void Set(Action change)
     {
         change();
-        shell.Commands.InvalidateAll();
         Changed?.Invoke();
     }
 

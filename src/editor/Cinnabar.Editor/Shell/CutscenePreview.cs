@@ -121,7 +121,6 @@ public sealed class CutscenePreview(EditorShell shell)
             _pending = null;
         }
         Changed?.Invoke();
-        shell.Commands.InvalidateAll();
     }
 
     /// <summary>Takes the preview for a tab, and ends the session of another. Without a game in Edit, the tab holds it until there is one.</summary>

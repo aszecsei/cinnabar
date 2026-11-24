@@ -70,7 +70,6 @@ public sealed partial class CutsceneEditor
         Checks.Schedule();
         _entityBindings = BindingsOfEntities(_shell.Selection.Entities);
         Changed?.Invoke();
-        _shell.Commands.InvalidateAll();
     }
 
     /// <summary>Why the selected script slot cannot stand in the selected entity, or null when it can.</summary>

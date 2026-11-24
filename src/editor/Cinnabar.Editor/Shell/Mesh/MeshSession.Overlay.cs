@@ -19,7 +19,6 @@ public sealed partial class MeshSession
     internal void OnMeshModeChanged()
     {
         Tools.ForgetStalePrimitive();
-        _shell.Commands.InvalidateAll();
         _shell.SendGizmo();
         SendMeshOverlay();
         MeshModeChanged?.Invoke();

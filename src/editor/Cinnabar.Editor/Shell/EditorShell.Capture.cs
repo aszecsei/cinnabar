@@ -48,8 +48,6 @@ public sealed partial class EditorShell
         finally
         {
             SendCaptureSource(resend: false);
-            // The capture commands follow Busy, which the capture ends however it ends.
-            Commands.InvalidateAll();
         }
         if (outcome.Files.Count > 0)
         {
