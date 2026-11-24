@@ -125,7 +125,7 @@ sealed class CutsceneDetails : ScrollViewer
                 _content.Children.Add(TicksRow("length", "Set Length", b => _editor.File.Length, (b, t) => b.Set("length", Format(Math.Max(t, 1))), rate));
                 break;
         }
-        foreach (var (key, value) in block.Settings)
+        foreach (var (key, value) in block.Fields)
         {
             if ((block.Kind == CutsceneBlockKind.Cutscene && key == "length") || (block.Kind == CutsceneBlockKind.Marker && key == "color"))
             {

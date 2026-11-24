@@ -249,4 +249,29 @@ public sealed partial class DecisionFileTests
             .Replace("float travel_cost = 1", "float travel_cost = 1\nint kills");
         Assert.Equal(expected, board.Text);
     }
+
+    [Fact]
+    public void ANewSettingGoesAfterTheLastSettingAndANewLineTakesTheLastLinesIndent()
+    {
+        // After the setting that the file has.
+        var file = Read("decision 1\n# Why.\ntechnique = behavior_tree\n\nnode 1 wait\n  seconds = 1\n    set a = 1\n");
+        file.SetSetting("extra", "1");
+        Assert.Equal("decision 1\n# Why.\ntechnique = behavior_tree\nextra = 1\n\nnode 1 wait\n  seconds = 1\n    set a = 1\n", file.Text);
+
+        // A new field goes after the last field, before the writes, with the indent of the node's last line, a write here.
+        file.Find(1)!.Set("cooldown", "2");
+        Assert.EndsWith("\n  seconds = 1\n    cooldown = 2\n    set a = 1\n", file.Text);
+        file.Find(1)!.SetWrites([("a", "1"), ("b", "2")]);
+        Assert.EndsWith("\n    set a = 1\n    set b = 2\n", file.Text);
+
+        // Setting a setting to null removes each of its lines, with the comment above them.
+        file = Read("decision 1\ntechnique = goap\n# The keys.\nkeys = a\nkeys = b\n");
+        file.SetSetting("keys", null);
+        Assert.Equal("decision 1\ntechnique = goap\n", file.Text);
+
+        // A node without fields or writes indents its first with a tab.
+        var bare = Read("decision 1\nnode 1 wait\n");
+        bare.Find(1)!.Set("seconds", "1");
+        Assert.Equal("decision 1\nnode 1 wait\n\tseconds = 1\n", bare.Text);
+    }
 }

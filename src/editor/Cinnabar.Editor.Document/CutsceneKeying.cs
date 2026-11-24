@@ -425,8 +425,8 @@ public static class CutsceneKeying
     {
         if (parent.Children.FirstOrDefault()?.Head is { } child)
         {
-            return CutsceneBlock.Indent(child);
+            return child.Indent;
         }
-        return parent.Head is { } head ? CutsceneBlock.Indent(head) + "\t" : "";
+        return parent.Head is { } head ? head.Indent + "\t" : "";
     }
 }

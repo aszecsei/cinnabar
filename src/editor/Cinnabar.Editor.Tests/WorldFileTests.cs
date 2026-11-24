@@ -69,9 +69,9 @@ public sealed class WorldFileTests
         file.SetDistances(gate, 30, 45.25);
         Assert.Contains("\tload_distance = 30 # near\n\tunload_distance = 45.25\n\n# The base.", file.Text);
 
-        // A scene's removal leaves the comments that follow it.
+        // A scene's removal takes the comment above it, and leaves the comments that follow it.
         file.Remove(file.Find(Tile)!);
-        Assert.Equal("# The town.\nworld 1\n\n# The gate.\n\n# The base.\nscene $" + Base + "\n\tpersistent = true\n", file.Text);
+        Assert.Equal("# The town.\nworld 1\n\n# The base.\nscene $" + Base + "\n\tpersistent = true\n", file.Text);
     }
 
     [Fact]
@@ -127,5 +127,18 @@ public sealed class WorldFileTests
         Assert.True(WorldStreaming.WouldLoad(persistent, At(0)));
         Assert.Equal(double.PositiveInfinity, WorldStreaming.Distance(persistent, At(0)));
         Assert.False(WorldStreaming.WouldLoad(tile, At(0)));
+    }
+
+    [Fact]
+    public void ANewSettingTakesTheLastSettingsIndentAndARemovedSceneItsComment()
+    {
+        var file = Read("world 1\nscene $" + Base + "\n  min = [0, 0, 0]\n");
+        file.SetPersistent(file.Find(Base)!, true);
+        Assert.Equal("world 1\nscene $" + Base + "\n  min = [0, 0, 0]\n  persistent = true\n", file.Text);
+
+        // A scene leaves with the comment above it, as a node does.
+        file = Read("world 1\n\n# The base.\nscene $" + Base + "\n\tpersistent = true\n\nscene $" + Tile + "\n\tpersistent = true\n");
+        file.Remove(file.Find(Base)!);
+        Assert.Equal("world 1\n\nscene $" + Tile + "\n\tpersistent = true\n", file.Text);
     }
 }

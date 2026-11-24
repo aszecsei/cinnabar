@@ -328,4 +328,36 @@ public sealed partial class AnimationGraphFileTests : IDisposable
         // A problem's line finds its node in the text as it is now.
         Assert.Equal(1, document.NodeAt(document.Text.ReplaceLineEndings("\n").Split('\n').ToList().IndexOf("\tname = stand") + 1));
     }
+
+    [Fact]
+    public void ANewSettingGoesAfterTheLastSettingAndANewFieldTakesTheLastFieldsIndent()
+    {
+        // After the setting that the file has, as in every line format.
+        var file = Read("animation_graph 1\n# Why.\nentry = a\n\nnode 1 state\n  name = a\n    motion = b\n");
+        file.SetRootMotion("hips");
+        Assert.Equal("animation_graph 1\n# Why.\nentry = a\nroot_motion = \"hips\"\n\nnode 1 state\n  name = a\n    motion = b\n", file.Text);
+
+        // The last field's indent, and not the first's.
+        file.Find(1)!.Set("speed", "2");
+        Assert.EndsWith("\n  name = a\n    motion = b\n    speed = 2\n", file.Text);
+
+        // A node without fields indents its first with a tab.
+        var bare = Read("animation_graph 1\nnode 1 state\n");
+        bare.Find(1)!.Set("name", "a");
+        Assert.Equal("animation_graph 1\nnode 1 state\n\tname = a\n", bare.Text);
+    }
+
+    [Fact]
+    public void ASettingIsWrittenOnOneLineAndAnyBlockLeavesWithItsComment()
+    {
+        // The cooker reads the last good `entry` and a decision's cooker the first: one line is read the same by both.
+        var file = Read("animation_graph 1\nentry = a\n# The old one.\nentry = b\n\nparam speed float\n");
+        file.SetEntry("c");
+        Assert.Equal("animation_graph 1\nentry = c\n\nparam speed float\n", file.Text);
+
+        // A parameter takes its comment, as a node does.
+        file = Read("animation_graph 1\nentry = a\n\n# How fast.\nparam speed float\nparam look trigger\n");
+        file.Remove(file.Params.First());
+        Assert.Equal("animation_graph 1\nentry = a\n\nparam look trigger\n", file.Text);
+    }
 }

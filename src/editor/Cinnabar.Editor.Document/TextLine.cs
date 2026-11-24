@@ -19,6 +19,9 @@ sealed class TextLine(string text, string ending, bool hashInWord = false)
 
     public bool IsBlank => Code.Length == 0;
 
+    /// <summary>The spaces and tabs that the line starts with.</summary>
+    public string Indent => Text[..(Text.Length - Text.TrimStart().Length)];
+
     /// <summary>Replaces the line's code, keeping its indent and its comment.</summary>
     public void SetCode(string code)
     {

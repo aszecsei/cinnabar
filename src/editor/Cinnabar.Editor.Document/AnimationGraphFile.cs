@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace Cinnabar.Editor.Document;
 
 public enum AnimationGraphNodeKind
@@ -9,28 +7,8 @@ public enum AnimationGraphNodeKind
     Transition,
 }
 
-/// <summary>Whole lines of the file that belong together. Together, a file's blocks hold every line that it has.</summary>
-public abstract class AnimationGraphBlock
-{
-    internal List<TextLine> Lines { get; } = [];
-
-    /// <summary>The text of the block's lines, without their endings.</summary>
-    public IEnumerable<string> LineTexts => Lines.Select(l => l.Text);
-}
-
-/// <summary>Comments, blank lines, the header, and lines that the cooker has no place for and reports.</summary>
-public sealed class AnimationGraphOther : AnimationGraphBlock;
-
-/// <summary>An <c>entry = ...</c> or <c>root_motion = ...</c> line.</summary>
-public sealed class AnimationGraphSetting(string key) : AnimationGraphBlock
-{
-    public string Key { get; } = key;
-
-    public string Value => Lines[0].Value;
-}
-
 /// <summary>A <c>param &lt;name&gt; &lt;type&gt; [&lt;default&gt;]</c> line.</summary>
-public sealed class AnimationGraphParam : AnimationGraphBlock
+public sealed class AnimationGraphParam : LineBlock
 {
     string[] Fields => Lines[0].Code.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
 
@@ -43,7 +21,7 @@ public sealed class AnimationGraphParam : AnimationGraphBlock
 }
 
 /// <summary>A <c>clip &lt;name&gt; = $&lt;guid&gt;</c> line and the lines of its events.</summary>
-public sealed class AnimationGraphClip : AnimationGraphBlock
+public sealed class AnimationGraphClip : LineBlock
 {
     public string Name => Lines[0].Key["clip".Length..].Trim();
 
@@ -55,42 +33,9 @@ public sealed class AnimationGraphClip : AnimationGraphBlock
 }
 
 /// <summary>A <c>node &lt;id&gt; &lt;kind&gt;</c> line and the lines of its fields.</summary>
-public sealed class AnimationGraphNode(int id, AnimationGraphNodeKind kind) : AnimationGraphBlock
+public sealed class AnimationGraphNode(int id, AnimationGraphNodeKind kind) : GraphNodeBlock(id)
 {
-    public int Id { get; } = id;
-
     public AnimationGraphNodeKind Kind { get; } = kind;
-
-    /// <summary>The fields in the file's order. A field that the cooker reports as set twice is here twice.</summary>
-    public IEnumerable<(string Key, string Value)> Fields => FieldLines.Select(l => (l.Key, l.Value));
-
-    IEnumerable<TextLine> FieldLines => Lines.Skip(1).Where(l => !l.IsBlank);
-
-    /// <summary>A field's value as the file writes it, or null without it. The first line counts, as in the cooker.</summary>
-    public string? Get(string key) => FieldLines.FirstOrDefault(l => l.Key == key)?.Value;
-
-    /// <summary>Sets a field on its own line, keeping the line's comment, or with null, removes it.</summary>
-    public void Set(string key, string? value)
-    {
-        var line = FieldLines.FirstOrDefault(l => l.Key == key);
-        if (value == null)
-        {
-            Lines.RemoveAll(l => l != Lines[0] && !l.IsBlank && l.Key == key);
-            return;
-        }
-        // A value is on one line.
-        value = value.ReplaceLineEndings(" ");
-        if (line != null)
-        {
-            line.SetValue(value);
-            return;
-        }
-        var last = FieldLines.LastOrDefault();
-        var indent = last == null ? "\t" : last.Text[..(last.Text.Length - last.Text.TrimStart().Length)];
-        // A position comes first, and the rest in the order that they were set.
-        var at = key == "position" || last == null ? 1 : Lines.IndexOf(last) + 1;
-        Lines.Insert(at, new TextLine($"{indent}{key} = {value}", ""));
-    }
 
     /// <summary>Gives a field's line another key, as a blend's inputs do when one before them goes.</summary>
     public void RenameField(string key, string renamed)
@@ -100,13 +45,6 @@ public sealed class AnimationGraphNode(int id, AnimationGraphNodeKind kind) : An
             line.SetCode($"{renamed} = {line.Value}");
         }
     }
-
-    /// <summary>Where the file puts the node, or null when it does not, or its position is not two numbers.</summary>
-    public (double X, double Y)? Position =>
-        Get("position") is { } text && GraphNumbers.TryParse(text) is { Values: [var x, var y] } ? (x, y) : null;
-
-    public void SetPosition(double x, double y) =>
-        Set("position", $"[{GraphNumbers.Format(Math.Round(x))}, {GraphNumbers.Format(Math.Round(y))}]");
 }
 
 /// <summary>
@@ -115,17 +53,11 @@ public sealed class AnimationGraphNode(int id, AnimationGraphNodeKind kind) : An
 /// own lines. It reads only the structure. What a block's lines mean, and whether they are right, is the cooker's to
 /// say, so a graph with problems still opens, with its problems on its nodes.
 /// </summary>
-public sealed class AnimationGraphFile : ITextFile<AnimationGraphFile>
+public sealed class AnimationGraphFile : IndentedLineFile, ITextFile<AnimationGraphFile>
 {
-    readonly List<AnimationGraphBlock> _blocks = [];
-    // What the file's last line ends with, whichever line that comes to be.
-    string _finalEnding = "";
-
     AnimationGraphFile()
     {
     }
-
-    public IReadOnlyList<AnimationGraphBlock> Blocks => _blocks;
 
     public IEnumerable<AnimationGraphNode> Nodes => _blocks.OfType<AnimationGraphNode>();
 
@@ -133,22 +65,9 @@ public sealed class AnimationGraphFile : ITextFile<AnimationGraphFile>
 
     public IEnumerable<AnimationGraphClip> Clips => _blocks.OfType<AnimationGraphClip>();
 
-    /// <summary>The file's text.</summary>
-    public string Text
-    {
-        get
-        {
-            var lines = _blocks.SelectMany(b => b.Lines).ToList();
-            // A new line ends as the file's lines do.
-            var ending = lines.Find(l => l.Ending != "")?.Ending ?? "\n";
-            var text = new StringBuilder();
-            for (var i = 0; i < lines.Count; i++)
-            {
-                text.Append(lines[i].Text).Append(i == lines.Count - 1 ? _finalEnding : lines[i].Ending != "" ? lines[i].Ending : ending);
-            }
-            return text.ToString();
-        }
-    }
+    private protected override string HeaderWord => "animation_graph";
+
+    private protected override string HeaderProblem => "an animation graph starts with `animation_graph 1`";
 
     /// <summary>A line without a <c>#</c> and what follows it, outside of quotes.</summary>
     public static string StripComment(string line) => TextLine.StripComment(line);
@@ -198,86 +117,12 @@ public sealed class AnimationGraphFile : ITextFile<AnimationGraphFile>
     public static (AnimationGraphFile? File, MaterialProblem? Problem) Parse(string text)
     {
         var file = new AnimationGraphFile();
-        var header = false;
-        AnimationGraphBlock? open = null;
-        // Blank lines and comments: they stay in the open block when an indented line follows them.
-        var pending = new List<TextLine>();
-        var ids = new HashSet<int>();
-        void Other(params IEnumerable<TextLine> lines)
-        {
-            var block = new AnimationGraphOther();
-            block.Lines.AddRange(lines);
-            if (block.Lines.Count > 0)
-            {
-                file._blocks.Add(block);
-            }
-        }
-        void FlushPending()
-        {
-            Other(pending);
-            pending.Clear();
-        }
-        var number = 0;
-        foreach (var line in TextLine.Split(text))
-        {
-            number++;
-            file._finalEnding = line.Ending;
-            if (line.IsBlank)
-            {
-                pending.Add(line);
-                continue;
-            }
-            var indented = line.Text[0] is '\t' or ' ';
-            var fields = line.Code.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            if (!header)
-            {
-                if (indented || fields is not ["animation_graph", "1"])
-                {
-                    return (null, new MaterialProblem(number, "an animation graph starts with `animation_graph 1`"));
-                }
-                header = true;
-                FlushPending();
-                Other(line);
-                continue;
-            }
-            if (indented)
-            {
-                if (open == null)
-                {
-                    FlushPending();
-                    Other(line);
-                }
-                else
-                {
-                    open.Lines.AddRange(pending);
-                    pending.Clear();
-                    open.Lines.Add(line);
-                }
-                continue;
-            }
-            FlushPending();
-            open = null;
-            var block = ReadBlock(line, fields, ids);
-            if (block == null)
-            {
-                Other(line);
-                continue;
-            }
-            block.Lines.Add(line);
-            file._blocks.Add(block);
-            open = block is AnimationGraphClip or AnimationGraphNode ? block : null;
-        }
-        if (!header)
-        {
-            return (null, new MaterialProblem(1, "an animation graph starts with `animation_graph 1`"));
-        }
-        FlushPending();
-        return (file, null);
+        return file.Read(text) is { } problem ? (null, problem) : (file, null);
     }
 
-    // The block that an unindented line starts, or null for a line that the cooker has no place for, whose indented
-    // lines then have no place either.
-    static AnimationGraphBlock? ReadBlock(TextLine line, string[] fields, HashSet<int> ids)
+    private protected override bool HasIndentedLines(LineBlock block) => block is AnimationGraphClip or AnimationGraphNode;
+
+    private protected override LineBlock? ReadBlock(TextLine line, string[] fields, HashSet<int> ids)
     {
         switch (fields[0])
         {
@@ -300,90 +145,25 @@ public sealed class AnimationGraphFile : ITextFile<AnimationGraphFile>
                 };
                 return kind != null && ids.Add(id) ? new AnimationGraphNode(id, kind.Value) : null;
             default:
-                return line.Key is "entry" or "root_motion" ? new AnimationGraphSetting(line.Key) : null;
+                return line.Key is "entry" or "root_motion" ? new SettingBlock(line.Key) : null;
         }
     }
-
-    /// <summary>The line, from 1, that a block's lines start at.</summary>
-    public int LineOf(AnimationGraphBlock block)
-    {
-        var line = 1;
-        foreach (var b in _blocks)
-        {
-            if (b == block)
-            {
-                return line;
-            }
-            line += b.Lines.Count;
-        }
-        throw new ArgumentException("the block is not in this file", nameof(block));
-    }
-
-    /// <summary>The block that holds a line, from 1, or null past the end.</summary>
-    public AnimationGraphBlock? BlockAt(int line)
-    {
-        var first = 1;
-        foreach (var block in _blocks)
-        {
-            first += block.Lines.Count;
-            if (line >= 1 && line < first)
-            {
-                return block;
-            }
-        }
-        return null;
-    }
-
-    /// <summary>The node whose lines hold a line, from 1, or null for a line of no node.</summary>
-    public int? NodeAt(int line) => (BlockAt(line) as AnimationGraphNode)?.Id;
 
     public AnimationGraphNode? Find(int id) => Nodes.FirstOrDefault(n => n.Id == id);
 
-    /// <summary>The ID after the highest.</summary>
-    public int NextId() => Nodes.Select(n => n.Id).DefaultIfEmpty(0).Max() + 1;
-
     /// <summary>The state that the graph starts in, by name: the last good line counts, as in the cooker.</summary>
-    public string? Entry => Settings("entry").Select(s => s.Value).LastOrDefault(MaterialFile.IsIdentifier);
+    public string? Entry => SettingsOf("entry").Select(s => s.Value).LastOrDefault(MaterialFile.IsIdentifier);
 
     /// <summary>The joint that the graph reports root motion for: the last good line counts, as in the cooker.</summary>
     public string? RootMotion =>
-        Settings("root_motion").Select(s => GraphValue.Parse(s.Value)).OfType<GraphText>().LastOrDefault()?.Text;
+        SettingsOf("root_motion").Select(s => GraphValue.Parse(s.Value)).OfType<GraphText>().LastOrDefault()?.Text;
 
-    IEnumerable<AnimationGraphSetting> Settings(string key) => _blocks.OfType<AnimationGraphSetting>().Where(s => s.Key == key);
+    IEnumerable<SettingBlock> SettingsOf(string key) => Settings.Where(s => s.Key == key);
 
     public void SetEntry(string state) => SetSetting("entry", state);
 
     /// <summary>Names the joint for root motion, or with null or "", none.</summary>
-    public void SetRootMotion(string? joint)
-    {
-        if (string.IsNullOrEmpty(joint))
-        {
-            foreach (var setting in Settings("root_motion").ToList())
-            {
-                Remove(setting);
-            }
-            return;
-        }
-        SetSetting("root_motion", TextQuote.Quote(joint));
-    }
-
-    void SetSetting(string key, string value)
-    {
-        if (Settings(key).LastOrDefault() is { } setting)
-        {
-            setting.Lines[0].SetValue(value);
-            return;
-        }
-        var block = new AnimationGraphSetting(key);
-        block.Lines.Add(new TextLine($"{key} = {value}", ""));
-        // Under the header and the comments that follow it.
-        var at = _blocks.FindIndex(b => b is AnimationGraphOther && b.Lines.Any(l => !l.IsBlank)) + 1;
-        while (at < _blocks.Count && _blocks[at] is AnimationGraphOther && _blocks[at].Lines.All(l => l.Text.TrimStart().StartsWith('#')))
-        {
-            at++;
-        }
-        Insert(at, block);
-    }
+    public void SetRootMotion(string? joint) => SetSetting("root_motion", string.IsNullOrEmpty(joint) ? null : TextQuote.Quote(joint));
 
     /// <summary>Adds a parameter's line after the last parameter's, or before the clips and the nodes, with a blank line.</summary>
     public AnimationGraphParam AddParam(string name, string type, string? value)
@@ -420,67 +200,8 @@ public sealed class AnimationGraphFile : ITextFile<AnimationGraphFile>
         return block;
     }
 
-    // After the last of a group; or before what follows the group, with a blank line after it; or at the end, with a
-    // blank line before it.
-    void InsertInGroup(AnimationGraphBlock block, AnimationGraphBlock? last, AnimationGraphBlock? next)
-    {
-        if (last != null)
-        {
-            Insert(_blocks.IndexOf(last) + 1, block);
-            return;
-        }
-        var blank = new AnimationGraphOther();
-        blank.Lines.Add(new TextLine("", ""));
-        if (next != null)
-        {
-            var at = _blocks.IndexOf(next);
-            Insert(at, block);
-            Insert(at + 1, blank);
-            return;
-        }
-        // A blank line after the last node's lines, unless the file ends with one.
-        if (_blocks[^1].Lines[^1].Text.Trim().Length > 0)
-        {
-            Insert(_blocks.Count, blank);
-        }
-        Insert(_blocks.Count, block);
-    }
-
-    void Insert(int at, AnimationGraphBlock block) => _blocks.Insert(at, block);
-
-    /// <summary>Removes a block. A node takes the comment right above it, and leaves one blank line where it had one on each side.</summary>
-    public void Remove(AnimationGraphBlock block)
-    {
-        var at = _blocks.IndexOf(block);
-        if (at < 0)
-        {
-            return;
-        }
-        _blocks.RemoveAt(at);
-        if (block is AnimationGraphNode && at > 0 && _blocks[at - 1] is AnimationGraphOther above)
-        {
-            while (above.Lines.Count > 0 && above.Lines[^1].Text.TrimStart().StartsWith('#'))
-            {
-                above.Lines.RemoveAt(above.Lines.Count - 1);
-            }
-            if (above.Lines.Count == 0)
-            {
-                _blocks.RemoveAt(--at);
-            }
-        }
-        if (at > 0 && at < _blocks.Count && _blocks[at - 1] is AnimationGraphOther before && _blocks[at] is AnimationGraphOther after
-            && before.Lines[^1].Text.Trim().Length == 0 && after.Lines[0].Text.Trim().Length == 0)
-        {
-            after.Lines.RemoveAt(0);
-            if (after.Lines.Count == 0)
-            {
-                _blocks.RemoveAt(at);
-            }
-        }
-    }
-
     /// <summary>Swaps two blocks' places in the file, which for two transitions from a state is which the graph tries first.</summary>
-    public void Swap(AnimationGraphBlock a, AnimationGraphBlock b)
+    public void Swap(LineBlock a, LineBlock b)
     {
         var (first, second) = (_blocks.IndexOf(a), _blocks.IndexOf(b));
         if (first >= 0 && second >= 0)
