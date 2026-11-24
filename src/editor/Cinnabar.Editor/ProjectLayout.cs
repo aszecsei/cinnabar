@@ -83,11 +83,11 @@ public static class ProjectLayout
         {
             return null;
         }
-        foreach (var meta in Directory.EnumerateFiles(contentDir, "*.meta"))
+        foreach (var meta in Directory.EnumerateFiles(contentDir, "*" + MetaFile.Extension))
         {
-            if (string.Equals(ProjectSettings.Get(meta, "guid"), guid, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(MetaFile.TryRead(meta)?.Guid, guid, StringComparison.OrdinalIgnoreCase))
             {
-                return meta[..^".meta".Length];
+                return meta[..^MetaFile.Extension.Length];
             }
         }
         foreach (var dir in Directory.EnumerateDirectories(contentDir))

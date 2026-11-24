@@ -30,7 +30,7 @@ public sealed class PrefabTests : IDisposable
 
     // The fixture's prefabs, by the GUIDs in their .meta files.
     static Dictionary<string, Scene> FixturePrefabs() => Directory.GetFiles(FixtureDirectory(), "*.prefab").ToDictionary(
-        p => File.ReadAllText(p + ".meta").Split('=')[1].Trim(),
+        p => MetaFile.TryRead(p + MetaFile.Extension)!.Guid,
         p => Parse(File.ReadAllText(p)));
 
     [Fact]
@@ -362,7 +362,7 @@ public sealed class PrefabTests : IDisposable
 
         document.Save();
         Assert.True(File.Exists(path));
-        Assert.Equal($"guid = {prefab.Guid}\n", File.ReadAllText(path + ".meta"));
+        Assert.Equal(MetaFile.New(prefab.Guid).Text(), File.ReadAllText(path + MetaFile.Extension));
         var saved = Parse(File.ReadAllText(path));
         Assert.Equal(2, saved.Entities.Count);
         Assert.False(prefab.IsDirty);

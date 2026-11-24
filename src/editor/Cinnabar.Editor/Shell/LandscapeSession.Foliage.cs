@@ -301,10 +301,10 @@ public sealed partial class LandscapeSession
         {
             try
             {
-                var meta = set.Path + ".meta";
+                var meta = set.Path + MetaFile.Extension;
                 if (set.Saved == null && !File.Exists(meta))
                 {
-                    SceneDocument.WriteAtomically(meta, "# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).\n" + $"guid = {set.Guid}\n");
+                    SceneDocument.WriteAtomically(meta, MetaFile.New(set.Guid).Text());
                 }
                 set.Save();
                 shell.Console.Add(LogLevel.Info, $"landscape: saved {set.Path}");

@@ -142,10 +142,10 @@ public sealed partial class MeshSession
             {
                 // A new mesh's .meta file, with its GUID, is the editor's to write, so the scene's reference resolves
                 // at the daemon's next pass. The daemon owns it from then on.
-                var meta = document.Path + ".meta";
+                var meta = document.Path + MetaFile.Extension;
                 if (document.Saved == null && !File.Exists(meta))
                 {
-                    SceneDocument.WriteAtomically(meta, "# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).\n" + $"guid = {document.Guid}\n");
+                    SceneDocument.WriteAtomically(meta, MetaFile.New(document.Guid).Text());
                 }
                 document.Save();
                 _shell.Console.Add(LogLevel.Info, $"mesh: saved {document.Path}");

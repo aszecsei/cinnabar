@@ -1,3 +1,4 @@
+using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Cook;
 
@@ -27,21 +28,7 @@ public sealed partial class EditorShell
         {
             return asset.Guid;
         }
-        try
-        {
-            foreach (var line in File.ReadAllLines(path + ".meta"))
-            {
-                var parts = line.Split('=', 2);
-                if (parts.Length == 2 && parts[0].Trim() == "guid")
-                {
-                    return parts[1].Trim().ToLowerInvariant();
-                }
-            }
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-        }
-        return null;
+        return MetaFile.TryRead(path + MetaFile.Extension)?.Guid;
     }
 
     /// <summary>
@@ -54,21 +41,7 @@ public sealed partial class EditorShell
         {
             return asset.Guid;
         }
-        try
-        {
-            foreach (var line in File.ReadAllLines(path + ".meta"))
-            {
-                var parts = line.Split('=', 2);
-                if (parts.Length == 2 && parts[0].Trim() == name)
-                {
-                    return parts[1].Trim().ToLowerInvariant();
-                }
-            }
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-        }
-        return null;
+        return MetaFile.TryRead(path + MetaFile.Extension)?.SubassetGuid(name);
     }
 
     // An operation that may move the open scene's file, which the document then follows, with its autosave.
