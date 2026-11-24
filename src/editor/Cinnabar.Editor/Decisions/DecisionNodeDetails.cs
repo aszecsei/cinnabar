@@ -16,8 +16,9 @@ namespace Cinnabar.Editor.Decisions;
 /// <summary>
 /// The decision editor's details (see docs/editor/decision-editor.md#the-canvas): the selected node's fields, its
 /// decorators and its problems. An action's arguments are each a constant or a key of the blackboard, picked from a
-/// list, and a condition is a text box that completes the blackboard's keys. A utility, GOAP or HTN node shows each
-/// field of its kind, whether the file writes it or not.
+/// list, and a condition is a text box that completes the blackboard's keys. A node shows each field of its kind, as
+/// <see cref="DecisionFields"/> lists them, whether the file writes it or not, then the fields that the file writes and
+/// its kind does not take, then a behavior tree's decorators.
 /// </summary>
 sealed class DecisionNodeDetails : DetailsPanel
 {
@@ -58,81 +59,88 @@ sealed class DecisionNodeDetails : DetailsPanel
         }
         Rows.Add(new TextBlock { Text = _editor.Label(node.Id), FontSize = 15, FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
         Rows.Add(new TextBlock { Text = $"node {node.Id} · {node.Kind}", Classes = { "dim" }, FontSize = 11 });
-        if (_editor.Technique == "behavior_tree")
+        if (DecisionFields.Of(_editor.Technique, node.Kind) is { } fields)
         {
-            ShowTreeNode(node);
-        }
-        else if (FieldsOf(_editor.Technique, node.Kind) is { } fields)
-        {
-            ShowTechniqueNode(node, fields);
+            var decorators = DecisionFields.DecoratorsOf(_editor.Technique);
+            ShowFields(node, fields);
+            ShowLooseFields(node, [.. fields.Select(f => f.Key), .. decorators.Select(f => f.Key)]);
+            if (decorators.Count > 0)
+            {
+                Rows.Add(Heading("Decorators"));
+                ShowFields(node, decorators);
+            }
         }
         else
         {
-            ShowFields(node);
+            // A kind or a technique that the details do not know: each field as the file writes it.
+            ShowLooseFields(node, []);
+            foreach (var (key, value) in node.Writes)
+            {
+                Rows.Add(Row($"set {key}", new TextBlock { Text = value, VerticalAlignment = VerticalAlignment.Center }));
+            }
         }
         AddProblems(_editor.Problems.Where(p => p.Node == node.Id));
     }
 
-    Control TextField(DecisionNode node, string key, string watermark) =>
-        ValueBox(node.Get(key) ?? "", watermark, text => _editor.SetField(node.Id, key, text));
-
-    Control ChoiceField(DecisionNode node, string key, IReadOnlyList<string> options, string fallback)
+    void ShowFields(DecisionNode node, IEnumerable<DecisionField> fields)
     {
-        var value = node.Get(key) ?? fallback;
-        var choices = options.Contains(value) ? options : [.. options, value];
-        var id = node.Id;
-        return Choice(choices, value, v => _editor.SetField(id, key, v == fallback ? null : v));
+        foreach (var field in fields.Where(f => f.Shown?.Invoke(node) != false))
+        {
+            switch (field.Editor)
+            {
+                case DecisionEditorKind.Action:
+                    ShowAction(node);
+                    break;
+                case DecisionEditorKind.Writes:
+                    ShowWrites(node);
+                    break;
+                default:
+                    Rows.Add(Row(field.Label, Editor(node, field)));
+                    break;
+            }
+        }
     }
 
-    void ShowTreeNode(DecisionNode node)
+    // The fields that the file writes and that are not among the shown ones, which the cooker reports.
+    void ShowLooseFields(DecisionNode node, IReadOnlyCollection<string> shown)
     {
-        switch (BehaviorTreeGeometry.ShapeOf(node.Kind))
+        foreach (var (key, _) in node.Fields.Where(f => f.Key != "position" && !shown.Contains(f.Key)).DistinctBy(f => f.Key).ToList())
         {
-            case TreeShape.Composite:
-                var children = node.Ids("children");
-                Rows.Add(Row("Children", new TextBlock
+            var field = DecisionFields.Loose(_editor.Technique, key);
+            Rows.Add(Row(field.Label, Editor(node, field)));
+        }
+    }
+
+    // The control that edits a field of a row, by its kind of editor.
+    Control Editor(DecisionNode node, DecisionField field)
+    {
+        var id = node.Id;
+        var key = field.Key;
+        var value = node.Get(key);
+        switch (field.Editor)
+        {
+            case DecisionEditorKind.Keys:
+                var keys = _editor.Keys.Where(k => field.KeyTypes == null || field.KeyTypes.Contains(k.Type)).Select(k => k.Name);
+                return KeyBox(value ?? "", field.Hint, keys, text => _editor.SetField(id, key, text));
+            case DecisionEditorKind.Choice:
+                var picked = value ?? field.Fallback;
+                return Choice(field.Choices.Contains(picked) ? field.Choices : [.. field.Choices, picked], picked,
+                    v => _editor.SetField(id, key, v == field.Fallback ? null : v));
+            case DecisionEditorKind.Curve:
+                var curve = value ?? "linear";
+                return Choice(ResponseCurve.Kinds.Contains(curve) ? ResponseCurve.Kinds : [.. ResponseCurve.Kinds, curve], curve, v => _editor.SetCurveKind(id, v));
+            case DecisionEditorKind.Ids:
+                var ids = node.Ids(key);
+                return new TextBlock
                 {
-                    Text = children.Count == 0 ? "None: drag from its foot to a node" : string.Join(", ", children.Select(_editor.Label)),
+                    Text = ids.Count == 0 ? field.Hint : string.Join(", ", ids.Select(c => $"{_editor.Label(c)} {c}")),
                     TextWrapping = TextWrapping.Wrap,
                     VerticalAlignment = VerticalAlignment.Center,
-                }));
-                if (node.Kind == "parallel")
-                {
-                    Rows.Add(Row("Policy", ChoiceField(node, "policy", ["one", "all"], "")));
-                }
-                break;
-            case TreeShape.Action:
-                ShowAction(node);
-                break;
-            case TreeShape.Wait:
-                Rows.Add(Row("Seconds", TimeField(node, "seconds")));
-                break;
-            case TreeShape.Set:
-                ShowWrites(node);
-                break;
-            case TreeShape.Condition:
-                Rows.Add(Row("Condition", ConditionField(node, "condition")));
-                break;
+                };
             default:
-                ShowFields(node);
-                return;
+                return ValueBox(value ?? "", field.Hint, text => _editor.SetField(id, key, text));
         }
-        Rows.Add(Heading("Decorators"));
-        Rows.Add(Row("When", ConditionField(node, "when")));
-        Rows.Add(Row("Abort", ChoiceField(node, "abort", ["none", "self", "lower", "both"], "none")));
-        Rows.Add(Row("Cooldown", TimeField(node, "cooldown")));
-        Rows.Add(Row("Time limit", TimeField(node, "time_limit")));
-        Rows.Add(Row("Repeat", TextField(node, "repeat", "a count, or forever")));
-        Rows.Add(Row("Invert", ChoiceField(node, "invert", ["false", "true"], "false")));
-        Rows.Add(Row("Force", ChoiceField(node, "force", ["", "succeed", "fail"], "")));
     }
-
-    // A time is seconds, or a float or an int key, which the box completes.
-    Control TimeField(DecisionNode node, string key) =>
-        KeyBox(node.Get(key) ?? "", "seconds, or a key", _editor.Keys.Where(k => k.Type is "float" or "int").Select(k => k.Name), text => _editor.SetField(node.Id, key, text));
-
-    Control ConditionField(DecisionNode node, string key) =>
-        KeyBox(node.Get(key) ?? "", "a condition, such as health < 0.3", _editor.Keys.Select(k => k.Name), text => _editor.SetField(node.Id, key, text));
 
     /// <summary>A box that edits text and completes the word under its end from a list of keys, as a condition's.</summary>
     internal static Control KeyBox(string text, string watermark, IEnumerable<string> keys, Action<string> commit)
@@ -285,107 +293,4 @@ sealed class DecisionNodeDetails : DetailsPanel
         "position" or "vector" => "[0, 0, 0]",
         _ => "0",
     };
-
-    /// <summary>
-    /// The fields of a kind of node of a technique, in the order that the details show them, as
-    /// docs/content/kinds/decisions.md lists them; <c>set</c> is its writes. Null for a kind that the editor does not know.
-    /// </summary>
-    internal static IReadOnlyList<string>? FieldsOf(string? technique, string kind) => (technique, kind) switch
-    {
-        ("utility", "option") => ["action", "weight", "when", "considerations", "target", "target_tag", "cooldown", "set"],
-        ("utility" or "goap", "consideration") => ["input", "range", "curve", "slope", "exponent", "x_shift", "y_shift", "points"],
-        ("goap", "goal") => ["desired", "priority", "when", "considerations"],
-        ("goap", "action") => ["action", "preconditions", "effects", "cost", "when", "set"],
-        ("htn", "task") => ["methods"],
-        ("htn", "method") => ["when", "preconditions", "subtasks"],
-        ("htn", "action") => ["action", "preconditions", "effects", "when", "set"],
-        _ => null,
-    };
-
-    // What a field's empty box says it takes.
-    static string Hint(string key) => key switch
-    {
-        "weight" or "priority" or "slope" or "exponent" => "1",
-        "x_shift" or "y_shift" => "0",
-        "range" => "[0, 1]",
-        "points" => "[x, y], [x, y], ...",
-        "when" => "always",
-        "preconditions" => "none, or tests such as armed and ammo > 0",
-        "effects" => "key = value, key += n",
-        "desired" => "tests, such as down",
-        "cost" => "1, or a float or an int key",
-        "cooldown" => "seconds, or a key",
-        "input" => "a key, distance(self, target) or since(key)",
-        "target" => "an entity key",
-        "target_tag" => "a tag",
-        _ => key,
-    };
-
-    // A utility, GOAP or HTN node: its action, picked as a tree's is, its technique's fields, and any other that the file
-    // writes, which the cooker reports.
-    void ShowTechniqueNode(DecisionNode node, IReadOnlyList<string> fields)
-    {
-        var id = node.Id;
-        foreach (var key in fields)
-        {
-            switch (key)
-            {
-                case "action":
-                    ShowAction(node);
-                    break;
-                case "considerations" or "methods" or "subtasks":
-                    var ids = node.Ids(key);
-                    var none = key switch
-                    {
-                        "considerations" => "None",
-                        "methods" => "None: drag from its foot to a method",
-                        _ => "None: drag from its foot to a task or an action",
-                    };
-                    Rows.Add(Row(key, new TextBlock
-                    {
-                        Text = ids.Count == 0 ? none : string.Join(", ", ids.Select(c => $"{_editor.Label(c)} {c}")),
-                        TextWrapping = TextWrapping.Wrap,
-                        VerticalAlignment = VerticalAlignment.Center,
-                    }));
-                    break;
-                case "curve":
-                    var curve = node.Get("curve") ?? "linear";
-                    var kinds = ResponseCurve.Kinds.Contains(curve) ? ResponseCurve.Kinds : [.. ResponseCurve.Kinds, curve];
-                    Rows.Add(Row("curve", Choice(kinds, curve, picked => _editor.SetCurveKind(id, picked))));
-                    break;
-                case "exponent" when node.Get("curve") is "linear" or "step" or null:
-                case "points" when node.Get("curve") != "table":
-                    break;
-                case "set":
-                    ShowWrites(node);
-                    break;
-                default:
-                    Rows.Add(Row(key.Replace('_', ' '), DecisionKeysField(node, key)));
-                    break;
-            }
-        }
-        foreach (var (key, _) in node.Fields.Where(f => f.Key != "position" && !fields.Contains(f.Key)).DistinctBy(f => f.Key).ToList())
-        {
-            Rows.Add(Row(key.Replace('_', ' '), DecisionKeysField(node, key)));
-        }
-    }
-
-    // Another technique's node: each field as the file writes it.
-    void ShowFields(DecisionNode node)
-    {
-        foreach (var (key, _) in node.Fields.Where(f => f.Key != "position").DistinctBy(f => f.Key).ToList())
-        {
-            Rows.Add(Row(key.Replace('_', ' '), DecisionKeysField(node, key)));
-        }
-        foreach (var (key, value) in node.Writes)
-        {
-            Rows.Add(Row($"set {key}", new TextBlock { Text = value, VerticalAlignment = VerticalAlignment.Center }));
-        }
-    }
-
-    // A field that may name keys completes them; a number, a range or points is a plain box.
-    Control DecisionKeysField(DecisionNode node, string key) =>
-        key is "when" or "condition" or "input" or "desired" or "preconditions" or "effects" or "cost" or "cooldown" or "target"
-            ? KeyBox(node.Get(key) ?? "", Hint(key), _editor.Keys.Select(k => k.Name), text => _editor.SetField(node.Id, key, text))
-            : TextField(node, key, Hint(key));
 }
