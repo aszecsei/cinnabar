@@ -63,7 +63,7 @@ public sealed class UiEditorView : DockPanel
         toolbar.Children.Add(Label("scale"));
         toolbar.Children.Add(scale);
         toolbar.Children.Add(Gap());
-        toolbar.Children.Add(SmallButton("Fit", "Fit the screen in the canvas (F)", editor.Fit));
+        toolbar.Children.Add(SmallButton("Fit", CommandViews.Tip(shell.KeyBindings, "Fit the screen in the canvas", EditorCommands.FrameSelected), editor.Fit));
         toolbar.Children.Add(SmallButton("100%", "One pixel of the screen for each pixel of the canvas, as the game draws it", () =>
         {
             var (w, h) = editor.Size;

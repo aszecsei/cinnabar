@@ -41,7 +41,7 @@ public sealed class DecisionEditorView : DockPanel
         var text = SmallButton("Open in Script Editor", "Edit the decision's text. Save first: this editor does not read the file again.", () => shell.OpenScript(editor.Document.Path));
         DockPanel.SetDock(text, DockSide.Left);
         toolbar.Children.Add(text);
-        _frame = SmallButton("Frame", "Pan and zoom so the whole tree is in view (F)", () => (_center as BehaviorTreeCanvas)?.Frame());
+        _frame = SmallButton("Frame", CommandViews.Tip(shell.KeyBindings, "Pan and zoom so the whole tree is in view", EditorCommands.FrameSelected), () => (_center as BehaviorTreeCanvas)?.Frame());
         DockPanel.SetDock(_frame, DockSide.Left);
         toolbar.Children.Add(_frame);
         DockPanel.SetDock(_status, DockSide.Right);
