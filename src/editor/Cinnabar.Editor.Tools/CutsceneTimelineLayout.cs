@@ -183,7 +183,26 @@ public sealed class CutsceneTimelineRow
 }
 
 /// <summary>A row as it is on screen, with what of it is in view.</summary>
-public sealed record CutsceneVisibleRow(CutsceneTimelineRow Row, double Y, IReadOnlyList<CutsceneVisibleBar> Bars, IReadOnlyList<CutsceneKeyGlyph> Points, IReadOnlyList<CutsceneKeyGlyph> Keys);
+public sealed record CutsceneVisibleRow(CutsceneTimelineRow Row, double Y, IReadOnlyList<CutsceneVisibleBar> Bars, IReadOnlyList<CutsceneKeyGlyph> Points, IReadOnlyList<CutsceneKeyGlyph> Keys)
+{
+    /// <summary>The triggers in view as flags and badges (see <see cref="CutsceneTimelineLayout.Flags"/>).</summary>
+    public IReadOnlyList<CutsceneEventFlag> Flags { get; init; } = [];
+}
+
+/// <summary>
+/// Triggers that draw as one flag (see docs/editor/cutscene-editor.md#flags-on-the-timeline): one with its name, or several, closer than
+/// the first one's name is wide, as a badge with their count. X is the first one's, in the time area's pixels, and the
+/// flag takes the pixels from X to X + Width.
+/// </summary>
+public sealed record CutsceneEventFlag(double X, double Width, IReadOnlyList<CutsceneTimelineItem> Items)
+{
+    public bool Badge => Items.Count > 1;
+
+    public IEnumerable<string> Paths => Items.Select(i => i.Path);
+
+    /// <summary>What the flag says: the trigger's name, or the badge's count.</summary>
+    public string Text => Badge ? Items.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) : Items[0].Label ?? "";
+}
 
 /// <summary>A bar in view, from x0 to x1 in the time area's pixels.</summary>
 public sealed record CutsceneVisibleBar(double X0, double X1, CutsceneTimelineItem Item);
@@ -251,6 +270,12 @@ public sealed class CutsceneTimelineLayout
     public const double Grab = 5;
     /// <summary>Keys closer than this draw as one glyph.</summary>
     public const double MergeWidth = 2;
+    /// <summary>From a trigger's time to its flag's text.</summary>
+    public const double FlagInset = 8;
+    /// <summary>The width that a flag's text takes for each character, so the draw and the hit test agree without a font.</summary>
+    public const double FlagCharWidth = 6;
+    /// <summary>The room after a flag's text, and around a badge's count.</summary>
+    public const double FlagPad = 4;
     /// <summary>The width of each of a track header's toggles: mute, solo and lock, from left to right at its right end.</summary>
     public const double LockWidth = 22;
     /// <summary>The marker flags' strip: the top of the ruler.</summary>
@@ -426,10 +451,10 @@ public sealed class CutsceneTimelineLayout
                     break;
                 }
                 case { Kind: CutsceneBlockKind.Range, Start: { } s, End: { } e }:
-                    row.Bars.Add(new CutsceneTimelineItem(CutsceneItemKind.Range, s, e, CutsceneFile.PathOf(child)) { Warning = sources.EventWarning?.Invoke(child) });
+                    row.Bars.Add(new CutsceneTimelineItem(CutsceneItemKind.Range, s, e, CutsceneFile.PathOf(child)) { Label = child.Name, Warning = sources.EventWarning?.Invoke(child) });
                     break;
                 case { Kind: CutsceneBlockKind.Trigger, Start: { } t }:
-                    row.Points.Add(new CutsceneTimelineItem(CutsceneItemKind.Trigger, t, t, CutsceneFile.PathOf(child)) { Warning = sources.EventWarning?.Invoke(child) });
+                    row.Points.Add(new CutsceneTimelineItem(CutsceneItemKind.Trigger, t, t, CutsceneFile.PathOf(child)) { Label = child.Name, Warning = sources.EventWarning?.Invoke(child) });
                     break;
             }
         }
@@ -723,10 +748,56 @@ public sealed class CutsceneTimelineLayout
                     bars.Add(new CutsceneVisibleBar(view.X(bar.Start), view.X(bar.End), bar));
                 }
             }
-            result.Add(new CutsceneVisibleRow(row, RulerHeight + row.Top - scrollY, bars, Glyphs(row.Points, view, from, to), Glyphs(row.Keys, view, from, to)));
+            result.Add(new CutsceneVisibleRow(row, RulerHeight + row.Top - scrollY, bars, Glyphs(row.Points, view, from, to), Glyphs(row.Keys, view, from, to))
+            {
+                Flags = [.. RowFlags(row, view).Where(f => f.X + f.Width >= -Grab && f.X <= view.X(to))],
+            });
         }
         return result;
     }
+
+    /// <summary>
+    /// The triggers' flags, from glyphs in time order: a glyph joins the flag before it while it is closer to that flag's
+    /// start than the flag is wide. A flag is as wide as its name, and a badge as its count, whichever is wider once it
+    /// has more than one.
+    /// </summary>
+    public static List<CutsceneEventFlag> Flags(IReadOnlyList<CutsceneKeyGlyph> glyphs)
+    {
+        var flags = new List<CutsceneEventFlag>();
+        var items = new List<CutsceneTimelineItem>();
+        double x = 0, width = 0;
+        void Close()
+        {
+            if (items.Count > 0)
+            {
+                flags.Add(new CutsceneEventFlag(x, width, [.. items]));
+                items.Clear();
+            }
+        }
+        foreach (var glyph in glyphs)
+        {
+            if (items.Count > 0 && glyph.X < x + width)
+            {
+                items.AddRange(glyph.Items);
+                width = Math.Max(width, FlagWidth(items.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                continue;
+            }
+            Close();
+            x = glyph.X;
+            items.AddRange(glyph.Items);
+            width = FlagWidth(items.Count > 1 ? items.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) : items[0].Label ?? "");
+        }
+        Close();
+        return flags;
+    }
+
+    /// <summary>How wide a flag is that says the text.</summary>
+    public static double FlagWidth(string text) => FlagInset + text.Length * FlagCharWidth + FlagPad;
+
+    // A row's flags, grouped from its first trigger, so the draw and the hit test agree on what a badge holds, and a pan
+    // does not change it.
+    static List<CutsceneEventFlag> RowFlags(CutsceneTimelineRow row, TimelineView view) =>
+        row.Points.Count == 0 ? [] : Flags(Glyphs(row.Points, view, double.NegativeInfinity, double.PositiveInfinity));
 
     static List<CutsceneKeyGlyph> Glyphs(List<CutsceneTimelineItem> items, TimelineView view, double from, double to)
     {
@@ -860,9 +931,11 @@ public sealed class CutsceneTimelineLayout
         {
             return new CutsceneHit(CutsceneHitKind.Key, row, keys, tick);
         }
-        if (Nearest(row.Points, view, px) is { } points)
+        // A trigger's diamond, with the others of its flag, then the bars, then the rest of a flag: its name or its badge.
+        var flags = RowFlags(row, view);
+        if (flags.Where(f => Math.Abs(f.X - px) <= Grab).MinBy(f => Math.Abs(f.X - px)) is { } diamond)
         {
-            return new CutsceneHit(CutsceneHitKind.Trigger, row, points, tick);
+            return new CutsceneHit(CutsceneHitKind.Trigger, row, [.. diamond.Paths], tick);
         }
         // A bar under the point first, the last of them, as it draws over the ones before it: where two bars meet, each
         // edge is the side of its own bar. Then an edge just outside a bar.
@@ -893,6 +966,10 @@ public sealed class CutsceneTimelineLayout
                 }
                 return new CutsceneHit(CutsceneHitKind.Body, row, [bar.Path], tick);
             }
+        }
+        if (flags.FirstOrDefault(f => px >= f.X && px <= f.X + f.Width) is { } flag)
+        {
+            return new CutsceneHit(CutsceneHitKind.Trigger, row, [.. flag.Paths], tick);
         }
         return new CutsceneHit(CutsceneHitKind.Empty, row, [], tick);
     }

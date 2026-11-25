@@ -34,7 +34,6 @@ Event_Handler :: struct {
 
 // Fired_Kind is what an event track sends for an event: a range's end, a trigger, or a range's begin. At one time, on
 // one track, ends go first, so a range that ends where the next begins closes before it opens.
-@(private)
 Fired_Kind :: enum u8 {
 	End,
 	Trigger,
@@ -261,17 +260,59 @@ keep_ranges :: proc(e: ^Evaluation, w: ^ecs.World, views: []Scope_View) {
 	}
 }
 
-// Sent is an event as send_events delivers it: its full name, its target, its values and its player's handle, in frame
-// memory, so it needs neither the evaluation nor the blob once it is queued.
+// Sent is an event as send_events delivers it: its full name, its target, its values, its player's handle and where it
+// came from, in frame memory, so it needs neither the evaluation nor the blob once it is queued.
 @(private)
 Sent :: struct {
-	player:    Player_Handle,
-	name:      string,
+	player: Player_Handle,
+	name:   string,
 	// The binding's entity, the null entity for a binding that is missing, or nil for every behaviour.
-	entity:    Maybe(ecs.Entity),
-	args:      []script.Event_Arg,
-	// A player's own lifecycle event, which goes to the scripts only, not to the native handlers.
-	lifecycle: bool,
+	entity: Maybe(ecs.Entity),
+	args:   []script.Event_Arg,
+	origin: Sent_Origin,
+}
+
+// Sent_Origin is what queued an event: an event track's key, or the player's own lifecycle, whose events go to the
+// scripts only, not to the native handlers.
+@(private)
+Sent_Origin :: union #no_nil {
+	Track_Event,
+	Player_Lifecycle,
+}
+
+// Track_Event is the key of an event track that sent an event: its ID in its cutscene's blob, which the cooker keeps
+// unique in a cutscene, whether it is a trigger or a range's begin or end, and the time on the root's time. child is
+// the cutscene of the tree that the key is in, 0 for the root.
+Track_Event :: struct {
+	event: u32,
+	kind:  Fired_Kind,
+	time:  i32,
+	child: int,
+}
+
+@(private)
+Player_Lifecycle :: struct {}
+
+// Queued_Event is an event of an event track that a player queued for send_events, as queued_events gives it.
+Queued_Event :: struct {
+	name:   string,
+	source: Track_Event,
+}
+
+// queued_events gives the events of the player's event tracks that send_events will deliver next, in order, in the
+// allocator. The editor's preview reports them (see docs/editor/cutscene-editor.md#events). The names are frame memory.
+queued_events :: proc(
+	s: ^State,
+	player: Player_Handle,
+	allocator := context.temp_allocator,
+) -> []Queued_Event {
+	queued := make([dynamic]Queued_Event, allocator)
+	for sent in s.outbox {
+		if source, from_track := sent.origin.(Track_Event); from_track && sent.player == player {
+			append(&queued, Queued_Event{sent.name, source})
+		}
+	}
+	return queued[:]
 }
 
 // flush_events queues the events that the evaluation's tracks recorded in the phase for send_events, sorted by time,
@@ -358,6 +399,7 @@ flush_events :: proc(
 			player = e.player,
 			name   = name,
 			args   = args,
+			origin = Track_Event{ev.id, f.kind, i32(f.time), f.child},
 		}
 		if track.binding != format.CUTSCENE_NONE {
 			entity, alive := tree_binding(e, w, f.child, track.binding)
@@ -387,7 +429,7 @@ send_events :: proc(s: ^State) {
 				}
 			}
 		}
-		if event.lifecycle {
+		if _, lifecycle := event.origin.(Player_Lifecycle); lifecycle {
 			continue
 		}
 		hash := format.animation_graph_hash(event.name)

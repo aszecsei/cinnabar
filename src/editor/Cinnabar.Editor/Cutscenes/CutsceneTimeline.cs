@@ -69,6 +69,9 @@ sealed class CutsceneTimeline : Control
     static readonly IPen EaseHandlePen = new Pen(new SolidColorBrush(Color.FromArgb(0xC0, 0x10, 0x10, 0x12)), 1);
     static readonly IBrush WaveBrush = new SolidColorBrush(Color.FromArgb(0x90, 0x10, 0x10, 0x12));
     static readonly IPen EventPen = new Pen(new SolidColorBrush(Color.FromArgb(0xE0, 0xF4, 0xF4, 0xF6)), 1.5);
+    // A trigger's flag behind its name, and a badge behind its count (see docs/editor/cutscene-editor.md#flags-on-the-timeline).
+    static readonly IBrush FlagBrush = new SolidColorBrush(Color.Parse("#F1C232"), 0.85);
+    static readonly IBrush BadgeBrush = new SolidColorBrush(Color.Parse("#E8E8EC"));
     static readonly Typeface Face = new("Inter");
 
     readonly CutsceneEditor _editor;
@@ -105,7 +108,8 @@ sealed class CutsceneTimeline : Control
             .Add(() => _editor.ProblemsChanged += Changed, () => _editor.ProblemsChanged -= Changed)
             .Add(() => _editor.LooksChanged += Viewed, () => _editor.LooksChanged -= Viewed)
             .Add(() => _editor.FrameRequested += Frame, () => _editor.FrameRequested -= Frame)
-            .Add(() => _editor.PlayheadChanged += Playhead, () => _editor.PlayheadChanged -= Playhead);
+            .Add(() => _editor.PlayheadChanged += Playhead, () => _editor.PlayheadChanged -= Playhead)
+            .Add(() => _editor.Flashed += Viewed, () => _editor.Flashed -= Viewed);
     }
 
     public CutsceneTimelineInput Input { get; }
@@ -175,6 +179,11 @@ sealed class CutsceneTimeline : Control
 
     public override void Render(DrawingContext context)
     {
+        // A fired event's flash fades on the next frames, also after the play stops (see docs/editor/cutscene-editor.md#events-in-the-preview).
+        if (_editor.Flashes.Live())
+        {
+            TopLevel.GetTopLevel(this)?.RequestAnimationFrame(_ => InvalidateVisual());
+        }
         var size = Bounds.Size;
         context.FillRectangle(Background, new Rect(size));
         var layout = Input.Layout;
@@ -444,6 +453,10 @@ sealed class CutsceneTimeline : Control
             {
                 context.DrawRectangle(WarnPen, rect.Deflate(0.75), 2);
             }
+            if (bar.Item.Kind == CutsceneItemKind.Range && _editor.Flashes.Strength(bar.Item.Path) is > 0 and var flash)
+            {
+                context.FillRectangle(new SolidColorBrush(Colors.White, 0.7 * flash), rect.Inflate(2 * flash), 3);
+            }
             if (selected.Contains(bar.Item.Path))
             {
                 context.DrawRectangle(SelectedPen, rect.Deflate(1), 2);
@@ -451,9 +464,11 @@ sealed class CutsceneTimeline : Control
             // The label stays in the part of its bar in view (see docs/editor/cutscene-editor.md#labels).
             if (track && !cuts && bar.Item.Label is { Length: > 0 } label && Layout.LabelRoom(bar.X0, bar.X1, area) is var (lx, room))
             {
-                using (context.PushClip(new Rect(Layout.Gutter + lx, rect.Y, room, rect.Height)))
+                // A range's bar is half a row high, so its name is smaller and may stand a little past it.
+                var range = bar.Item.Kind == CutsceneItemKind.Range;
+                using (context.PushClip(new Rect(Layout.Gutter + lx, rect.Y - (range ? 2 : 0), room, rect.Height + (range ? 4 : 0))))
                 {
-                    var text = Text(label, BarText, 10);
+                    var text = Text(label, BarText, range ? 8 : 10);
                     context.DrawText(text, new Point(Layout.Gutter + lx, rect.Y + (rect.Height - text.Height) / 2));
                 }
             }
@@ -492,10 +507,24 @@ sealed class CutsceneTimeline : Control
             }
         }
         var middle = y + Layout.RowHeight / 2;
-        foreach (var glyph in row.Points)
+        // Each trigger is a flag with its name, and triggers closer than a name is wide are a badge with their count.
+        foreach (var flag in row.Flags)
         {
-            Diamond(context, Layout.Gutter + glyph.X, middle, 6, glyph.Paths.Any(selected.Contains) ? SelectedKey : Fill("event", locked), glyph.Paths.Any(problems.Contains),
-                glyph.Items.Any(i => i.Warning != null));
+            var fx = Layout.Gutter + flag.X;
+            var label = new Rect(fx + Layout.FlagInset - 3, middle - 7, flag.Width - Layout.FlagInset + 1, 14);
+            context.FillRectangle(flag.Badge ? BadgeBrush : FlagBrush, label, flag.Badge ? 7 : 2);
+            using (context.PushClip(label))
+            {
+                var text = Text(flag.Text, BarText, 10);
+                context.DrawText(text, new Point(label.X + (flag.Badge ? (label.Width - text.Width) / 2 : 3), middle - text.Height / 2));
+            }
+            var flash = flag.Paths.Max(_editor.Flashes.Strength);
+            if (flash > 0)
+            {
+                Diamond(context, fx, middle, 6 + 4 * flash, new SolidColorBrush(Colors.White, flash), false);
+            }
+            Diamond(context, fx, middle, 6, flag.Paths.Any(selected.Contains) ? SelectedKey : Fill("event", locked), flag.Paths.Any(problems.Contains),
+                flag.Items.Any(i => i.Warning != null));
         }
         foreach (var glyph in row.Keys)
         {

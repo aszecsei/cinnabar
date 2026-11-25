@@ -107,11 +107,28 @@ public sealed class CutsceneTimelineInput
             { Kind: CutsceneHitKind.Header, Row.Binding: { State: not CutsceneBindingState.Bound, Reason: { } reason } } => reason,
             { Kind: CutsceneHitKind.Body or CutsceneHitKind.StartEdge or CutsceneHitKind.EndEdge, Row: { Kind: CutsceneRowKind.Track, TrackKind: "camera_cut" } row, Paths: [var path, ..] }
                 => row.Bars.FirstOrDefault(b => b.Path == path) is { } cut ? CutTip(cut, _editor.File.Rate) : null,
-            // An event whose name no behaviour handles says so (see docs/editor/cutscene-editor.md#events).
-            { Row: { Kind: CutsceneRowKind.Track, TrackKind: "event" } row, Paths: var paths }
-                => row.Bars.Concat(row.Points).FirstOrDefault(i => paths.Contains(i.Path) && i.Warning != null)?.Warning,
+            { Row: { Kind: CutsceneRowKind.Track, TrackKind: "event" } row, Paths: var paths } => EventTip(row, paths),
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// What an event's hover shows: a badge's triggers by name, in time order (see docs/editor/cutscene-editor.md#flags-on-the-timeline),
+    /// then the warning of an event whose name no behaviour handles (see docs/editor/cutscene-editor.md#events).
+    /// </summary>
+    public static string? EventTip(CutsceneTimelineRow row, IReadOnlyList<string> paths)
+    {
+        var items = row.Bars.Concat(row.Points).Where(i => paths.Contains(i.Path)).ToList();
+        var lines = new List<string>();
+        if (items.Count(i => i.Kind == CutsceneItemKind.Trigger) > 1)
+        {
+            lines.Add(string.Join(" · ", items.Where(i => i.Kind == CutsceneItemKind.Trigger).Select(i => i.Label)));
+        }
+        if (items.Select(i => i.Warning).FirstOrDefault(w => w != null) is { } warning)
+        {
+            lines.Add(warning);
+        }
+        return lines.Count == 0 ? null : string.Join('\n', lines);
     }
 
     /// <summary>

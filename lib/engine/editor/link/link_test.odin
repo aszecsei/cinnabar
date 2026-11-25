@@ -94,6 +94,14 @@ every_message_round_trips :: proc(t: ^testing.T) {
 			sensor = {36, 24},
 		},
 		Cutscene_Preview_Shown{shown = {ticket = 3, tick = 1001, blob = 99, values = 5}},
+		Cutscene_Preview_Fired {
+			ticket = 3,
+			tick = 1001,
+			event = 7,
+			kind = .Begin,
+			name = "alarm_begin",
+			nested = true,
+		},
 		Cutscene_Preview_Values {
 			ticket = 3,
 			tick = 1001,

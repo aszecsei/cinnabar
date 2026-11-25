@@ -907,6 +907,9 @@ public sealed partial class EditorShell
             case Link.Protocol.CutscenePreviewTick tick:
                 CutscenePreview.OnTick(tick);
                 return;
+            case Link.Protocol.CutscenePreviewFired fired:
+                CutscenePreview.OnFired(fired);
+                return;
             case Link.Protocol.ViewportLookShown shown:
                 Looks.OnShown(shown);
                 return;

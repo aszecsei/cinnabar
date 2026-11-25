@@ -1,6 +1,8 @@
+using LogLevel = Cinnabar.Editor.Model.LogLevel;
 using CutscenePreviewClose = Cinnabar.Editor.Link.Protocol.CutscenePreviewClose;
 using CutscenePreviewEndReason = Cinnabar.Editor.Link.Protocol.CutscenePreviewEndReason;
 using CutscenePreviewEnded = Cinnabar.Editor.Link.Protocol.CutscenePreviewEnded;
+using CutscenePreviewFired = Cinnabar.Editor.Link.Protocol.CutscenePreviewFired;
 using CutscenePreviewOpen = Cinnabar.Editor.Link.Protocol.CutscenePreviewOpen;
 using CutscenePreviewOpened = Cinnabar.Editor.Link.Protocol.CutscenePreviewOpened;
 using CutscenePreviewPlay = Cinnabar.Editor.Link.Protocol.CutscenePreviewPlay;
@@ -8,6 +10,7 @@ using CutscenePreviewSettings = Cinnabar.Editor.Link.Protocol.CutscenePreviewSet
 using CutscenePreviewTick = Cinnabar.Editor.Link.Protocol.CutscenePreviewTick;
 using CutscenePreviewTime = Cinnabar.Editor.Link.Protocol.CutscenePreviewTime;
 using Cinnabar.Editor.Cutscenes;
+using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Shell;
@@ -431,6 +434,30 @@ public sealed class CutscenePreview(EditorShell shell)
         if (!tick.Playing)
         {
             Become(open with { Transport = CutsceneTransport.Paused.Instance });
+        }
+    }
+
+    /// <summary>
+    /// An event that the preview sent to the scripts while it played with Events in Preview (see
+    /// docs/editor/cutscene-editor.md#events-in-the-preview): a line in the console, and a flash on its trigger or range
+    /// when the tab's text still has its ID. The play may have stopped in the same frame, so a paused session takes it
+    /// too. An event of a sub-sequence only logs, as its ID is the child's.
+    /// </summary>
+    internal void OnFired(CutscenePreviewFired fired)
+    {
+        if (State is not CutscenePreviewState.Open open || open.Ticket != fired.Ticket)
+        {
+            return;
+        }
+        var editor = open.Editor;
+        var at = CutsceneTime.Timecode(fired.Tick, editor.File.Rate);
+        var key = fired.Nested ? null : editor.File.Blocks.FirstOrDefault(b =>
+            b.Kind is CutsceneBlockKind.Trigger or CutsceneBlockKind.Range && b.Id == (int)fired.Event);
+        var where = fired.Nested ? " in a sub-sequence" : key?.Parent?.Name is { } track ? $" on \"{track}\"" : "";
+        shell.Console.Add(LogLevel.Info, $"cutscene: {fired.Name} at {at}{where}");
+        if (key != null)
+        {
+            editor.FlashEvent(CutsceneFile.PathOf(key));
         }
     }
 

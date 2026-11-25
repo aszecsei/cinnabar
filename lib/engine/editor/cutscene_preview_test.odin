@@ -824,26 +824,59 @@ settings_silence_tracks_turn_grains_off_and_send_events_while_playing :: proc(t:
 	testing.expect_value(t, bulb_of(f), 2)
 	testing.expect(t, p.live.evaluation.no_grains)
 
-	// Without events, a play over the beat sends nothing.
+	// Without events, a play over the beat sends nothing, to the scripts or to the editor.
 	step(f, link.Cutscene_Preview_Play{ticket = 1, tick = 0, rate = 1})
 	frame(f, time.Second)
 	testing.expect_value(t, beats, 0)
+	testing.expect_value(t, fired_count(step(f)), 0)
 
-	// With them, it sends the beat once; a scrub over it sends nothing.
+	// With them, it sends the beat once, and tells the editor; a scrub over it sends nothing.
 	step(f, link.Cutscene_Preview_Time{ticket = 1, tick = 0})
 	step(f, link.Cutscene_Preview_Settings{ticket = 1, scrub_sound = true, events = true})
 	step(f, link.Cutscene_Preview_Play{ticket = 1, tick = 0, rate = 1})
 	frame(f, time.Second / 4)
 	testing.expect_value(t, beats, 0)
+	testing.expect_value(t, fired_count(step(f)), 0)
 	frame(f, time.Second / 2)
 	testing.expect_value(t, beats, 1)
-	step(f)
+	messages := step(f)
+	testing.expect_value(t, fired_count(messages), 1)
+	fired, told := find_message(messages, link.Cutscene_Preview_Fired)
+	testing.expect(t, told)
+	testing.expect_value(t, fired.ticket, 1)
+	testing.expect_value(t, fired.tick, SECOND / 2)
+	testing.expect_value(t, fired.event, 1)
+	testing.expect_value(t, fired.kind, link.Cutscene_Preview_Fired_Kind.Trigger)
+	testing.expect_value(t, fired.name, "beat")
+	testing.expect(t, !fired.nested)
 	frame(f, 0)
 	testing.expect_value(t, beats, 1)
+	testing.expect_value(t, fired_count(step(f)), 0)
 	step(f, link.Cutscene_Preview_Time{ticket = 1, tick = 0})
 	step(f, link.Cutscene_Preview_Time{ticket = 1, tick = SECOND})
 	frame(f, 0)
 	testing.expect_value(t, beats, 1)
+	testing.expect_value(t, fired_count(step(f)), 0)
+
+	// A play whose last frame crosses the beat and stops at the end of the range still sends it.
+	step(f, link.Cutscene_Preview_Play{ticket = 1, tick = SECOND / 4, rate = 1})
+	frame(f, 10 * time.Second)
+	testing.expect_value(t, beats, 2)
+	messages = step(f)
+	testing.expect_value(t, fired_count(messages), 1)
+	stop, stopped := find_message(messages, link.Cutscene_Preview_Tick)
+	testing.expect(t, stopped && !stop.playing)
+}
+
+@(private = "file")
+fired_count :: proc(messages: []link.Message) -> int {
+	n := 0
+	for m in messages {
+		if _, is := m.(link.Cutscene_Preview_Fired); is {
+			n += 1
+		}
+	}
+	return n
 }
 
 // With unsaved, the preview plays the cook daemon's blob from the preview area, and a newer one there replaces it at the
