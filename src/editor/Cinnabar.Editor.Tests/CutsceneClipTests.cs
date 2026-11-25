@@ -75,20 +75,20 @@ public sealed class CutsceneClipTests : IDisposable
         var (shell, editor, input, text) = Intro();
         var guard = Y(input, "binding:2", CutsceneRowKind.Binding);
         Assert.True(input.CanDropClips([Run], X(450000), guard));
-        Assert.Equal(["section:14"], input.DropClips([Run], X(450000), guard));
+        Assert.Equal(["section:16"], input.DropClips([Run], X(450000), guard));
         // A new animation track for the guard, after its other tracks, with a section of the clip's length, selected.
         var dropped = text.Replace(BarkTrackEnd.ReplaceLineEndings("\n"), """
             		max_distance = 30
-            track 11 animation "Animation"
+            track 13 animation "Animation"
             	binding = 2
-            	section 14 450000 540000
+            	section 16 450000 540000
             		asset = $aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
             """.ReplaceLineEndings("\n"));
         Assert.Equal(dropped, editor.Document.Text);
-        Assert.Equal(["section:14"], editor.SelectedPaths);
+        Assert.Equal(["section:16"], editor.SelectedPaths);
         Assert.Equal(["Add Section"], editor.Document.History);
-        Assert.Equal("Run", input.Layout.Rows.SelectMany(r => r.Bars).Single(b => b.Path == "section:14").Label);
+        Assert.Equal("Run", input.Layout.Rows.SelectMany(r => r.Bars).Single(b => b.Path == "section:16").Label);
         shell.Commands.Get("edit.undo").Execute();
         Assert.Equal(text, editor.Document.Text);
 
@@ -103,10 +103,10 @@ public sealed class CutsceneClipTests : IDisposable
     {
         var (_, editor, input, text) = Intro(runLength: 0);
         // A sound on the guard's row goes on the guard's audio track, the bark's, after the bark, in start order.
-        Assert.Equal(["section:14"], input.DropClips([Hum], X(500000), Y(input, "binding:2", CutsceneRowKind.Binding)));
+        Assert.Equal(["section:16"], input.DropClips([Hum], X(500000), Y(input, "binding:2", CutsceneRowKind.Binding)));
         Assert.Contains("""
             		max_distance = 30
-            	section 14 500000 620000
+            	section 16 500000 620000
             		asset = $bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
             track 4 sub_sequence
             """.ReplaceLineEndings("\n"), editor.Document.Text);
@@ -117,13 +117,13 @@ public sealed class CutsceneClipTests : IDisposable
             			key 0 0.6 auto
             			key 200000 1 auto
             			key 400000 0.8 auto
-            	section 15 100000 220000
+            	section 17 100000 220000
             		asset = $bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
             """.ReplaceLineEndings("\n"), editor.Document.Text);
         // A clip that has not cooked has no length yet: it is a second, and the sound after it starts there.
-        Assert.Equal(["section:16", "section:17"], input.DropClips([Run, Hum], X(30000), Y(input, "track:1")));
-        Assert.Contains("section 16 30000 90000", editor.Document.Text);
-        Assert.Contains("section 17 90000 210000", editor.Document.Text);
+        Assert.Equal(["section:18", "section:19"], input.DropClips([Run, Hum], X(30000), Y(input, "track:1")));
+        Assert.Contains("section 18 30000 90000", editor.Document.Text);
+        Assert.Contains("section 19 90000 210000", editor.Document.Text);
         Assert.Equal(["Add Section", "Add Section", "Add Sections"], editor.Document.History);
 
         // A locked track takes nothing.
@@ -203,7 +203,7 @@ public sealed class CutsceneClipTests : IDisposable
         // A hum over the bark's last 20000 ticks: the bark is from 360000 to 420000, the hum from 400000 to 520000.
         input.DropClips([Hum], X(400000), bark);
         var overlapped = editor.Document.Text;
-        Assert.Contains("section 14 400000 520000", overlapped);
+        Assert.Contains("section 16 400000 520000", overlapped);
         Assert.Equal([(400.0, 420.0)], L.Overlaps(input.Layout.Visible(input.View, input.TimeWidth, 0, 800).First(r => r.Row.Path == "track:3").Bars));
 
         // The bark's ease out handle, at its end, snaps to the hum's start, and the hum's ease in handle to the bark's end.
@@ -212,12 +212,12 @@ public sealed class CutsceneClipTests : IDisposable
         Drag(input, X(400000) + 1, top, X(420000) - 3);
         var crossfade = overlapped.Replace("""
             		max_distance = 30
-            	section 14 400000 520000
+            	section 16 400000 520000
             		asset = $bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
             """.ReplaceLineEndings("\n"), """
             		max_distance = 30
             		ease_out = 20000
-            	section 14 400000 520000
+            	section 16 400000 520000
             		asset = $bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
             		ease_in = 20000
             """.ReplaceLineEndings("\n"));

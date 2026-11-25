@@ -6,6 +6,7 @@ using System.Threading.Channels;
 using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Shell;
+using Cinnabar.Editor.Viewport;
 
 namespace Cinnabar.Editor.Tests;
 
@@ -440,6 +441,109 @@ public abstract class HostTests : IAsyncDisposable
         Assert.DoesNotContain(closed, m => m is CutscenePreviewEnded);
         Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
     }
+
+    // The sample's intro in the real animation scene, played by its intro_player behaviour in Play (see
+    // docs/cinematics/scripts.md): once to its end, and once skipped with the skip action held. Both leave the world the
+    // same, and give back what the intro held: the running fox's pose, the input context, the HUD and the camera, with
+    // the entities that it spawned gone. The walking fox's track keeps its pose, so it ends 4 m on either way. The test's
+    // copy of the scene has no fox_walker, so nothing but the intro moves the walking fox.
+    [Fact]
+    public async Task TheSampleIntroSkippedEndsAsPlayedAndGivesEverythingBack()
+    {
+        var root = EditorOptions.RepositoryRoot();
+        if (!File.Exists(Path.Combine(root, "build", "dev", "content", IntroCutscene + ".blob")))
+        {
+            Assert.Skip("the sample's content is not cooked");
+        }
+        var text = File.ReadAllText(Path.Combine(root, "samples", "mygame", "content", "scenes", "animation.scene")).ReplaceLineEndings("\n");
+        var (scene, problems) = Document.SceneFile.Parse(text);
+        Assert.Empty(problems);
+        scene!.Entities.Single(e => e.Name == "Walking Fox").Behaviours.Clear();
+
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<Welcome>();
+
+        var played = await PlayIntro(editor, scene, skip: false);
+        var skipped = await PlayIntro(editor, scene, skip: true);
+        Assert.Equal(played.Walking, skipped.Walking);
+        Assert.NotEqual(played.WalkingBefore, played.Walking);
+        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+    }
+
+    // The walking fox's Transform before an intro and after it.
+    sealed record IntroRun(byte[] WalkingBefore, byte[] Walking);
+
+    async Task<IntroRun> PlayIntro(Editor editor, Document.Scene scene, bool skip)
+    {
+        editor.Link.Send(new SetMode(EditorMode.Edit));
+        var world = await Load(editor, scene, guid: AnimationScene);
+        ulong Id(string name) => world.Entities.Single(e => e.Name == name).Entity;
+        var (walking, running, hud) = (Id("Walking Fox"), Id("Running Fox"), Id("HUD"));
+        var before = new Dictionary<ulong, byte[]>();
+        foreach (var entity in new[] { walking, running })
+        {
+            editor.Link.Send(new WatchEntity(entity));
+            before[entity] = (await editor.Next<EntityValues>(v => v.Entity == entity)).Components.Single(c => c.Id == 1).Data;
+        }
+
+        editor.Link.Send(new SetMode(EditorMode.Play));
+        var quiet = await editor.Next<GameStats>(s => s.Behaviours > 0);
+        Assert.Empty(quiet.InputContexts);
+        editor.Skipped.Clear();
+        editor.Link.Send(new EditorInput([GameInput.Down(InputKey.I)]));
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+        editor.Link.Send(new EditorInput([GameInput.Up(InputKey.I)]));
+        await editor.Next<Log>(l => l.Text.Contains("intro started"));
+
+        // While it plays, it holds the cutscene context, the HUD and a claim on the camera.
+        var holding = await editor.Next<GameStats>(s => s.InputContexts.Any(c => c.Name == "cutscene"));
+        Assert.True(holding.CameraEntries > quiet.CameraEntries);
+        // The HUD's archetype gains Suspended, which has no fields to show.
+        bool HudSuspended(EntityDelta d, bool suspended) =>
+            d.Changed.Any(c => c.Entity == hud && c.Components.Contains(Suspended) == suspended);
+        if (!editor.Skipped.OfType<EntityDelta>().Any(d => HudSuspended(d, true)))
+        {
+            await editor.Next<EntityDelta>(d => HudSuspended(d, true));
+        }
+
+        if (skip)
+        {
+            editor.Link.Send(new EditorInput([GameInput.Down(InputKey.Enter)]));
+            await editor.Next<Log>(l => l.Text.Contains("intro finished by a skip"));
+            editor.Link.Send(new EditorInput([GameInput.Up(InputKey.Enter)]));
+        }
+        await editor.Next<Log>(l => l.Text.Contains(skip ? "skipped" : "played to its end"));
+        Assert.Contains(editor.Skipped, m => m is Log l && l.Text.Contains("the intro was seen"));
+
+        // After its blend back to gameplay, the context, the HUD and the camera are as they were, and what it spawned is gone.
+        await editor.Next<GameStats>(s => s.InputContexts.Length == 0 && s.CameraEntries == quiet.CameraEntries);
+        var hudLast = editor.Skipped.OfType<EntityDelta>().LastOrDefault(d => d.Changed.Any(c => c.Entity == hud));
+        var deltas = editor.Skipped.OfType<EntityDelta>().ToList();
+        if (hudLast == null || HudSuspended(hudLast, true))
+        {
+            deltas.Add(await editor.Next<EntityDelta>(d => HudSuspended(d, false)));
+        }
+        var destroyed = deltas.SelectMany(d => d.Destroyed).ToHashSet();
+        var spawned = deltas.SelectMany(d => d.Changed).Select(c => c.Entity)
+            .Where(e => !world.Entities.Any(w => w.Entity == e)).ToHashSet();
+        Assert.True(spawned.Count >= 5, $"the intro spawns a guard, a stone and three cameras, not {spawned.Count} entities");
+        Assert.All(spawned, e => Assert.Contains(e, destroyed));
+
+        // The running fox's track moves it, and restores, so it ends where it stood, played or skipped.
+        Assert.Contains(editor.Skipped, m => m is EntityValues v && v.Entity == running && !v.Components.Single(c => c.Id == 1).Data.SequenceEqual(before[running]));
+        var runningLast = editor.Skipped.OfType<EntityValues>().LastOrDefault(v => v.Entity == running);
+        if (runningLast == null || !runningLast.Components.Single(c => c.Id == 1).Data.SequenceEqual(before[running]))
+        {
+            await editor.Next<EntityValues>(v => v.Entity == running && v.Components.Single(c => c.Id == 1).Data.SequenceEqual(before[running]));
+        }
+
+        byte[] Last(ulong entity) =>
+            editor.Skipped.OfType<EntityValues>().Last(v => v.Entity == entity).Components.Single(c => c.Id == 1).Data;
+        return new IntroRun(before[walking], Last(walking));
+    }
+
+    const ulong Suspended = 11;
 
     // A scene view looks through a spawned camera of the cutscene by its binding (see docs/editor/cutscene-editor.md#cameras):
     // the game reports the pose and the lens that the world shows, and the editor's values move the camera by the binding's

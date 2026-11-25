@@ -204,29 +204,29 @@ public sealed class CutsceneCameraTests : IDisposable
         Assert.Equal(before + 1, editor.Document.History.Count);
         Assert.Equal("New Camera", editor.Document.History[^1]);
         var binding = editor.File.Bindings.Last();
-        Assert.Equal(6, binding.Id);
+        Assert.Equal(8, binding.Id);
         Assert.Equal("Camera", binding.Name);
         Assert.Equal($"${CutsceneEditor.EngineCameraPrefab}", binding.Get("spawn"));
         Assert.Equal("[10, 2, 0]", binding.Get("position"));
         Assert.Equal("[0, 0.7071067811865476, 0, 0.7071067811865476]", binding.Get("rotation"));
-        Assert.Equal($"binding:6", editor.SelectedPaths.Single());
+        Assert.Equal($"binding:8", editor.SelectedPaths.Single());
 
         // A transform track, relative, with no offset at the playhead, and the lens.
-        var transform = editor.File.Tracks.Single(t => t.Get("binding") == "6" && t.TrackKind == "transform");
-        Assert.Equal([0.0, 0.0, 0.0], CutsceneKeying.KeysAt(editor.File, new KeyTarget.Pose(6, PosePart.Position), 630000));
-        Assert.Equal([0.0, 0.0, 0.0], CutsceneKeying.KeysAt(editor.File, new KeyTarget.Pose(6, PosePart.Rotation), 630000));
+        var transform = editor.File.Tracks.Single(t => t.Get("binding") == "8" && t.TrackKind == "transform");
+        Assert.Equal([0.0, 0.0, 0.0], CutsceneKeying.KeysAt(editor.File, new KeyTarget.Pose(8, PosePart.Position), 630000));
+        Assert.Equal([0.0, 0.0, 0.0], CutsceneKeying.KeysAt(editor.File, new KeyTarget.Pose(8, PosePart.Rotation), 630000));
         Assert.NotNull(transform);
         var focal = CutsceneKeying.KeysAt(editor.File,
-            new KeyTarget.Property(6, Panels.CinematicCameraText.CinematicCameraId, "focal_length", PropertyShape.Number), 630000);
+            new KeyTarget.Property(8, Panels.CinematicCameraText.CinematicCameraId, "focal_length", PropertyShape.Number), 630000);
         Assert.Equal(20.78, Assert.Single(focal)!.Value, 2);
 
         // The cut, at the playhead, to the length.
-        Assert.Equal((630000, 720000, "6"), Cuts(editor)[^1]);
+        Assert.Equal((630000, 720000, "8"), Cuts(editor)[^1]);
         Assert.Equal(4, Cuts(editor).Count);
 
         // Undo takes all of it back.
         shell.Commands.Get("edit.undo").Execute();
-        Assert.DoesNotContain(editor.File.Bindings, b => b.Id == 6);
+        Assert.DoesNotContain(editor.File.Bindings, b => b.Id == 8);
         Assert.Equal(3, editor.File.Tracks.Single(t => t.TrackKind == "camera_cut").Children.Count(c => c.Kind == CutsceneBlockKind.Section));
     }
 
@@ -237,11 +237,11 @@ public sealed class CutsceneCameraTests : IDisposable
         using var _ = shell;
         editor.SetPlayhead(100000);
 
-        Assert.Equal(6, editor.NewCameraFromView(shell.Viewports[0]));
+        Assert.Equal(8, editor.NewCameraFromView(shell.Viewports[0]));
         Assert.Equal([3, 4, 5], CutsceneEdits.CutCameras(editor.File).Order());
 
         // At the length a cut would show nothing, so none is added.
-        Assert.False(CutsceneEdits.AddCut(editor.File, 720000, 6));
+        Assert.False(CutsceneEdits.AddCut(editor.File, 720000, 8));
 
         shell.Viewports[0].Camera.SetProjection(CameraProjection.Orthographic);
         Assert.NotNull(editor.NewCameraRefusal(shell.Viewports[0]));
@@ -258,12 +258,12 @@ public sealed class CutsceneCameraTests : IDisposable
         shell.OnGameMessage(new ViewportLookShown(0, look.Serial, true, 4, [3L << 24, 1L << 24, 5L << 24], [0, 1, 0, 0],
             (float)Lens.VerticalFov(50, 24), 50, [36, 24]));
 
-        Assert.Equal(6, editor.NewCameraFromView(shell.Viewports[0]));
+        Assert.Equal(8, editor.NewCameraFromView(shell.Viewports[0]));
 
         var binding = editor.File.Bindings.Last();
         Assert.Equal("[3, 1, 5]", binding.Get("position"));
         var focal = CutsceneKeying.KeysAt(editor.File,
-            new KeyTarget.Property(6, Panels.CinematicCameraText.CinematicCameraId, "focal_length", PropertyShape.Number), editor.Playhead);
+            new KeyTarget.Property(8, Panels.CinematicCameraText.CinematicCameraId, "focal_length", PropertyShape.Number), editor.Playhead);
         Assert.Equal(50, Assert.Single(focal)!.Value, 2);
     }
 
@@ -451,14 +451,14 @@ public sealed class CutsceneCameraTests : IDisposable
     static KeyTarget LensKey(int binding, string field) =>
         new KeyTarget.Property(binding, Panels.CinematicCameraText.CinematicCameraId, field, PropertyShape.Number);
 
-    // A spawned camera of the engine's prefab, made from the first scene view at the playhead: binding 6.
+    // A spawned camera of the engine's prefab, made from the first scene view at the playhead: binding 8.
     static int NewCamera(EditorShell shell, CutsceneEditor editor, int tick = 300000)
     {
         LensType(shell);
         editor.SetPlayhead(tick);
         shell.CutscenePreview.Flush();
         var id = editor.NewCameraFromView(shell.Viewports[0]);
-        Assert.Equal(6, id);
+        Assert.Equal(8, id);
         return id!.Value;
     }
 

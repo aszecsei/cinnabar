@@ -89,7 +89,7 @@ public sealed class CutsceneTimelineTests : IDisposable
             		bus = 2
             		min_distance = 2
             		max_distance = 30
-            	section 14 440000 480000
+            	section 16 440000 480000
             		asset = $7ce894b4b95e68b918869459e5cd9c93
             		bus = 2
             		min_distance = 2
@@ -98,7 +98,7 @@ public sealed class CutsceneTimelineTests : IDisposable
 
             """);
         Assert.Equal(split, editor.Document.Text);
-        Assert.Equal(["section:3", "section:14"], editor.SelectedPaths);
+        Assert.Equal(["section:3", "section:16"], editor.SelectedPaths);
 
         // Slip: Alt and a drag of the second half 20 pixels to the left plays 20000 ticks later in the sound.
         Drag(input, X(460000), bark, X(440000), KeyModifiers.Alt);
@@ -107,7 +107,7 @@ public sealed class CutsceneTimelineTests : IDisposable
 
         // Ripple: Shift and a drag of the first half's end lengthens it, and the second half moves on as far.
         Drag(input, X(440000) - 2, bark, X(450000) - 2, KeyModifiers.Shift);
-        var rippled = slipped.Replace("section 3 400000 440000", "section 3 400000 450000").Replace("section 14 440000 480000", "section 14 450000 490000");
+        var rippled = slipped.Replace("section 3 400000 440000", "section 3 400000 450000").Replace("section 16 440000 480000", "section 16 450000 490000");
         Assert.Equal(rippled, editor.Document.Text);
 
         Assert.Equal(["Move", "Trim", "Split", "Slip", "Ripple Trim"], editor.Document.History);
@@ -294,7 +294,7 @@ public sealed class CutsceneTimelineTests : IDisposable
         editor.SetKeyboardPane(CutscenePane.Timeline);
         editor.SetPlayhead(100000);
         shell.Commands.Get(EditorCommands.CutsceneAddMarker).Execute();
-        var marked = text.Replace("skip_color = \"#000000\"\n", "skip_color = \"#000000\"\nmarker 1 100000 \"Marker 1\"\n");
+        var marked = text.Replace("hide_ui = [$bdeaa563d6faa121b2f06fde16f065e5]\n", "hide_ui = [$bdeaa563d6faa121b2f06fde16f065e5]\nmarker 1 100000 \"Marker 1\"\n");
         Assert.Equal(marked, editor.Document.Text);
         Assert.Equal(["marker:1"], editor.SelectedPaths);
         // M again at the marker's time selects it and adds none.
@@ -424,7 +424,7 @@ public sealed class CutsceneTimelineTests : IDisposable
         editor.Select(["section:3", "marker:9"], SelectMode.Replace);
         editor.SetFilterText(" FOX ");
         Assert.Equal("FOX", editor.FilterText);
-        Assert.Equal(["Walking Fox", "Fox walks", "Fox walk clip"], input.Layout.Rows.Select(r => r.Label));
+        Assert.Equal(["Walking Fox", "Fox walks", "Fox walk clip", "Running Fox", "Fox runs"], input.Layout.Rows.Select(r => r.Label));
         // The bark is on the guard, which the filter hides.
         Assert.Empty(editor.SelectedPaths);
         // Nor can a click or a paste select it while the filter hides it.
@@ -528,7 +528,7 @@ public sealed class CutsceneTimelineTests : IDisposable
         shell.Commands.Get(EditorCommands.CutscenePreviousEdge).Execute();
         Assert.Equal(600000, editor.Playhead);
         shell.Commands.Get(EditorCommands.CutscenePreviousEdge).Execute();
-        Assert.Equal(420000, editor.Playhead);
+        Assert.Equal(480000, editor.Playhead);
         shell.Commands.Get(EditorCommands.CutsceneGoToStart).Execute();
         shell.Commands.Get(EditorCommands.CutsceneNextEdge).Execute();
         Assert.Equal(30000, editor.Playhead);

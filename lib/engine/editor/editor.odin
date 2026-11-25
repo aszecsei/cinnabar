@@ -552,6 +552,9 @@ poll :: proc(
 		stats_interval := now - s.last_stats
 		s.last_stats = now
 		stats := game_stats(w, scripts, frame)
+		if e.views != nil {
+			stats.camera_entries = u32(camera.held_count(e.views))
+		}
 		if e.streaming != nil {
 			work := streaming.stats(e.streaming)
 			stats.scenes_loading = u32(work.scenes_loading)

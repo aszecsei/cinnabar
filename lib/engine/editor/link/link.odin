@@ -1467,6 +1467,8 @@ Game_Stats :: struct {
 	reflection_memory:          u64,
 	// The input contexts' pushes, the top first, none while every stack is the default alone.
 	input_contexts:             []Input_Context_Stats,
+	// The pushes and claims that the camera stacks hold (see docs/world/cameras.md#stacks).
+	camera_entries:             u32,
 }
 
 // Gi_Cascade_Stats is a split cascade's table: the probes that rays reached, its slots, and the keys that found no

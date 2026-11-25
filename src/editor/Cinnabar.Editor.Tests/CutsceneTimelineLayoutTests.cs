@@ -70,6 +70,7 @@ public sealed class CutsceneTimelineLayoutTests
         [
             "Cuts", "Music", "Dialogue", "Story", "Presentation", "Opening shot",
             "Walking Fox", "Fox walks", "Fox walk clip", "Extra Guard", "Bark", "Wide Shot", "Close Shot", "Rack focus", "Tracking Shot",
+            "Running Fox", "Fox runs", "Stone", "Stone rolls",
         ], layout.Rows.Select(r => r.Label));
         Assert.Equal(1, layout.Rows.First(r => r.Label == "Fox walks").Depth);
         // A track's keys are on its row at their time on the cutscene's, and its channels are folded.
@@ -153,7 +154,7 @@ public sealed class CutsceneTimelineLayoutTests
         Assert.Contains(400000, snapTo);
         Assert.DoesNotContain(399000, snapTo);
         Assert.Contains(200000, snapTo);
-        Assert.Equal([0, 30000, 174000, 200000, 300000, 360000, 400000, 420000, 600000, 720000], layout.Edges());
+        Assert.Equal([0, 30000, 174000, 200000, 300000, 360000, 400000, 420000, 480000, 600000, 720000], layout.Edges());
     }
 
     [Fact]
@@ -182,7 +183,7 @@ public sealed class CutsceneTimelineLayoutTests
         var file = Intro();
         string[] Labels(CutsceneRowFilter filter) => [.. L.Build(file, new HashSet<string>(), filter).Rows.Select(r => r.Label)];
         // A binding that the text names shows all of its tracks; a track that it names shows with its binding.
-        Assert.Equal(["Walking Fox", "Fox walks", "Fox walk clip"], Labels(new("fox", null)));
+        Assert.Equal(["Walking Fox", "Fox walks", "Fox walk clip", "Running Fox", "Fox runs"], Labels(new("fox", null)));
         Assert.Equal(["Extra Guard", "Bark"], Labels(new("BARK", null)));
         Assert.Equal(["Music"], Labels(new("music", null)));
         Assert.Empty(Labels(new("nothing", null)));

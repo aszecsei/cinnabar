@@ -271,6 +271,17 @@ claimed :: proc(v: ^Views) -> bool {
 	return false
 }
 
+// held_count is how many pushes and claims are held, across every stack.
+held_count :: proc(v: ^Views) -> int {
+	count := 0
+	for &entry in v.entries {
+		if _, held := entry.state.?; held {
+			count += 1
+		}
+	}
+	return count
+}
+
 // set_layout lays the views out. A view that the layout drops gives its renderer state back. A custom layout's count
 // is 1 to MAX_VIEWS, and its rects past the count are cleared.
 set_layout :: proc(v: ^Views, r: ^render.Renderer, layout: Layout) {
