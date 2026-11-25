@@ -14,7 +14,7 @@ import format "cinnabar:engine/asset/format"
 // in ticks, each with sections of keyed channels, a clip, a sound or a sub-sequence (see
 // docs/content/kinds/cutscenes.md). The cook checks the assets that a cutscene names and its sub-sequences' nesting, which
 // it reads from the other cutscenes' sources, so the order of the passes does not matter.
-CUTSCENE_COOK_VERSION :: "cutscenes 14"
+CUTSCENE_COOK_VERSION :: "cutscenes 15"
 
 // CUTSCENE_TEMPLATE is the text of a new cutscene: 10 seconds at 30 frames a second, with no bindings and an empty
 // camera cut track. testdata/cutscenes/template.cutscene is the same text, which the editor's tests read.
@@ -683,6 +683,8 @@ Pending_Section :: struct {
 	roll_line:          int,
 	// The settings that only a sub-sequence section takes: the lines of trim and scale, and its binds.
 	sub_lines:          [2]int,
+	// The line of a sub-sequence section's name, which the editor's shot list shows. It is not in the blob.
+	name_line:          int,
 	binds:              [dynamic]Pending_Bind,
 	// The lines of the settings that only a presentation section takes: kind, color, speaker, text, key and audio,
 	// and the ID of the audio section that audio names.
@@ -1618,6 +1620,12 @@ cutscene_parse :: proc(
 					continue
 				}
 				s.contents.offset, s.contents.trim_end, s.sub_lines[0] = start, end, line
+			case "name":
+				if _, ok := cutscene_name(value_text); !ok {
+					problem(&found, line, "name is quoted text")
+					continue
+				}
+				s.name_line = line
 			case "scale":
 				value, message := parse_graph_value(value_text)
 				if message != "" ||
@@ -1883,6 +1891,7 @@ cutscene_parse :: proc(
 			     "loop",
 			     "trim",
 			     "scale",
+			     "name",
 			     "root_motion",
 			     "camera",
 			     "blend_in",
@@ -2260,6 +2269,9 @@ cutscene_parse :: proc(
 				}
 				if len(s.binds) > 0 {
 					problem(&found, s.binds[0].line, "only a sub_sequence section binds bindings")
+				}
+				if s.name_line != 0 {
+					problem(&found, s.name_line, "only a sub_sequence section has a name")
 				}
 				c.trim_end = 0
 				if !plays {

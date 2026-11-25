@@ -63,11 +63,12 @@ public sealed class CutsceneBlock : FieldBlock
     public string? TrackKind => Kind == CutsceneBlockKind.Track && Words is [_, var kind, ..] ? kind : null;
 
     /// <summary>
-    /// The name of a binding, a track or a marker, unquoted, a channel's, or the event of a trigger or a range, or null
-    /// when the block has none.
+    /// The name of a binding, a track or a marker, unquoted, a channel's, the event of a trigger or a range, or a
+    /// section's <c>name</c> setting, unquoted, or null when the block has none.
     /// </summary>
     public string? Name => Kind switch
     {
+        CutsceneBlockKind.Section => Get("name") is { } text ? TextQuote.Unquote(text.Trim()) : null,
         CutsceneBlockKind.Binding => Quoted(1),
         CutsceneBlockKind.Track => Quoted(2),
         CutsceneBlockKind.Channel => Words is [var name, ..] ? name : null,
@@ -146,12 +147,18 @@ public sealed class CutsceneBlock : FieldBlock
         }
     }
 
-    /// <summary>Renames a binding, a track or a marker, keeping its ID and its kind or time.</summary>
+    /// <summary>
+    /// Renames a binding, a track or a marker, keeping its ID and its kind or time, or sets a section's <c>name</c>,
+    /// which an empty name removes.
+    /// </summary>
     public void SetName(string name)
     {
         var words = Words;
         switch (Kind)
         {
+            case CutsceneBlockKind.Section:
+                Set("name", name.Length == 0 ? null : TextQuote.Quote(name));
+                break;
             case CutsceneBlockKind.Binding when words.Length >= 1:
                 SetHead($"binding {words[0]} {TextQuote.Quote(name)}");
                 break;

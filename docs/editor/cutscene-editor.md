@@ -877,7 +877,7 @@ While **Events in Preview** is on and the preview plays (see [Scrub, play and st
 
 ## Sub-sequences
 
-A shot is often a sub-sequence: a section that plays another cutscene, its child (see [Cinematics: Sub-sequence tracks](../cinematics/tracks.md#sub-sequence-tracks)). The tab edits a child **in context**: at the parent's time, while the preview plays the parent with its other tracks around the shot. A sub-sequence section's bar shows its child's file name.
+A shot is often a sub-sequence: a section that plays another cutscene, its child (see [Cinematics: Sub-sequence tracks](../cinematics/tracks.md#sub-sequence-tracks)). The tab edits a child **in context**: at the parent's time, while the preview plays the parent with its other tracks around the shot. A sub-sequence section's bar shows its `name`, or else its child's file name.
 
 ### In context
 
@@ -912,6 +912,28 @@ A shot is often a sub-sequence: a section that plays another cutscene, its child
 
 A drop of a cutscene that plays the shown level, at any depth, is refused at the drop, and the console names the cycle's path as the cooker does: `sub-sequence cycle: child -> parent -> child`. `CutsceneSubSequences.Cycle` walks the children breadth first, from the open documents' unsaved text and the other cutscenes' files, so the path is the shortest. A section whose child plays a cutscene above it does not open in context.
 
+### Shot list
+
+**Shots** in the toolbar, or **Shot List** in the palette, shows a column to the left of the timeline. It lists the shown level's sub-sequence sections, from every sub-sequence track, in time order (`CutsceneShots.Shots`):
+
+- **A row** shows the section's `name`, or its child's file name, its start and its length as timecode, and its camera under the name. The camera is the child's first camera cut in the span that the section plays, or, when the child has no cut there, the shown level's cut at the section's start.
+- **A click** selects the section, moves the playhead to its start and frames it.
+- **Rename.** A double-click on a row, or F2 while the list has the keyboard, swaps in a box. Enter sets the section's `name` as one undo entry, "Rename Shot", and Esc or a click elsewhere leaves it. An empty name removes the setting. The bar and the breadcrumbs show the new name.
+- **Reorder.** A drag onto another row of the same track moves the shot to that row's place, as one undo entry, "Reorder Shots" (`CutsceneShots.Reorder`). The sections from the one place to the other are laid out again in the new order from the first one's start. Each keeps its length, and each place keeps the gap before it, so the span that they fill stays the same and the later sections stay where they are. A drop on a row of another track, or on a locked track, is refused, and the console says why.
+- **In context**, the list shows the shown child's sub-sequences.
+
+### New shots
+
+**New Shot at Playhead** (Ctrl+Alt+N in the timeline, or the section menu) makes a new cutscene asset, a child, and moves the selected sections, triggers and ranges into it (`CutsceneShots.NewShot`):
+
+1. **The asset.** The cook daemon makes a cutscene from the template beside the shown one, named `<cutscene>_shot_NN`, where NN is one more than the number of shots, or the next free name. The content browser does not open it.
+2. **The blocks.** A selected key takes its section, and a sound takes the subtitles that name it. Blocks on locked tracks stay. With nothing selected, the shot is empty: it runs from the playhead to the next shot's start, or for the template's 10 s.
+3. **The child** takes the parent's rate and the span's length, from the first start to the last end. It gets a copy of each binding that the blocks name, at the same ID: a track's binding, a cut's camera, a constraint's target, a relative space, an entity value or a `bind`, and the bindings that those name in turn. The blocks are pasted at their times less the span's start, on tracks like theirs, as a paste with new tracks makes them. A camera cut goes on the template's cut track.
+4. **The parent** loses the blocks and gains a sub-sequence section over the span, named `Shot NN`, with a `bind N = N` for each copied binding, so the child acts on the parent's entities and spawns none of its own. The section goes on the first sub-sequence track, or on a new "Shots" track when it would overlap a section there. The bindings stay in the parent.
+5. **One undo entry in each document**, "New Shot". The child is saved at once, since the parent's cook check reads its children's saved files and its `bind` lines name the child's new bindings. The parent's entry stays unsaved, and the new section is selected.
+
+The shown cutscene can change while the daemon makes the asset. Then nothing moves, and the console names the new asset, which stays as the template. A drag under way, or a selection that is all on locked tracks, refuses the command.
+
 ### Sub-sequence commands
 
 | Command | Default | What it does |
@@ -919,6 +941,8 @@ A drop of a cutscene that plays the shown level, at any depth, is refused at the
 | Open Sub-sequence | Ctrl+Enter | Shows the selected sub-sequence's child in context. |
 | Up One Level | Backspace (`Back`) | Shows the cutscene that plays the shown child. |
 | Open in Own Tab | | Opens the shown child, or the selected section's, as its own asset. |
+| New Shot at Playhead | Ctrl+Alt+N | Moves the selected blocks into a new child, or makes an empty one at the playhead (see [New shots](#new-shots)). |
+| Shot List | | Shows or hides the shot list. |
 
 They are timeline commands, which the timeline and the curve editor have, and they are not in the ribbon.
 
@@ -928,4 +952,7 @@ They are timeline commands, which the timeline and the curve editor have, and th
 - **Bindings that a section maps** (`bind <child> = <parent>`) show as the child's own bindings in context, which possess or spawn as at the top level. Keys go to a binding that possesses the selected entity itself.
 - **Cameras and binding values wait for the top level.** The game plays the tab's own cutscene, whose binding IDs are not the child's, so in context Look Through, the pilot, and values over the preview by a binding's ID (a spawned camera's pose and lens) are refused with a reason. Look Through Cuts follows the tab's own cut track.
 - **A child open in its own tab cooks twice,** once for each tab that holds it, as each has its own checks. The preview takes the unsaved text only of the children that its tab holds in context.
-- **The shot list and New Shot at Playhead** are not built yet.
+- **New Shot's key is Ctrl+Alt+N.** Ctrl+Shift+N is Create Entity's everywhere, and a timeline key does not shadow a window key.
+- **An undo of a new shot** brings the parent's text back, and leaves the child's asset and its file with the moved blocks.
+- **A reorder moves only the shots' sections.** The parent's other tracks, such as its camera cuts, stay at their times.
+- **A new shot copies its bindings.** The child's bindings are copies of the parent's at the time of the shot, so a later rebind in the parent does not change the child's own possess or spawn. The `bind` lines still give the parent's entities to the child at run time.

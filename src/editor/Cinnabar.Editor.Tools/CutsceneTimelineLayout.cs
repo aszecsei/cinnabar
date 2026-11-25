@@ -509,10 +509,11 @@ public sealed class CutsceneTimelineLayout
         }
     }
 
-    // What a section's bar says: a presentation section's line or kind, a camera cut's camera, an animation's, a
-    // sound's or a sub-sequence's clip, or else its ID.
+    // What a section's bar says: a presentation section's line or kind, a camera cut's camera, a sub-sequence's name,
+    // an animation's, a sound's or a sub-sequence's clip, or else its ID.
     static string SectionLabel(CutsceneFile file, CutsceneBlock track, CutsceneBlock section, CutsceneClipInfo? clip) => track.TrackKind switch
     {
+        "sub_sequence" when section.Name is { Length: > 0 } name => name,
         "animation" or "audio" or "sub_sequence" when clip != null => clip.Name,
         "presentation" => section.Get("text") is { } text ? TextQuote.Unquote(text) ?? text : section.Get("kind") ?? "",
         "camera_cut" => section.Get("camera") is { } camera && CutsceneFile.TryParseId(camera, out var id)

@@ -844,8 +844,9 @@ sealed class CutsceneTimeline : Control
         }
         MenuBuilder.Build(menu.Items,
             _editor.SelectedSubSequence != null
-                ? [EditorCommands.CutsceneOpenSubSequence, EditorCommands.CutsceneOpenInOwnTab]
-                : [EditorCommands.CutsceneRevealClip, EditorCommands.CutsceneOpenClip, new MenuSeparator(), EditorCommands.CutsceneMatchClipLength],
+                ? [EditorCommands.CutsceneOpenSubSequence, EditorCommands.CutsceneOpenInOwnTab, new MenuSeparator(), EditorCommands.CutsceneNewShot]
+                : [EditorCommands.CutsceneRevealClip, EditorCommands.CutsceneOpenClip, new MenuSeparator(), EditorCommands.CutsceneMatchClipLength,
+                    EditorCommands.CutsceneNewShot],
             shell.Commands, shell.KeyBindings, MenuBinding.Snapshot, Refocus);
         menu.Open(this);
     }

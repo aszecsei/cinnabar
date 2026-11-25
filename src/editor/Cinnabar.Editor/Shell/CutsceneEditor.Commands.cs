@@ -103,6 +103,8 @@ public sealed partial class CutsceneEditor
         EditorCommands.CutsceneOpenSubSequence => new(() => OpenSubSequence(SelectedSubSequence!), () => OpenSubSequenceRefusal(SelectedSubSequence) == null),
         EditorCommands.CutsceneUpOneLevel => new(() => UpOneLevel(), () => InContext && !Documents.Any(d => d.InTransaction)),
         EditorCommands.CutsceneOpenInOwnTab => new(OpenInOwnTab, () => CanOpenInOwnTab),
+        EditorCommands.CutsceneNewShot => new(NewShotAtPlayhead, () => NewShotRefusal() == null),
+        EditorCommands.CutsceneShots => new(() => ShotsOpen = !ShotsOpen),
         _ => null,
     };
 

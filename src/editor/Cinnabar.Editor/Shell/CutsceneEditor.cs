@@ -1445,6 +1445,7 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
 
     public void Dispose()
     {
+        DisposeShots();
         RootDocument.Changed -= _rootChanged;
         _shell.CutsceneTimelineSettingsSaved -= OnTimelineSettingsSaved;
         DisposeLevels();

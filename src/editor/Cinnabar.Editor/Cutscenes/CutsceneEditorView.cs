@@ -38,6 +38,12 @@ public sealed class CutsceneEditorView : DockPanel
     readonly TextBox _search = new() { Classes = { "value-edit" }, MinWidth = 200, FontSize = 12 };
     readonly ToggleButton _selectedOnly = new() { Content = "Selected entities", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(8, 0, 0, 0) };
     readonly ToggleButton _curves = new() { Content = "Curves", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(8, 0, 0, 0) };
+    readonly ToggleButton _shots = new() { Content = "Shots", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(8, 0, 0, 0) };
+    // The shot list, in a column to the left of the timeline while it is open, with a split beside it.
+    readonly CutsceneShotList _shotList;
+    readonly ColumnDefinition _shotColumn = new(0, GridUnitType.Pixel);
+    readonly ColumnDefinition _shotSplitColumn = new(0, GridUnitType.Pixel);
+    readonly GridSplitter _shotSplit = new() { ResizeDirection = GridResizeDirection.Columns, IsVisible = false };
     readonly RowDefinition _curveRow = new(0, GridUnitType.Pixel);
     readonly RowDefinition _curveSplitRow = new(0, GridUnitType.Pixel);
     readonly CutsceneCurveEditor _curveEditor;
@@ -91,6 +97,10 @@ public sealed class CutsceneEditorView : DockPanel
         _curves.IsCheckedChanged += (_, _) => editor.CurvesOpen = _curves.IsChecked == true;
         DockPanel.SetDock(_curves, DockSide.Left);
         toolbar.Children.Add(_curves);
+        ToolTip.SetTip(_shots, CommandViews.Tip(shell.KeyBindings, "Show the sub-sequence sections in time order beside the timeline", EditorCommands.CutsceneShots));
+        _shots.IsCheckedChanged += (_, _) => editor.ShotsOpen = _shots.IsChecked == true;
+        DockPanel.SetDock(_shots, DockSide.Left);
+        toolbar.Children.Add(_shots);
         // The playhead's time: a click, or Go to Time, swaps in a box to type a time. Enter jumps there, and Enter or
         // Esc gives the keyboard back to the timeline.
         _playheadButton.Content = _playhead;
@@ -225,7 +235,14 @@ public sealed class CutsceneEditorView : DockPanel
         timelinePane.Children.Add(panes);
         // Red around the timeline while auto-key keys this cutscene's bound entities' edits.
         _autoKeyFrame = new Border { Child = timelinePane, Classes = { "auto-key-frame" }, BorderThickness = new Thickness(2) };
-        grid.Children.Add(_autoKeyFrame);
+        _shotList = new CutsceneShotList(editor) { IsVisible = false };
+        var fold = new Grid { ColumnDefinitions = [_shotColumn, _shotSplitColumn, new ColumnDefinition(1, GridUnitType.Star)] };
+        fold.Children.Add(_shotList);
+        Grid.SetColumn(_shotSplit, 1);
+        fold.Children.Add(_shotSplit);
+        Grid.SetColumn(_autoKeyFrame, 2);
+        fold.Children.Add(_autoKeyFrame);
+        grid.Children.Add(fold);
         var split = new GridSplitter { ResizeDirection = GridResizeDirection.Rows };
         Grid.SetRow(split, 1);
         grid.Children.Add(split);
@@ -389,10 +406,32 @@ public sealed class CutsceneEditorView : DockPanel
         }
     }
 
+    // The shot list's column opens and closes with it.
+    void ShowShots()
+    {
+        var open = _editor.ShotsOpen;
+        if (_shots.IsChecked != open)
+        {
+            _shots.IsChecked = open;
+        }
+        if (_shotList.IsVisible != open)
+        {
+            _shotList.IsVisible = open;
+            _shotSplit.IsVisible = open;
+            _shotSplitColumn.Width = new GridLength(open ? 4 : 0, GridUnitType.Pixel);
+            _shotColumn.Width = new GridLength(open ? 260 : 0, GridUnitType.Pixel);
+        }
+        if (open)
+        {
+            _shotList.Show();
+        }
+    }
+
     void Show()
     {
         ShowAutoKey();
         ShowCurves();
+        ShowShots();
         ShowPlayhead();
         ScheduleFlush();
         var preview = _shell.CutscenePreview;

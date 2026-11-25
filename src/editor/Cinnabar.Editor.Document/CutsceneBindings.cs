@@ -204,7 +204,12 @@ public static class CutsceneBindings
         return [.. file.Root.Descendants().Where(b => !removed.Contains(b) && b.Fields.Any(s => Names(s.Key, s.Value, binding)))];
     }
 
-    static bool Names(string key, string value, int binding)
+    static bool Names(string key, string value, int binding) => NamedId(key, value) == binding;
+
+    /// <summary>The IDs of the bindings that a block's settings name, as <see cref="ReferencesTo"/> finds them.</summary>
+    internal static IEnumerable<int> NamedBindings(CutsceneBlock block) => block.Fields.Select(f => NamedId(f.Key, f.Value)).OfType<int>();
+
+    static int? NamedId(string key, string value)
     {
         var words = value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         string? id = key switch
@@ -215,7 +220,7 @@ public static class CutsceneBindings
             _ when key.StartsWith("bind ", StringComparison.Ordinal) => words is [var w] ? w : null,
             _ => null,
         };
-        return id != null && int.TryParse(id, NumberStyles.None, CultureInfo.InvariantCulture, out var named) && named == binding;
+        return id != null && int.TryParse(id, NumberStyles.None, CultureInfo.InvariantCulture, out var named) ? named : null;
     }
 
     /// <summary>
