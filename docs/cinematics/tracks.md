@@ -2,7 +2,7 @@
 
 A track acts on the world at the cutscene's time. Its kind says what it writes: a field, a pose, a camera, a sound, an event to the scripts, or the tracks of another cutscene. This document describes the kinds that the engine has, in `lib/engine/cutscene`, and the curve that every keyed track shares. Read [Evaluation](evaluation.md) first, for sections, blending and the restore snapshot.
 
-**In this document:** [Curves](#curves) · [Property tracks](#property-tracks) · [Transform tracks](#transform-tracks) · [Animation tracks](#animation-tracks) · [Camera cut tracks](#camera-cut-tracks) · [Audio tracks](#audio-tracks) · [Event tracks](#event-tracks) · [Sub-sequence tracks](#sub-sequence-tracks) · [Presentation tracks](#presentation-tracks) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
+**In this document:** [Curves](#curves) · [Property tracks](#property-tracks) · [Transform tracks](#transform-tracks) · [Animation tracks](#animation-tracks) · [Camera cut tracks](#camera-cut-tracks) · [Audio tracks](#audio-tracks) · [Event tracks](#event-tracks) · [Sub-sequence tracks](#sub-sequence-tracks) · [Presentation tracks](#presentation-tracks) · [Limits](#limits) · [Procedures](#procedures)
 
 ## Curves
 
@@ -647,10 +647,10 @@ Scripts read and change them with the `Subtitles` library ([Scripting: Subtitles
 
 `register` sets the presentation kind. Without the cutscenes' UI, the tracks evaluate and nothing shows.
 
-## Not built yet
+## Limits
 
 - Fields blend track by track: each track blends its sections over the field's own value, and the later track wins. So two shots that overlap cross-fade an `Animator`'s pose, but a transform or a property that both write takes the later shot's value at its weight over the own value, not over the other shot's.
-- The cutscene editor's preview sets `audition`: `.Preview` while it plays and `.Scrub` while it is scrubbed (see [Cutscene editor: Preview](../editor/cutscene-editor.md#preview)). Its waveforms are [#556](https://github.com/aszecsei/cinnabar/issues/556).
+- The cutscene editor's preview sets `audition`: `.Preview` while it plays and `.Scrub` while it is scrubbed (see [Cutscene editor: Preview](../editor/cutscene-editor.md#preview)).
 - In the editor, a scene view follows the cut track only while it looks through the cuts (see [Cutscene editor: Look through](../editor/cutscene-editor.md#look-through)).
 
 ## Procedures

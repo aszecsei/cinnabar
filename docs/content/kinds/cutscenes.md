@@ -8,7 +8,7 @@ Cutscenes are `.cutscene` text files in the content roots. A cutscene has bindin
 
 `just cutscenes` runs `cook cutscenes --cache build/<target>/content --config dev|release --root game=<content root> --root engine=lib/engine/content`. The daemon cooks cutscenes like any other kind (`tools/cook/cutscenes.odin`).
 
-This page describes the asset. [Cinematics](../../cinematics/README.md) describes how the game resolves its bindings, evaluates its tracks and plays it, and [Cinematics: Tracks](../../cinematics/tracks.md) the curve and the kinds of track that are built. The [cutscene editor](../../editor/cutscene-editor.md) opens it in a tab, which is built in steps.
+This page describes the asset. [Cinematics](../../cinematics/README.md) describes how the game resolves its bindings, evaluates its tracks and plays it, and [Cinematics: Tracks](../../cinematics/tracks.md) the curve and the kinds of track that are built. The [cutscene editor](../../editor/cutscene-editor.md) opens it in a tab, and renders it out to frames, sound and video.
 
 ```
 cutscene 1
@@ -36,7 +36,7 @@ track 2 audio "Bark"
 		asset = $7ce894b4b95e68b918869459e5cd9c93
 ```
 
-`samples/mygame/content/cutscenes/intro.cutscene` is a longer example. It plays `fox_walk.cutscene` as a sub-sequence.
+`samples/mygame/content/cutscenes/intro.cutscene` is a longer example. It plays `fox_walk.cutscene` as a sub-sequence. It possesses the walking fox and, with the policy `optional`, the running fox, which runs 3 m and is back where it stood at the end. It spawns a guard, a stone that rolls away from the guard's bark, and three cameras. It pushes the input context `cutscene` and hides the HUD, so the player holds the skip action, Enter or the pad's B, to skip it. `intro_player.luau` defines that action and the context in its `start`, and the `animation` scene has the HUD's entity.
 
 ## Time
 

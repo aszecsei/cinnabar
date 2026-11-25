@@ -2,9 +2,9 @@
 
 The cutscene editor edits a cutscene (see [Content: Cutscenes](../content/kinds/cutscenes.md)), which the game plays as [Cinematics](../cinematics/README.md) describes. Each open one is a tab, a `GraphEditorDocument` with the ID `cutscene.{guid}`, over a `CutsceneEditor` in the shell, which holds its state. Docking can rebuild the view, and tests drive the editor without a window.
 
-The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, the bindings, the cameras with their lenses and focus, and the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)): names, loops, eases, drops, the section menu, sounds' waveforms and clips' events. Pose thumbnails wait for render out ([#559](https://github.com/aszecsei/cinnabar/issues/559)). Event keys ([#558](https://github.com/aszecsei/cinnabar/issues/558)) take their names from the bound behaviours' handlers, with typed payloads and Jump to Handler. Sub-sequences ([#557](https://github.com/aszecsei/cinnabar/issues/557)) open in context in the tab, with breadcrumbs and the parent's time on the ruler. The shot list and New Shot at Playhead are not built yet.
+The editor is built under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, the bindings, the cameras with their lenses and focus, and the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)): names, loops, eases, drops, the section menu, sounds' waveforms and clips' events. Event keys ([#558](https://github.com/aszecsei/cinnabar/issues/558)) take their names from the bound behaviours' handlers, with typed payloads and Jump to Handler. Sub-sequences ([#557](https://github.com/aszecsei/cinnabar/issues/557)) open in context in the tab, with breadcrumbs and the parent's time on the ruler, a shot list and New Shot at Playhead. Commands add [presentation](#presentation) sections, event ranges and gain keys. [Render out](#render-out) ([#559](https://github.com/aszecsei/cinnabar/issues/559)) writes the cutscene's frames, sound and video. Pose and cut thumbnails are not built.
 
-**In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Sections](#sections) · [Preview](#preview) · [Keying](#keying) · [Bindings](#bindings) · [Curves](#curves) · [Cameras](#cameras) · [Events](#events) · [Sub-sequences](#sub-sequences)
+**In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Sections](#sections) · [Preview](#preview) · [Keying](#keying) · [Bindings](#bindings) · [Curves](#curves) · [Cameras](#cameras) · [Events](#events) · [Presentation](#presentation) · [Sub-sequences](#sub-sequences) · [Render out](#render-out)
 
 ## The file
 
@@ -232,7 +232,11 @@ Each action is a command, so it is in the command palette, and `keybindings.json
 | Open Clip | `cutscene.openClip` | None |
 | Match Clip Length | `cutscene.matchClipLength` | None |
 | Add Event | `cutscene.addEvent` | E |
+| Add Event Range | `cutscene.addEventRange` | Shift+E |
+| Add Fade, Add Letterbox, Add Subtitle | `cutscene.addFade`, `cutscene.addLetterbox`, `cutscene.addSubtitle` | None |
+| Add Gain Key | `cutscene.addGainKey` | None |
 | Jump to Handler | `cutscene.jumpToHandler` | None |
+| Render Out… | `cutscene.renderOut` | Ctrl+Shift+R |
 
 ### Cost
 
@@ -819,7 +823,7 @@ While a cutscene's preview is open, the helpers draw each camera's frustum in a 
 - **The wheel changes the flying speed.** It does not dolly, because a pilot's move ends with a mouse release. Alt and the right button dolly.
 - **The editing tools are off in a view that looks through a camera.** The gizmo, a box select, mesh mode, the landscape brush and drops act in the editor camera's view. A click still selects.
 - **The frustums are the same in every view.** The helpers' lines are shared by the scene views, so a camera that any view looks through has no frustum in the others either.
-- **No cut or pose thumbnails yet.** A cut's hover shows its camera and its times, not a picture of its first frame, and an animation section shows no pose. Both wait for render out ([#559](https://github.com/aszecsei/cinnabar/issues/559)), which makes the preview's renders.
+- **No cut or pose thumbnails.** A cut's hover shows its camera and its times, not a picture of its first frame, and an animation section shows no pose. [Render out](#render-out) writes frames to files and makes no thumbnails.
 - **A preview value keys at the preview's time.** Past the range's end, the preview stands at the end, so Enter keys a held lens value there.
 
 ## Events
@@ -874,6 +878,18 @@ While **Events in Preview** is on and the preview plays (see [Scrub, play and st
 - **A sub-sequence's events log but do not flash.** Their IDs are the child's, and the game does not say which child sent one. In context, the parent's events do not flash either, since the timeline shows the child. An event whose ID the tab's text no longer has, after an edit that the game has not cooked yet, also only logs.
 - **A name wider than its flag's estimate** is cut at the flag's end.
 - **The list is read when the rows are built.** A script that the daemon cooks again changes the list at the next build.
+
+## Presentation
+
+Four commands add blocks of the presentation, event and audio tracks at the playhead (see [Cinematics: Presentation tracks](../cinematics/tracks.md#presentation-tracks)). Each is one undo entry, selects what it added and shows its track. A locked track takes nothing. They are timeline commands, and they are not in the ribbon.
+
+- **The span.** A new block covers the in and out points when the tab has them, or else 2 s from the playhead (`CutsceneEditor.NewSpanTicks`).
+- **Add Fade, Add Letterbox** and **Add Subtitle** add a section of that `kind` to the first presentation track. When the cutscene has none, the command adds a track named Presentation. The length grows when the section ends past it.
+  - **A fade** starts black and opaque: `color = "#000000"` and an `opacity` channel of a constant 1.
+  - **A letterbox** has an `aspect` channel of a constant 2.39.
+  - **A subtitle** has the placeholder text `…`, which the details edit.
+- **Add Event Range** (Shift+E) adds a range over the span, clamped to the cutscene's length. It goes on the selected event track, or on the first event track of the selected binding or of the selected track's binding, which it adds, named Events, when there is none. Its name is the first range that the binding's behaviours handle (see [Names](#names)), or `range`.
+- **Add Gain Key** keys the selected audio section's `gain` at the playhead. It adds the `gain` channel, of a constant 1, when the section has none. The curve editor then shows the key. The command needs an audio section selected and the playhead inside it. Otherwise it is disabled, and the reason is "Select an audio section." or "Move the playhead into the section."
 
 ## Sub-sequences
 
@@ -956,3 +972,91 @@ They are timeline commands, which the timeline and the curve editor have, and th
 - **An undo of a new shot** brings the parent's text back, and leaves the child's asset and its file with the moved blocks.
 - **A reorder moves only the shots' sections.** The parent's other tracks, such as its camera cuts, stay at their times.
 - **A new shot copies its bindings.** The child's bindings are copies of the parent's at the time of the shot, so a later rebind in the parent does not change the child's own possess or spawn. The `bind` lines still give the parent's entities to the child at run time.
+
+## Render out
+
+A render out plays the saved cutscene out of real time. It writes each frame as a PNG, the sound as a WAV, and with ffmpeg, a video. The game draws a frame only when everything that it shows has streamed in and compiled, so each frame is final. The host writes the files.
+
+### The dialog
+
+**Render Out…** (`cutscene.renderOut`, Ctrl+Shift+R) is in the cutscene tab's toolbar and in the timeline's commands, and not in the ribbon. It shows `RenderOutDialog`. While a run of the tab is under way, the toolbar button shows the frames written and the time left, and cancels the run.
+
+| Field | What it holds |
+|---|---|
+| Range | **Whole range**, the cutscene's `range`. **In to out**, when the tab has in or out points. **Selected shot**, a selected sub-sequence section, not in context. |
+| Size | `<width>x<height>`, 1 to 8192 on each side. 1920x1080 at first. |
+| Rate | Frames a second, 15 or more. The cutscene's rate at first. |
+| Format | PNG. EXR is in the list and is refused with "EXR frames need an HDR target, which the renderer does not have yet". |
+| Folder | `<project>/renders/<cutscene name>` at first. |
+| File names | A pattern with `{name}`, the cutscene's name, and `{frame}`, the frame's number. `{name}.{frame}.png` at first. The pattern needs `{frame}`. |
+| Camera | **Cut track**, or a camera binding that a camera cut section names. |
+| Warm-up | Frames at the first frame's time that are drawn and not written, 0 to 64. 8 at first. |
+| Sound | A WAV of the cutscene's sound. On at first. |
+| Video | An MP4 of the frames and the sound. Off, with the tooltip "Set ffmpeg in the settings to make videos", unless `settings.json` in the editor's settings folder has `"ffmpeg"`, the path of an ffmpeg that exists. |
+
+- **The frames.** A span of `n` ticks has `ceil(n × rate / 60000)` frames. `{frame}` is the frame's number at the rate from the cutscene's time 0, six digits wide, so a render of one shot has the numbers of its place in the cutscene.
+- **The dialog** says the number of frames and the first file's name. **Render** is disabled, with the reason, when a setting is refused or the editor cannot start a run (see [Limits](#render-out-limits)).
+
+### What a run does
+
+- **In the editor.** `RenderOutModel` (`Cinnabar.Editor.Model`) holds the run as one state: `Idle`, `Starting`, `Running`, `Cancelling` or `Muxing`. Only `Become` changes it, and `Allowed` lists the changes (see [State with a lifecycle](../overview/conventions.md#state-with-a-lifecycle)). Each run has a ticket, which only goes up, and the model drops a message of another ticket.
+  - The editor leaves Edit as Play does: the overrides and the cutscene preview end, and the editor's mode is Play. Play and Pause do nothing during a run.
+  - **Stop** cancels the run, as does closing the tab. A lost link or a soft restart of the host fails it.
+  - When the game ends the run, the editor sets Edit and sends its scene again, as Stop does. The video is made after that.
+- **In the game.** `Mode_Render` in `lib/engine/editor/render_out.odin` holds the run, and the link knows it as Play. The stages are:
+  1. `Preparing` loads the cutscene and waits for the host to open the files.
+  2. `Warming` draws the warm-up frames. A warm-up of 0 skips it.
+  3. `Rendering` draws the frames.
+  4. `Finishing` waits for the host to write what it took.
+  5. `Ended` stays until the editor sets Edit.
+
+  `change_render` is the one writer. The run takes no input.
+- **A frame** takes three steps, over several of the game's frames:
+  1. **World.** The world steps by the exact duration of the frame, which comes from its number and not from a sum. The cutscene's player goes to the frame's tick (`cutscene.drive`, see [Evaluation: The clock](../cinematics/evaluation.md#the-clock)). Events fire over the span, and no camera cut jumps.
+  2. **Settling.** The view draws with a second `View_State`, the probe, until `SETTLE_QUIET_DRAWS` (3) draws in a row find nothing to wait for. A draw waits for these: no pipeline compiling (`render.frame_compiling`); no resident entry unsettled (`render.residency_unsettled`, see [Assets](../rendering/assets.md#gpu-residency)); no mesh or texture pages pending; every asset current (`asset.current`); and no scene loading. A frame waits at most 60 s. Each warm-up draw settles in the same way.
+  3. **Drawing.** The view draws once with the run's own `View_State`, and the host copies the frame.
+- **A cut** that the camera stacks give during the World or Settling steps goes to the frame's draw.
+- **The clocks.** The renderer's clock is fixed at 60 s plus the frame's number over the rate (see [Frame: The clock](../rendering/frame.md#the-clock)), so what the renderer moves by time moves the same in each run. `ecs.align_clock` aligns the world's ticks at the start (see [Time](../world/time.md#fixed-and-variable-rate)). Textures take the mip that they want at once (`residency_set_exact_mips`).
+- **Failures.** Three draws in a row that fail make the run fail. A `Load_Scene` during a run fails it. A cancel ends the run after the frame that it is on.
+- **The host** (`src/host/render_out.odin`) copies each frame with `gpu_capture_texture`, at most two in flight, encodes it on the capture worker, and writes it to a temporary file that it then renames. It sends `Render_Out_Written` for each frame, and for the sound with the frame -1. The history ring takes no sample during a run. A host built with `CAPTURE=false` refuses a render out. A soft restart aborts the run's files.
+
+### Files
+
+- **Frames.** One PNG for each frame, in the folder, named by the pattern.
+- **A sidecar** beside each PNG, with the same name and the extension `.json`. The editor writes it when the host says that the frame is written (see [Capture: Sidecar](capture.md#sidecar)).
+
+  | Field | What it holds |
+  |---|---|
+  | `schema`, `kind` | 1, and `render_out` |
+  | `cutscene` | The cutscene's name |
+  | `frame`, `tick` | The frame's number and its tick on the cutscene's time |
+  | `timecode`, `cutsceneFrame`, `shot` | The time as `mm:ss:ff`, the frame at the cutscene's rate, and the camera of the cut section there, or `gameplay` |
+  | `width`, `height`, `rate` | The frame's size and the rate |
+  | `settleDraws`, `ms` | The draws that waited, and the game's time for the frame in milliseconds |
+
+- **Sound.** The host takes the world's sound through a tap of the audio device's queue (see [Audio: The tap](../core/audio.md#the-tap)). The device plays silence. For each frame the host takes the frame's exact share of 48 kHz samples, and waits until the mixer fills the queue to its depth again. It writes `<folder>/<name>.wav`, 16-bit PCM, to a `.tmp` file that it renames when the run closes.
+- **Video.** When the run is done and Video is on, the editor runs ffmpeg on the frames and the sound: `libx264`, `yuv420p`, `-crf 18`, and with sound, AAC at 192 kb/s and `-shortest`. It writes `<folder>/<name>.mp4.tmp.mp4` and renames it to `<name>.mp4` when ffmpeg succeeds. The state is `Muxing` meanwhile, and Cancel stops ffmpeg. A video needs the sound, so Video makes the run write it.
+
+### Determinism
+
+Two runs of one cutscene are near-identical, not identical bit for bit. The split cascade's global illumination probes take their table slots in the order of the GPU's threads, and a few pixels near moving skinned meshes differ by a few levels. The tests compare two runs with at most 2% of the pixels more than 16 levels apart. The run fixes the time: the world's step, the cutscene's tick, the renderer's clock, the mips and what is streamed in.
+
+`CINNABAR_STREAM_DELAY_FRAMES=<n>` holds each streamed transfer back `n` frames, so a test shows that a frame waits for its streaming (see [Platform](../core/platform.md#environment-variables)).
+
+### Commands
+
+| Command | What it does |
+|---|---|
+| `render-out` (automation) | Opens the cutscene's tab and renders it out with the request's settings over the tab's. It answers when the run and its video have ended, with `ok`, `files` and `renderOut`: `outcome`, `reason`, `frames`, `folder`, `audio` and `video`. See [Capture: Automation](capture.md#automation). |
+| `editorctl render-out` | `editorctl render-out <cutscene> <folder> [whole\|inout\|shot:<name>\|<from>-<to>] [<w>x<h>] [--rate <fps>] [--format png\|exr] [--pattern <names>] [--warmup <frames>] [--camera <binding>] [--no-audio] [--video]`. `<from>-<to>` is in ticks, and `--camera` is a binding's ID. |
+
+The command blocks until the run ends, with no time limit, and the automation server's other requests wait meanwhile. A request has the dialog's refusals.
+
+### Render out limits
+
+- **It renders the saved cutscene.** A tab with unsaved changes is refused, with "save the cutscene first: a render out renders the saved cutscene".
+- **It starts in Edit,** with a game linked and a scene open, and runs one at a time.
+- **EXR is not built.** The renderer has no HDR target.
+- **The frames are near-identical,** not identical (see [Determinism](#determinism)).
+- **The device is silent** during a run, because the sound goes to the file.
+- **The rate is 15 or more,** because a lower rate makes a frame of more ticks than one game frame runs.

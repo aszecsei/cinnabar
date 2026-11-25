@@ -14,6 +14,7 @@ The fixed tick schedule, the frame-rate stages, interpolation of presented poses
 - **Interpolation:** an entity that moves in `Fixed` systems has a `Previous_Transform`, and so do its children. At the start of each tick, the world copies `Transform` to `Previous_Transform`. Presentation (render extraction, cameras, UI) uses `presented`, or `interpolate` with the clock's `alpha`, the fraction of the current tick that has passed. Presentation is therefore up to one tick late. Animation poses are presented the same way, from the samples of the last two ticks ([Animation: Ticks and presentation](../animation/design.md#ticks-and-presentation)).
 - **Teleports:** to move an interpolated entity without a blend, use `teleport` or `command_teleport`. It sets both `Transform` and `Previous_Transform`.
 - **Rate changes:** `set_tick_rate` takes effect from the next tick. The schedule stays exact across the change.
+- **Aligning:** `ecs.align_clock` drops the part of a tick that has passed. The ticks then start again from the current one, so the next frame's ticks fall where a fresh clock's would. A render out calls it at its start, so each run has the same ticks (see [Cutscene editor: Render out](../editor/cutscene-editor.md#render-out)).
 
 ## Time scale
 

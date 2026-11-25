@@ -174,3 +174,11 @@ A split screen draws several views into one target, each into its own rect of it
 | View model's own projection | The view model draws with the view's projection. |
 
 - **A `Camera`** is orthographic when its `projection` is `Orthographic`. Its `orthographic_height` and `far` are in meters, and 0 means `DEFAULT_ORTHOGRAPHIC_HEIGHT` (10) and `DEFAULT_ORTHOGRAPHIC_FAR` (1000).
+
+## The clock
+
+`Renderer.clock` is the time that the frame reads, a `Maybe(Fixed_Clock)` whose nil is the host's. `clock_seconds(&renderer)` gives it in seconds: the fixed clock's, or `platform.time_seconds()`, or 0 without a host clock. `set_render_clock` is its one writer.
+
+- **What reads it:** the material time (`frame_time`, wrapped every hour), the exposure's adaptation, the clouds' wind, the particles' wall delta, and the reflection probes' capture time.
+- **Who sets it:** a render out sets it for each frame, at 60 s plus the frame's number over the rate, so what moves by time moves the same in each run (see [Cutscene editor: Render out](../editor/cutscene-editor.md#render-out)). Nothing else does.
+- **`frame_compiling`** is true when the last `draw_frame` asked for a pipeline that was still compiling, so a later frame would draw differently. `handle_status` counts those asks in an atomic counter that `draw_frame` resets, because the frame's jobs ask too. A render out draws until it is false.
