@@ -150,9 +150,10 @@ public readonly record struct CurveKey(
 }
 
 /// <summary>
-/// The runtime's curve evaluator in the editor (see docs/cinematics/tracks.md#curves): a line-for-line copy of
-/// lib/engine/cutscene/curve.odin, with its f64 arithmetic in the same order and no fused multiply-adds, so that it
-/// gives the same f32 bits at every tick. The shared test curve, lib/engine/cutscene/testdata/curve.txt, checks both.
+/// The runtime's curve evaluator in the editor (see docs/cinematics/tracks.md#curves): a line-for-line copy of the keyed
+/// curve with i32 times in lib/core/math/keyed.odin and exact.odin, with its f64 arithmetic in the same order and no
+/// fused multiply-adds, so that it gives the same f32 bits at every tick. The shared test curve,
+/// lib/core/math/testdata/curve.txt, checks both.
 /// </summary>
 public static class CutsceneCurve
 {
@@ -162,11 +163,11 @@ public static class CutsceneCurve
     /// <summary>The weight of a handle that is not weighted, <c>CUTSCENE_TANGENT_WEIGHT</c>.</summary>
     public const double TangentWeight = 1.0 / 3.0;
 
-    /// <summary>How many halvings find a weighted segment's parameter, <c>CURVE_SOLVE_STEPS</c>.</summary>
+    /// <summary>How many halvings find a weighted segment's parameter, <c>KEY_SOLVE_STEPS</c>.</summary>
     public const int SolveSteps = 48;
 
     /// <summary>
-    /// The curve's value at a tick on its own time: <c>curve_value</c>. Before the first key, <paramref name="pre"/>
+    /// The curve's value at a tick on its own time: <c>key_value</c>. Before the first key, <paramref name="pre"/>
     /// decides, and after the last, <paramref name="post"/> does (see <see cref="Wrap"/>). Between keys, the first key's
     /// interpolation decides. An empty curve is 0.
     /// </summary>
@@ -191,7 +192,7 @@ public static class CutsceneCurve
     }
 
     /// <summary>
-    /// The curve's value at a tick as if each key were constant: <c>curve_step</c>, for fields that step. Its infinity
+    /// The curve's value at a tick as if each key were constant: <c>key_step</c>, for fields that step. Its infinity
     /// is as <see cref="Value"/>'s, except that linear holds.
     /// </summary>
     public static float Step(IReadOnlyList<CurveKey> keys, int t, CurveInfinity pre, CurveInfinity post)
@@ -210,7 +211,7 @@ public static class CutsceneCurve
     }
 
     /// <summary>
-    /// <c>curve_wrap</c>: the tick inside a non-empty curve's keys that gives a tick's value outside them, by the mode of
+    /// <c>key_wrap</c>: the tick inside a non-empty curve's keys that gives a tick's value outside them, by the mode of
     /// its side, and how many spans a cycle with offset moves the value by. Constant and linear hold the end key's tick.
     /// The division is floored, written out, since % truncates toward 0.
     /// </summary>
@@ -245,11 +246,11 @@ public static class CutsceneCurve
         };
     }
 
-    // curve_offset: a value moved by cycles times the change from the first key's value to the last's.
+    // key_offset: a value moved by cycles times the change from the first key's value to the last's.
     static float Offset(IReadOnlyList<CurveKey> keys, float v, long cycles) =>
         cycles == 0 ? v : (float)((double)v + (double)cycles * ((double)keys[keys.Count - 1].Value - (double)keys[0].Value));
 
-    // curve_extend: a linear side's value, on along the curve's slope at its end key. At least two keys.
+    // key_extend: a linear side's value, on along the curve's slope at its end key. At least two keys.
     static double Extend(IReadOnlyList<CurveKey> keys, int t, bool before)
     {
         var n = keys.Count;
@@ -269,7 +270,7 @@ public static class CutsceneCurve
         return (double)keys[end].Value + slope * ((double)((long)t - (long)keys[end].Time) / TicksPerSecond);
     }
 
-    // curve_inside: the value at a tick from the first key's to the last's.
+    // key_inside: the value at a tick from the first key's to the last's.
     static float Inside(IReadOnlyList<CurveKey> keys, int t)
     {
         var n = keys.Count;
@@ -296,7 +297,7 @@ public static class CutsceneCurve
         };
     }
 
-    // curve_step_inside: the stepped value at a tick from the first key's to the last's.
+    // key_step_inside: the stepped value at a tick from the first key's to the last's.
     static float StepInside(IReadOnlyList<CurveKey> keys, int t)
     {
         var n = keys.Count;
@@ -330,7 +331,7 @@ public static class CutsceneCurve
         return lo;
     }
 
-    // curve_bezier: the segment from keys[i] to keys[i + 1] at s, from 0 to 1 of its duration.
+    // key_segment_value: the segment from keys[i] to keys[i + 1] at s, from 0 to 1 of its duration.
     static double Bezier(IReadOnlyList<CurveKey> keys, int i, double s)
     {
         CurveKey k0 = keys[i], k1 = keys[i + 1];
@@ -375,7 +376,7 @@ public static class CutsceneCurve
         return Cubic(v0, y1, y2, v1, (lo + hi) / 2);
     }
 
-    /// <summary>A cubic Bezier's coordinate at u from its four control points' coordinates: <c>curve_cubic</c>.</summary>
+    /// <summary>A cubic Bezier's coordinate at u from its four control points' coordinates: <c>cubic</c>.</summary>
     public static double Cubic(double p0, double p1, double p2, double p3, double u)
     {
         var r = 1 - u;
@@ -391,7 +392,7 @@ public static class CutsceneCurve
         keys[i].Interp == CurveInterp.Bezier ? keys[i].InSlope : AutoSlope(keys, i);
 
     /// <summary>
-    /// An automatic key's slope in value per second: <c>curve_auto_slope</c>. The first and last keys, and a peak, a
+    /// An automatic key's slope in value per second: <c>key_auto_slope</c>. The first and last keys, and a peak, a
     /// trough or a key level with a neighbour, are flat. Otherwise it is the slope through the neighbours, limited to
     /// three times the gentler of its two segments' slopes, so the curve does not overshoot.
     /// </summary>

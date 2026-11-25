@@ -276,7 +276,7 @@ public sealed class CutsceneCurveLayout
 
     /// <summary>
     /// The end of a key's handle on a side, in the control. A weighted key's is its control point, as
-    /// <c>curve_bezier</c> builds it: the weight's part of the segment's duration across, and the slope over that time up,
+    /// <c>key_segment_value</c> builds it: the weight's part of the segment's duration across, and the slope over that time up,
     /// but at least <see cref="MinHandleLength"/> pixels from the key. Any other key's is <see cref="HandleLength"/>
     /// pixels from the key, along the slope that the curve has there as it shows on screen.
     /// </summary>

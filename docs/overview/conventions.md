@@ -18,7 +18,7 @@ A few rules appear in every document, because every part of the engine is shaped
 | **Logic that spans frames is a script coroutine.** | Jobs cannot span frames; scripts and their coroutines live in the host-owned VM heap. | [Scripting](../scripting/behaviours.md#coroutines) |
 | **Structural changes to the world are deferred to command buffers**, except in the serial script phase. | Jobs iterate the world in parallel. | [World](../world/ecs.md#command-buffers) |
 | **The GPU boundary is plain data.** The engine records command buffers; the backend tracks no state. | Parallel recording, porting, and reload safety. | [GPU](../gpu/command-buffers.md#command-buffers) |
-| **Shared packages import nothing one-sided.** `format`, `wire`, `link`, `cook_link`, `layout` and `gpu` compile into the host, the DLL and the tools. | Their layouts must agree across processes and builds. | [Modules](README.md#modules) |
+| **Shared packages import nothing one-sided.** `format`, `wire`, `link`, `cook_link`, `layout`, `core/math` and `gpu` compile into the host, the DLL and the tools. | Their layouts must agree across processes and builds. | [Modules](README.md#modules) |
 | **The editor owns the scene; the daemon owns `.meta` files; the host owns the world.** | Each piece of state has one writer, so a crash of any process loses nothing it does not own. | [Editor](../editor/document-and-scenes.md#document-model), [Content pipeline](../content/daemon-and-operations.md#asset-operations) |
 
 ## State with a lifecycle

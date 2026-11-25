@@ -632,8 +632,8 @@ A property track whose field is an integer, a bool or an enum steps, as the runt
 
 ### The evaluator
 
-`CutsceneCurve` in `Cinnabar.Editor.Document` is the editor's copy of the runtime's evaluator (`lib/engine/cutscene/curve.odin`), line for line. It does the same `f64` arithmetic in the same order, without fused multiply-adds, with the same 48 halvings for a weighted segment. `CurveKey.Parse` reads a key line as the cooker does: each number as an `f64` that must be finite, then an `f32`.
-- `CutsceneCurveTests` reads `lib/engine/cutscene/testdata/curve.txt`, the curve that the runtime's test writes, and checks that the editor gives the same `f32` bits at each of its ticks.
+`CutsceneCurve` in `Cinnabar.Editor.Document` is the editor's copy of the runtime's evaluator, the keyed curve with `i32` times in `lib/core/math` (`keyed.odin` and `exact.odin`), line for line. It does the same `f64` arithmetic in the same order, without fused multiply-adds, with the same 48 halvings for a weighted segment. `CurveKey.Parse` reads a key line as the cooker does: each number as an `f64` that must be finite, then an `f32`.
+- `CutsceneCurveTests` reads `lib/core/math/testdata/curve.txt`, the curve that the runtime's test writes, and checks that the editor gives the same `f32` bits at each of its ticks.
 - The curve editor samples each curve at whole ticks only, one sample for each pixel, clamped to its section, as the runtime samples it, with its infinity.
 - It reads a channel's `pre_infinity` and `post_infinity` as the cooker does. `CutsceneCurveTests` checks the golden file's infinity blocks too.
 - Split takes its values from it.

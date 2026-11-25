@@ -7,9 +7,9 @@ namespace Cinnabar.Editor.Tests;
 /// <summary>The editor's curve evaluator, which gives the runtime's bits, and the key line's reader and writer.</summary>
 public sealed class CutsceneCurveTests
 {
-    // The shared test curve that lib/engine/cutscene/curve_test.odin writes and checks.
+    // The shared test curve that lib/core/math/key_test.odin writes and checks.
     static string[] Golden() =>
-        File.ReadAllLines(Path.Combine(EditorOptions.RepositoryRoot(), "lib", "engine", "cutscene", "testdata", "curve.txt"));
+        File.ReadAllLines(Path.Combine(EditorOptions.RepositoryRoot(), "lib", "core", "math", "testdata", "curve.txt"));
 
     // A golden key line: time, value, interpolation, flags, in slope, in weight, out slope, out weight.
     static CurveKey GoldenKey(string[] w)
