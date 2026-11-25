@@ -118,7 +118,14 @@ set_mode :: proc(e: ^Editor, to: Session_Mode) {
 // enter_render leaves Edit for a render out, as Play leaves it: the overrides and the cutscene preview end, the editor
 // sends its scene again after the run, and the scripts get every callback, with the numbers that a Play draws.
 @(private)
-enter_render :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, run: Render_Run) -> (despawned: bool) {
+enter_render :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	run: Render_Run,
+) -> (
+	despawned: bool,
+) {
 	if end_overrides(e, w, link.Override_End_Reason.Mode) {
 		despawned = true
 		forget_dead(w, &e.session.view.selection)

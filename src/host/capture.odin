@@ -397,7 +397,10 @@ take_frame :: proc(c: ^Capture, done: gpu.Frame_Capture) {
 
 // post_render_job gives the worker a render out's frame, to write to path, from the heap.
 post_render_job :: proc(c: ^Capture, copy: gpu.Frame_Capture, run: u64, frame: i32, path: string) {
-	post_job(c, Job{kind = .Render_Frame, capture = copy, run = run, frame = u64(frame), path = path})
+	post_job(
+		c,
+		Job{kind = .Render_Frame, capture = copy, run = run, frame = u64(frame), path = path},
+	)
 }
 
 @(private = "file")

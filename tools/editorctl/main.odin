@@ -160,12 +160,12 @@ Content :: struct {
 
 // Response matches AutomationResponse.
 Response :: struct {
-	id:      i64 `json:"id"`,
-	ok:      bool `json:"ok"`,
-	files:   []string `json:"files"`,
-	error:   string `json:"error"`,
-	status:  Maybe(Status) `json:"status"`,
-	content: Maybe(Content) `json:"content"`,
+	id:         i64 `json:"id"`,
+	ok:         bool `json:"ok"`,
+	files:      []string `json:"files"`,
+	error:      string `json:"error"`,
+	status:     Maybe(Status) `json:"status"`,
+	content:    Maybe(Content) `json:"content"`,
 	timing:     Maybe(Timing) `json:"timing"`,
 	render_out: Maybe(Render_Out) `json:"renderOut"`,
 }
@@ -353,9 +353,18 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 		}
 	}
 	switch o.command {
-	case "status", "screenshot", "gif", "viewport", "camera", "timing", "ui", "content", "render-out":
+	case "status",
+	     "screenshot",
+	     "gif",
+	     "viewport",
+	     "camera",
+	     "timing",
+	     "ui",
+	     "content",
+	     "render-out":
 	case "":
-		return o, "no command: status, screenshot, gif, viewport, camera, timing, ui, content or render-out"
+		return o,
+			"no command: status, screenshot, gif, viewport, camera, timing, ui, content or render-out"
 	case:
 		return o, fmt.tprintf(
 			"unknown command %s: status, screenshot, gif, viewport, camera, timing, ui, content or render-out",
@@ -363,12 +372,19 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 		)
 	}
 	render_options :=
-		o.rate != nil || o.warmup != nil || o.camera != nil || o.format != "" || o.pattern != "" || o.no_audio || o.video
+		o.rate != nil ||
+		o.warmup != nil ||
+		o.camera != nil ||
+		o.format != "" ||
+		o.pattern != "" ||
+		o.no_audio ||
+		o.video
 	if o.command == "render-out" && len(o.positional) < 2 {
 		return o, "render-out takes a cutscene and a folder"
 	}
 	if render_options && o.command != "render-out" {
-		return o, "--rate, --format, --pattern, --warmup, --camera, --no-audio and --video go with render-out"
+		return o,
+			"--rate, --format, --pattern, --warmup, --camera, --no-audio and --video go with render-out"
 	}
 	if o.command != "content" && (len(o.settings) > 0) != (o.command == "viewport") {
 		return o,
@@ -619,7 +635,12 @@ print_response :: proc(r: Response) {
 		}
 	}
 	if render, has := r.render_out.?; has {
-		fmt.printfln("render out: %s, %d frames to %s", render.outcome, render.frames, render.folder)
+		fmt.printfln(
+			"render out: %s, %d frames to %s",
+			render.outcome,
+			render.frames,
+			render.folder,
+		)
 		if render.reason != "" {
 			fmt.printfln("reason: %s", render.reason)
 		}

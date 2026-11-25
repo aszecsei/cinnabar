@@ -215,8 +215,13 @@ init :: proc(
 
 	platform.start = time.tick_now()
 	platform.last_frame = platform.start
-	if frames, set := strconv.parse_u64(os.get_env(STREAM_DELAY_VARIABLE, context.temp_allocator)); set && frames > 0 {
-		log.warnf("core: %s holds each streamed transfer back %d frames", STREAM_DELAY_VARIABLE, frames)
+	if frames, set := strconv.parse_u64(os.get_env(STREAM_DELAY_VARIABLE, context.temp_allocator));
+	   set && frames > 0 {
+		log.warnf(
+			"core: %s holds each streamed transfer back %d frames",
+			STREAM_DELAY_VARIABLE,
+			frames,
+		)
 		stream_delay = {
 			frames = frames,
 			done   = make(map[gpu.Transfer]u64, runtime.heap_allocator()),

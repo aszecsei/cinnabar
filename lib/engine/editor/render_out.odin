@@ -159,9 +159,7 @@ frame_tick :: proc(start, n: i32, rate: u32) -> i32 {
 
 // frame_samples is how many frames of sound play from frame n to frame n + 1, so they sum to the time exactly.
 frame_samples :: proc(n: i32, rate: u32) -> int {
-	return int(
-		i64(n + 1) * RENDER_AUDIO_RATE / i64(rate) - i64(n) * RENDER_AUDIO_RATE / i64(rate),
-	)
+	return int(i64(n + 1) * RENDER_AUDIO_RATE / i64(rate) - i64(n) * RENDER_AUDIO_RATE / i64(rate))
 }
 
 // frame_seconds is the renderer's clock for frame n.
@@ -201,8 +199,16 @@ render_refusal :: proc(e: ^Editor, m: link.Render_Out_Begin) -> string {
 		return fmt.tprintf("a rate of %d is below %d frames a second", m.rate, RENDER_OUT_MIN_RATE)
 	case m.frame_count <= 0:
 		return "a render out has at least one frame"
-	case m.width == 0 || m.height == 0 || m.width > gpu.MAX_VIEWPORT_SIZE || m.height > gpu.MAX_VIEWPORT_SIZE:
-		return fmt.tprintf("a size of %dx%d is not 1 to %d on a side", m.width, m.height, gpu.MAX_VIEWPORT_SIZE)
+	case m.width == 0 ||
+	     m.height == 0 ||
+	     m.width > gpu.MAX_VIEWPORT_SIZE ||
+	     m.height > gpu.MAX_VIEWPORT_SIZE:
+		return fmt.tprintf(
+			"a size of %dx%d is not 1 to %d on a side",
+			m.width,
+			m.height,
+			gpu.MAX_VIEWPORT_SIZE,
+		)
 	case m.format == .Exr:
 		return "EXR frames need an HDR target, which the renderer does not have yet"
 	case m.folder == "":
@@ -223,7 +229,10 @@ begin_render_out :: proc(
 	despawned: bool,
 ) {
 	if reason := render_refusal(e, m); reason != "" {
-		link.write_message(out, link.Render_Out_Ended{ticket = m.ticket, outcome = .Failed, reason = reason})
+		link.write_message(
+			out,
+			link.Render_Out_Ended{ticket = m.ticket, outcome = .Failed, reason = reason},
+		)
 		return
 	}
 	heap := e.platform.heap_allocator
@@ -235,26 +244,30 @@ begin_render_out :: proc(
 	if !made {
 		link.write_message(
 			out,
-			link.Render_Out_Ended{ticket = m.ticket, outcome = .Failed, reason = "every cutscene player is taken"},
+			link.Render_Out_Ended {
+				ticket = m.ticket,
+				outcome = .Failed,
+				reason = "every cutscene player is taken",
+			},
 		)
 		return
 	}
 	run := Render_Run {
-		ticket         = m.ticket,
-		asset          = format.Guid(m.cutscene),
-		name           = strings.clone(m.name != "" ? m.name : "cutscene", heap),
-		folder         = strings.clone(m.folder, heap),
-		pattern        = strings.clone(m.pattern != "" ? m.pattern : "{name}.{frame}.png", heap),
-		range_start    = m.range_start,
-		frame_count    = m.frame_count,
-		rate           = m.rate,
-		size           = {m.width, m.height},
-		format         = core.Render_Out_Format(m.format),
+		ticket = m.ticket,
+		asset = format.Guid(m.cutscene),
+		name = strings.clone(m.name != "" ? m.name : "cutscene", heap),
+		folder = strings.clone(m.folder, heap),
+		pattern = strings.clone(m.pattern != "" ? m.pattern : "{name}.{frame}.png", heap),
+		range_start = m.range_start,
+		frame_count = m.frame_count,
+		rate = m.rate,
+		size = {m.width, m.height},
+		format = core.Render_Out_Format(m.format),
 		camera_binding = m.camera_binding,
-		warmup         = m.warmup,
-		audio          = m.audio,
-		player         = player,
-		stage          = Render_Preparing{since = e.platform.time_seconds()},
+		warmup = m.warmup,
+		audio = m.audio,
+		player = player,
+		stage = Render_Preparing{since = e.platform.time_seconds()},
 	}
 	despawned = enter_render(e, w, scripts, run)
 	send_render_progress(e, rendering(e))
@@ -300,7 +313,12 @@ fail_render_out :: proc(e: ^Editor, w: ^ecs.World, reason: string) {
 }
 
 @(private = "file")
-finishing :: proc(e: ^Editor, outcome: link.Render_Out_Outcome, reason: string, frames: i32) -> Render_Finishing {
+finishing :: proc(
+	e: ^Editor,
+	outcome: link.Render_Out_Outcome,
+	reason: string,
+	frames: i32,
+) -> Render_Finishing {
 	return {
 		outcome = outcome,
 		reason = strings.clone(reason, e.platform.heap_allocator),
@@ -345,15 +363,31 @@ render_allowed :: proc(from, to: Render_Stage) -> bool {
 // what the old stage held, tells the host to close the run's files on Finishing, and tells the editor of each new stage
 // and of the end, with Finishing's reason, or reason for a run that ends from Preparing.
 @(private)
-change_render :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run, to: Render_Stage, reason := "") -> bool {
+change_render :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	run: ^Render_Run,
+	to: Render_Stage,
+	reason := "",
+) -> bool {
 	if !render_allowed(run.stage, to) {
-		log.errorf("editor: a render out cannot go from %v to %v", stage_of(run.stage), stage_of(to))
+		log.errorf(
+			"editor: a render out cannot go from %v to %v",
+			stage_of(run.stage),
+			stage_of(to),
+		)
 		return false
 	}
 	same_stage := stage_of(run.stage) == stage_of(to)
 	if ended, ends := to.(Render_Ended); ends {
 		f, was_finishing := run.stage.(Render_Finishing)
-		send_render_ended(e, run, ended.outcome, f.reason if was_finishing else reason, ended.frames)
+		send_render_ended(
+			e,
+			run,
+			ended.outcome,
+			f.reason if was_finishing else reason,
+			ended.frames,
+		)
 		if was_finishing {
 			delete(f.reason, e.platform.heap_allocator)
 		}
@@ -417,7 +451,12 @@ send_render_ended :: proc(
 ) {
 	link.write_message(
 		&e.session.outbox,
-		link.Render_Out_Ended{ticket = run.ticket, outcome = outcome, reason = reason, frames = frames},
+		link.Render_Out_Ended {
+			ticket = run.ticket,
+			outcome = outcome,
+			reason = reason,
+			frames = frames,
+		},
 	)
 }
 
@@ -441,7 +480,9 @@ end_render_run :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run) {
 		send_render_ended(e, run, s.outcome, s.reason, s.frames)
 		delete(s.reason, heap)
 	}
-	run.stage = Render_Ended{outcome = .Cancelled}
+	run.stage = Render_Ended {
+		outcome = .Cancelled,
+	}
 	if e.cutscenes != nil {
 		cutscene.stop(e.cutscenes, w, run.player)
 	}
@@ -495,7 +536,12 @@ render_frame_time :: proc(e: ^Editor, w: ^ecs.World, dt: time.Duration) -> time.
 	case Render_Rendering:
 		render.set_render_clock(e.renderer, render.Fixed_Clock{frame_seconds(s.frame, run.rate)})
 		if _, world := s.step.(Step_World); world {
-			cutscene.drive(e.cutscenes, w, run.player, frame_tick(run.range_start, s.frame, run.rate))
+			cutscene.drive(
+				e.cutscenes,
+				w,
+				run.player,
+				frame_tick(run.range_start, s.frame, run.rate),
+			)
 			return frame_duration(s.frame, run.rate)
 		}
 	case Render_Finishing:
@@ -538,7 +584,12 @@ prepare_render :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run, s: Render_Pr
 	}
 	heap := e.platform.heap_allocator
 	run.target = e.platform.gpu_create_texture(
-		{size = run.size, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, label = "render out"},
+		{
+			size = run.size,
+			format = gpu.FRAME_TARGET_FORMAT,
+			usage = {.Render_Target},
+			label = "render out",
+		},
 		nil,
 	)
 	run.view = new(render.View_State, heap)
@@ -578,7 +629,12 @@ finish_render :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run, s: Render_Fin
 		f.outcome = .Failed
 		f.reason = strings.clone("the host lost the render out's files", e.platform.heap_allocator)
 	}
-	change_render(e, w, run, Render_Ended{outcome = run.stage.(Render_Finishing).outcome, frames = s.frames})
+	change_render(
+		e,
+		w,
+		run,
+		Render_Ended{outcome = run.stage.(Render_Finishing).outcome, frames = s.frames},
+	)
 }
 
 // render_simulation is what a run's frame runs: the world at a World step, and nothing at the others.
@@ -655,7 +711,14 @@ plan_render_frame :: proc(
 }
 
 @(private = "file")
-binding_view :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run) -> (view: render.View, ok: bool) {
+binding_view :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	run: ^Render_Run,
+) -> (
+	view: render.View,
+	ok: bool,
+) {
 	ev := cutscene.player_evaluation(e.cutscenes, run.player) or_return
 	data, blob := cutscene.cutscene_data(e.cutscenes, ev) or_return
 	index := cutscene.binding_index(data, blob, cutscene.Binding_Id(run.camera_binding)) or_return
@@ -691,12 +754,18 @@ render_drew :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run, drew: bool) {
 	}
 	switch &st in step {
 	case Step_World:
-		step^ = Step_Settling{since = now, cut = st.cut}
+		step^ = Step_Settling {
+			since = now,
+			cut   = st.cut,
+		}
 	case Step_Settling:
 		st.draws += 1
 		st.quiet = st.quiet + 1 if drew && settled(e, run) else 0
 		if st.quiet >= SETTLE_QUIET_DRAWS {
-			step^ = Step_Drawing{draws = st.draws, cut = st.cut}
+			step^ = Step_Drawing {
+				draws = st.draws,
+				cut   = st.cut,
+			}
 		} else if now - st.since > SETTLE_TIMEOUT_SECONDS {
 			fail_render_out(e, w, "what the frame shows did not finish streaming or compiling")
 		}
@@ -710,10 +779,17 @@ render_drew :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run, drew: bool) {
 			// illumination's counts, has come back by the next one in every run, however fast the GPU is.
 			warming.left -= 1
 			if warming.left > 0 {
-				warming.step = Step_Settling{since = now}
+				warming.step = Step_Settling {
+					since = now,
+				}
 				return
 			}
-			change_render(e, w, run, Render_Rendering{frame = 0, step = Step_Settling{since = now}, started = now})
+			change_render(
+				e,
+				w,
+				run,
+				Render_Rendering{frame = 0, step = Step_Settling{since = now}, started = now},
+			)
 			return
 		}
 		draw_render_frame(e, w, run, frame, st.draws, now)
@@ -723,7 +799,14 @@ render_drew :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run, drew: bool) {
 // draw_render_frame gives the host the frame that drew, tells the editor, and moves on to the next frame, or to
 // Finishing after the last.
 @(private = "file")
-draw_render_frame :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run, frame: i32, draws: u32, now: f64) {
+draw_render_frame :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	run: ^Render_Run,
+	frame: i32,
+	draws: u32,
+	now: f64,
+) {
 	rendering := &run.stage.(Render_Rendering)
 	switch e.platform.render_out.frame(run.ticket, frame, run.target) {
 	case .Accepted:
@@ -752,7 +835,12 @@ draw_render_frame :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run, frame: i3
 		change_render(e, w, run, finishing(e, .Done, "", frame + 1))
 		return
 	}
-	change_render(e, w, run, Render_Rendering{frame = frame + 1, step = Step_World{}, started = now})
+	change_render(
+		e,
+		w,
+		run,
+		Render_Rendering{frame = frame + 1, step = Step_World{}, started = now},
+	)
 }
 
 // render_has_room is whether the frame that draws next may draw: a Drawing step waits until the host has room for it,

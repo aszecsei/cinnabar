@@ -147,12 +147,12 @@ register_world :: proc(g: ^Game, h: Hooks) {
 }
 
 @(private)
-game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: bool) {
+game_update :: proc(g: ^Game, host_dt: time.Duration, h: Hooks) -> (keep_running: bool) {
 	defer end_frame(g)
 	g.frame_count += 1
 	// A render out steps the frame by its own time, a frame of the cutscene at a time, and takes no input (see
 	// docs/editor/cutscene-editor.md#render-out).
-	dt := editor.render_frame_time(&g.editor, &g.world, dt)
+	dt := editor.render_frame_time(&g.editor, &g.world, host_dt)
 	rendering_out := editor.rendering(&g.editor) != nil
 
 	update_project(g, h)

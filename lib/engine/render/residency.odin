@@ -742,7 +742,8 @@ residency_unsettled :: proc(r: ^Residency) -> (count: int) {
 			count += 1
 			continue
 		}
-		if res, is_texture := &e.current.(Texture_Resources); is_texture && res.texture.virtual == 0 {
+		if res, is_texture := &e.current.(Texture_Resources);
+		   is_texture && res.texture.virtual == 0 {
 			if res.texture.top_mip != wanted_mip(r, &e, res.texture.size, res.texture.mip_count) {
 				count += 1
 			}

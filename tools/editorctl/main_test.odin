@@ -273,7 +273,17 @@ a_timing_response_decodes_with_its_passes_and_sizes :: proc(t: ^testing.T) {
 @(test)
 render_out_arguments_are_read_and_checked :: proc(t: ^testing.T) {
 	o, problem := parse_args(
-		{"render-out", "cutscenes/intro.cutscene", "out", "shot:Close", "1280x720", "--rate", "24", "--video", "--no-audio"},
+		{
+			"render-out",
+			"cutscenes/intro.cutscene",
+			"out",
+			"shot:Close",
+			"1280x720",
+			"--rate",
+			"24",
+			"--video",
+			"--no-audio",
+		},
 	)
 	defer delete(o.positional)
 	testing.expect_value(t, problem, "")

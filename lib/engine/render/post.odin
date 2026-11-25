@@ -464,7 +464,8 @@ handle_status :: proc(
 	platform: ^core.Platform_API,
 	pipeline: gpu.Pipeline,
 ) -> gpu.Pipeline_Status {
-	status := platform.gpu_pipeline_status == nil ? gpu.Pipeline_Status.Ready : platform.gpu_pipeline_status(pipeline)
+	status :=
+		platform.gpu_pipeline_status == nil ? gpu.Pipeline_Status.Ready : platform.gpu_pipeline_status(pipeline)
 	if status == .Compiling {
 		intrinsics.atomic_add(&compiling_seen, 1)
 	}

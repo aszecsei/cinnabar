@@ -196,7 +196,10 @@ render_out_open :: proc(desc: core.Render_Out_Desc) -> (ok: bool, reason: string
 			return false, fmt.tprintf("cannot write the sound to %s: %v", desc.folder, err)
 		}
 		core.audio_tap_begin()
-		wav = Wav_Output{file = file, path = path}
+		wav = Wav_Output {
+			file = file,
+			path = path,
+		}
 	}
 	change_output(
 		c,
@@ -258,12 +261,18 @@ render_out_audio :: proc(run: u64, frames: int) -> core.Render_Out_Answer {
 	}
 	samples := make([]core.Audio_Frame, frames, context.temp_allocator)
 	if !core.audio_tap_take(samples) && f.failure == "" {
-		f.failure = strings.clone("the audio backend did not mix the sound in time", runtime.heap_allocator())
+		f.failure = strings.clone(
+			"the audio backend did not mix the sound in time",
+			runtime.heap_allocator(),
+		)
 	}
 	flat := ([^]f32)(raw_data(samples))[:2 * frames]
 	bytes := capture.pcm16(flat, make([]u8, 4 * frames, context.temp_allocator))
 	if _, err := os.write(w.file, bytes); err != nil && f.failure == "" {
-		f.failure = strings.clone(fmt.tprintf("cannot write the sound: %v", err), runtime.heap_allocator())
+		f.failure = strings.clone(
+			fmt.tprintf("cannot write the sound: %v", err),
+			runtime.heap_allocator(),
+		)
 	}
 	w.frames += u32(frames)
 	return .Accepted
@@ -284,7 +293,10 @@ render_out_close :: proc(run: u64, keep: bool) {
 			o.failure = strings.clone(reason, runtime.heap_allocator())
 		}
 		if path != "" && c.editor != nil && link_linked(c.editor) {
-			link_send(c.editor, link.Render_Out_Written{ticket = run, frame = -1, ok = true, path = path})
+			link_send(
+				c.editor,
+				link.Render_Out_Written{ticket = run, frame = -1, ok = true, path = path},
+			)
 		}
 		delete(path, runtime.heap_allocator())
 	}
@@ -377,10 +389,16 @@ take_render_frame :: proc(c: ^Capture, done: gpu.Frame_Capture) {
 render_frame_failed :: proc(c: ^Capture, f: ^Output_Files, frame: i32, reason: string) {
 	f.written += 1
 	if f.failure == "" {
-		f.failure = strings.clone(fmt.tprintf("frame %d: %s", frame, reason), runtime.heap_allocator())
+		f.failure = strings.clone(
+			fmt.tprintf("frame %d: %s", frame, reason),
+			runtime.heap_allocator(),
+		)
 	}
 	if c.editor != nil && link_linked(c.editor) {
-		link_send(c.editor, link.Render_Out_Written{ticket = f.run, frame = frame, reason = reason})
+		link_send(
+			c.editor,
+			link.Render_Out_Written{ticket = f.run, frame = frame, reason = reason},
+		)
 	}
 	render_out_settle(c)
 }
