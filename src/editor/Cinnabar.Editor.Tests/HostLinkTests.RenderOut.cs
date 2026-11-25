@@ -46,6 +46,49 @@ public sealed partial class HostLinkTests
         }
     }
 
+    // A cancel stops the run after the frame that it is on: the folder holds the frames up to it, each whole, and no
+    // file that the host was still writing.
+    [Fact]
+    public async Task ACancelStopsAfterItsFrameAndLeavesWholeFrames()
+    {
+        SkipWithoutTheFox();
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<Welcome>();
+        var scene = AnimationSceneFile();
+        var folder = Path.Combine(Path.GetTempPath(), $"cinnabar-render-{Guid.NewGuid():N}");
+        try
+        {
+            editor.Link.Send(new SetMode(EditorMode.Edit));
+            await Load(editor, scene, guid: AnimationScene);
+            editor.Link.Send(new RenderOutBegin(1, Convert.FromHexString(IntroCutscene), "intro", 120000, 300, 30, 320, 180,
+                RenderOutFormat.Png, 0, 0, folder, "{name}.{frame}.png", false));
+            var drawn = await editor.Next<RenderOutFrame>(f => f.Ticket == 1 && f.Frame == 3);
+            editor.Link.Send(new RenderOutCancel(1));
+            var ended = await editor.Next<RenderOutEnded>(e => e.Ticket == 1);
+            Assert.Equal(RenderOutOutcome.Cancelled, ended.Outcome);
+            Assert.InRange(ended.Frames, drawn.Frame, drawn.Frame + 1);
+
+            var files = Directory.GetFiles(folder).Select(Path.GetFileName).Order().ToList();
+            Assert.Equal(Enumerable.Range(0, ended.Frames).Select(n => $"intro.{60 + n:D6}.png"), files);
+            var end = new byte[] { 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82 };
+            Assert.All(files, f => Assert.Equal(end, File.ReadAllBytes(Path.Combine(folder, f!)).TakeLast(8)));
+            // The game ran no further frame after the cancel.
+            await Task.Delay(300, TestContext.Current.CancellationToken);
+            Assert.DoesNotContain(Drained(editor), m => m is RenderOutFrame);
+            editor.Link.Send(new SetMode(EditorMode.Edit));
+            await Load(editor, scene, guid: AnimationScene);
+            Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, true);
+            }
+        }
+    }
+
     // A host whose streamed transfers report done only 60 frames after they are, so every texture of the intro streams
     // in late. The frames wait for each one: none shows a lower mip than a run that found them resident, and the first,
     // with no warm-up to wait in, waited at least the delay.
