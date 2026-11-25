@@ -7,6 +7,7 @@ import "core:mem/virtual"
 import "core:os"
 import "core:path/filepath"
 import "core:reflect"
+import "core:strconv"
 import "core:strings"
 import "core:sync"
 import "core:time"
@@ -30,6 +31,42 @@ DISABLE_FEATURES_VARIABLE :: "CINNABAR_DISABLE_FEATURES"
 OUTPUT_VARIABLE :: "CINNABAR_OUTPUT"
 // 1 asks the game to play the audio device's test tone (see docs/core/audio.md#test-tone).
 TEST_TONE_VARIABLE :: "CINNABAR_TEST_TONE"
+// A number of frames that each streamed transfer goes on reporting that it is not done after the backend finished it,
+// to test what waits for streaming, such as a render out's frames (see docs/editor/cutscene-editor.md#render-out). For
+// example: CINNABAR_STREAM_DELAY_FRAMES=30.
+STREAM_DELAY_VARIABLE :: "CINNABAR_STREAM_DELAY_FRAMES"
+
+// Stream_Delay holds the transfers that the backend finished while STREAM_DELAY_VARIABLE delays them, by the frame that
+// the backend first reported each done.
+@(private = "file")
+Stream_Delay :: struct {
+	frames: u64,
+	done:   map[gpu.Transfer]u64,
+	mutex:  sync.Mutex,
+}
+
+@(private = "file")
+stream_delay: Stream_Delay
+
+// transfer_done is the backend's answer, held back by STREAM_DELAY_VARIABLE's frames when it is set.
+@(private = "file")
+transfer_done :: proc(transfer: gpu.Transfer) -> bool {
+	if !backend.transfer_done(transfer) {
+		return false
+	}
+	d := &stream_delay
+	if d.frames == 0 {
+		return true
+	}
+	sync.guard(&d.mutex)
+	first, seen := d.done[transfer]
+	if !seen {
+		d.done[transfer] = platform.frame_index
+		return false
+	}
+	// The entry stays, so a transfer that is asked again, with others of its stream, stays done.
+	return platform.frame_index - first >= d.frames
+}
 
 // The build selects the GPU backend by pointing this collection at a backend package.
 import backend "gpu_backend:."
@@ -178,6 +215,13 @@ init :: proc(
 
 	platform.start = time.tick_now()
 	platform.last_frame = platform.start
+	if frames, set := strconv.parse_u64(os.get_env(STREAM_DELAY_VARIABLE, context.temp_allocator)); set && frames > 0 {
+		log.warnf("core: %s holds each streamed transfer back %d frames", STREAM_DELAY_VARIABLE, frames)
+		stream_delay = {
+			frames = frames,
+			done   = make(map[gpu.Transfer]u64, runtime.heap_allocator()),
+		}
+	}
 	platform.api = {
 		permanent_allocator             = virtual.arena_allocator(&platform.permanent),
 		frame_allocator                 = virtual.arena_allocator(&platform.frame[0]),
@@ -241,7 +285,7 @@ init :: proc(
 		gpu_upload                      = backend.upload,
 		gpu_stream_buffer               = backend.stream_buffer,
 		gpu_stream_texture              = backend.stream_texture,
-		gpu_transfer_done               = backend.transfer_done,
+		gpu_transfer_done               = transfer_done,
 		gpu_read_buffer                 = backend.read_buffer,
 		gpu_create_buffer               = backend.create_buffer,
 		gpu_create_texture              = backend.create_texture,
@@ -334,6 +378,8 @@ absolute :: proc(path: string, allocator: runtime.Allocator) -> string {
 }
 
 shutdown :: proc() {
+	delete(stream_delay.done)
+	stream_delay = {}
 	rumble_send(rumble_stop_all(&platform.rumble))
 	// The backend first: it writes to the device from its own thread.
 	platform.api.audio.shutdown()

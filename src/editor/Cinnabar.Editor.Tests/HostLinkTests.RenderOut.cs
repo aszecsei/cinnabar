@@ -46,6 +46,59 @@ public sealed partial class HostLinkTests
         }
     }
 
+    // A host whose streamed transfers report done only 60 frames after they are, so every texture of the intro streams
+    // in late. The frames wait for each one: none shows a lower mip than a run that found them resident, and the first,
+    // with no warm-up to wait in, waited at least the delay.
+    [Fact]
+    public async Task ALateTextureNeverShowsALowerMip()
+    {
+        SkipWithoutTheFox();
+        var scene = AnimationSceneFile();
+        var root = Path.Combine(Path.GetTempPath(), $"cinnabar-render-{Guid.NewGuid():N}");
+        try
+        {
+            RenderRun resident;
+            await using (var editor = await Connect())
+            {
+                editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+                await editor.Next<Welcome>();
+                await RenderOut(editor, scene, 1, Path.Combine(root, "warm-up"), frames: 1, rangeStart: 300000, size: (640, 360), warmup: 0);
+                resident = await RenderOut(editor, scene, 2, Path.Combine(root, "resident"), frames: 3, rangeStart: 300000, size: (640, 360), warmup: 0);
+            }
+            await using var delayed = new DelayedHost();
+            await using var late = await delayed.Open();
+            late.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+            await late.Next<Welcome>();
+            var streamed = await RenderOut(late, scene, 1, Path.Combine(root, "late"), frames: 3, rangeStart: 300000, size: (640, 360),
+                fresh: true, warmup: 0);
+            Assert.True(streamed.Frames[0].SettleDraws >= DelayedHost.Frames,
+                $"the first frame waited {streamed.Frames[0].SettleDraws} draws, under the delay of {DelayedHost.Frames}");
+            for (var i = 0; i < 3; i++)
+            {
+                var (count, most) = Difference(resident.Written[i].Path, streamed.Written[i].Path);
+                Assert.True(count <= 640 * 360 / 50 && most <= 16, $"frame {i}: {count} pixels differ, by up to {most}");
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    // A host.exe whose streaming is held back (see core.STREAM_DELAY_VARIABLE). It is private, so xUnit does not run
+    // the host tests on it.
+    sealed class DelayedHost() : HostTests("host.exe", "just build", () => ["--adapter", Adapter.Value.ToString("x16")],
+        new Dictionary<string, string> { ["CINNABAR_STREAM_DELAY_FRAMES"] = Frames.ToString() })
+    {
+        public const int Frames = 60;
+
+        public Task<Editor> Open() => Connect();
+
+    }
+
     // How many pixels of two frames differ, and by how much at most, in any channel.
     static (int Count, int Most) Difference(string a, string b)
     {
@@ -87,14 +140,23 @@ public sealed partial class HostLinkTests
         return scene!;
     }
 
-    async Task<RenderRun> RenderOut(Editor editor, Document.Scene scene, ulong ticket, string folder, int frames, uint rate = 30,
-        int rangeStart = 0)
+    static async Task<RenderRun> RenderOut(Editor editor, Document.Scene scene, ulong ticket, string folder, int frames, uint rate = 30,
+        int rangeStart = 0, (uint Width, uint Height)? size = null, bool fresh = false, uint warmup = 4)
     {
+        var (width, height) = size ?? (320, 180);
         editor.Link.Send(new SetMode(EditorMode.Edit));
-        await Load(editor, scene, guid: AnimationScene);
+        // A fresh run begins in the poll that loads the scene, before any frame has streamed what it shows.
+        if (fresh)
+        {
+            editor.Link.Send(Document.SceneSnapshot.ToMessage(scene, AnimationScene));
+        }
+        else
+        {
+            await Load(editor, scene, guid: AnimationScene);
+        }
         editor.Skipped.Clear();
-        editor.Link.Send(new RenderOutBegin(ticket, Convert.FromHexString(IntroCutscene), "intro", rangeStart, frames, rate, 320, 180,
-            RenderOutFormat.Png, 0, 4, folder, "{name}.{frame}.png", false));
+        editor.Link.Send(new RenderOutBegin(ticket, Convert.FromHexString(IntroCutscene), "intro", rangeStart, frames, rate, width, height,
+            RenderOutFormat.Png, 0, warmup, folder, "{name}.{frame}.png", false));
         var ended = await editor.Next<RenderOutEnded>(e => e.Ticket == ticket);
         Assert.True(ended.Outcome == RenderOutOutcome.Done, $"{ended.Outcome}: {ended.Reason}");
 

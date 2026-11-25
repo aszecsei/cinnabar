@@ -87,7 +87,7 @@ Render_Preparing :: struct {
 }
 
 // Render_Warming draws left more frames at the first frame's time that are not written, so the temporal histories
-// and the exposure have settled when the first one is.
+// and the exposure have settled when the first one is. A run with no warm-up has no Warming.
 Render_Warming :: struct {
 	left: u32,
 	step: Frame_Step,
@@ -310,9 +310,11 @@ finishing :: proc(e: ^Editor, outcome: link.Render_Out_Outcome, reason: string, 
 render_allowed :: proc(from, to: Render_Stage) -> bool {
 	switch f in from {
 	case Render_Preparing:
-		#partial switch _ in to {
+		#partial switch t in to {
 		case Render_Warming, Render_Ended:
 			return true
+		case Render_Rendering:
+			return t.frame == 0
 		}
 	case Render_Warming:
 		#partial switch _ in to {
@@ -469,11 +471,10 @@ render_frame_time :: proc(e: ^Editor, w: ^ecs.World, dt: time.Duration) -> time.
 	switch &s in run.stage {
 	case Render_Preparing:
 		prepare_render(e, w, run, s)
-		if warming, warms := run.stage.(Render_Warming); warms {
-			if _, world := warming.step.(Step_World); world {
-				render.set_render_clock(e.renderer, render.Fixed_Clock{frame_seconds(0, run.rate)})
-				return 0
-			}
+		// The first step of the run is of no time, at the first frame's.
+		#partial switch _ in run.stage {
+		case Render_Warming, Render_Rendering:
+			render.set_render_clock(e.renderer, render.Fixed_Clock{frame_seconds(0, run.rate)})
 		}
 	case Render_Warming:
 		render.set_render_clock(e.renderer, render.Fixed_Clock{frame_seconds(0, run.rate)})
@@ -533,8 +534,14 @@ prepare_render :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run, s: Render_Pr
 	render.residency_set_exact_mips(&e.renderer.residency, true)
 	ecs.align_clock(w)
 	cutscene.start(e.cutscenes, w, run.player)
-	// One step of no time, so the world and the cutscene's tracks are at the first frame before anything draws.
-	change_render(e, w, run, Render_Warming{left = run.warmup, step = Step_World{}})
+	// One step of no time, so the world and the cutscene's tracks are at the first frame before anything draws. Without
+	// a warm-up, that is the first frame's own step.
+	if run.warmup == 0 {
+		now := e.platform.time_seconds()
+		change_render(e, w, run, Render_Rendering{frame = 0, step = Step_World{}, started = now})
+	} else {
+		change_render(e, w, run, Render_Warming{left = run.warmup, step = Step_World{}})
+	}
 }
 
 // finish_render ends a run once the host has written what it took.
@@ -687,8 +694,8 @@ render_drew :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run, drew: bool) {
 			warming := &run.stage.(Render_Warming)
 			// Each warm-up draw settles before it too, so what the GPU reads back to the view's state, such as the global
 			// illumination's counts, has come back by the next one in every run, however fast the GPU is.
+			warming.left -= 1
 			if warming.left > 0 {
-				warming.left -= 1
 				warming.step = Step_Settling{since = now}
 				return
 			}

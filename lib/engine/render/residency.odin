@@ -573,8 +573,11 @@ residency_update :: proc(r: ^Residency) {
 		}
 		if s, streaming := &e.stream.(Resident_Stream); streaming {
 			done := true
+			// Every transfer is asked, not only up to the first that is not done, so each one's answer is as fresh.
 			for t in s.transfers[:s.transfer_count] {
-				done &&= r.platform.gpu_transfer_done(t)
+				if !r.platform.gpu_transfer_done(t) {
+					done = false
+				}
 			}
 			// A paged mesh is in when its roots are in the pool, and a virtual texture when its root is.
 			pooled := false

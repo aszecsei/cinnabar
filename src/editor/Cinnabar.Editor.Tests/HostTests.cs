@@ -28,7 +28,9 @@ public abstract class HostTests : IAsyncDisposable
     /// <param name="host">The host's executable in build/dev.</param>
     /// <param name="build">The recipes that build it and the game.</param>
     /// <param name="arguments">The host's arguments besides the game, the project and the link.</param>
-    protected HostTests(string host, string build, Func<IEnumerable<string>> arguments)
+    /// <param name="environment">Variables that the host's environment has besides the test's.</param>
+    protected HostTests(string host, string build, Func<IEnumerable<string>> arguments,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         var root = EditorOptions.RepositoryRoot();
         var hostPath = Path.Combine(root, "build", "dev", host);
@@ -49,6 +51,10 @@ public abstract class HostTests : IAsyncDisposable
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
+        foreach (var (name, value) in environment ?? new Dictionary<string, string>())
+        {
+            info.Environment[name] = value;
+        }
         _host = Process.Start(info)!;
         _host.OutputDataReceived += (_, e) => _output.Enqueue(e.Data ?? "");
         _host.ErrorDataReceived += (_, e) => _output.Enqueue(e.Data ?? "");
