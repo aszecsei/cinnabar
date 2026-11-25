@@ -285,8 +285,8 @@ a_failed_frame_builds_the_accels_again :: proc(t: ^testing.T) {
 	// A ready mesh, whose structure the first request makes, and a skinned entity of it.
 	r.residency.count = 1
 	e := &r.residency.entries[0]
-	e.kind, e.ready = .Mesh, true
-	mesh := &e.current.mesh
+	e.kind, e.ready, e.current = .Mesh, true, Resident_Mesh{}
+	mesh := &e.current.(Resident_Mesh)
 	mesh.positions, mesh.indices, mesh.vertex_count, mesh.index_count, mesh.index_format =
 		positions, indices, 3, 3, .U32
 	r.scene.skins.instances = make(map[u32]Skinned_Instance, platform.heap_allocator)
@@ -381,12 +381,14 @@ a_built_mesh_accel_is_compacted :: proc(t: ^testing.T) {
 	// Two ready meshes of one triangle, and a skinned entity of the first.
 	r.residency.count = 2
 	for &e in r.residency.entries[:2] {
-		e.kind, e.ready = .Mesh, true
-		m := &e.current.mesh
+		e.kind, e.ready, e.current = .Mesh, true, Resident_Mesh{}
+		m := &e.current.(Resident_Mesh)
 		m.positions, m.indices, m.vertex_count, m.index_count, m.index_format =
 			positions, indices, 3, 3, .U32
 	}
-	mesh, kept := &r.residency.entries[0].current.mesh, &r.residency.entries[1].current.mesh
+	mesh, kept :=
+		&r.residency.entries[0].current.(Resident_Mesh),
+		&r.residency.entries[1].current.(Resident_Mesh)
 	r.scene.skins.instances = make(map[u32]Skinned_Instance, platform.heap_allocator)
 	defer delete(r.scene.skins.instances)
 	r.scene.skins.instances[0] = {

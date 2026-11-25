@@ -205,11 +205,12 @@ take_accel_sizes :: proc(r: ^Renderer) {
 		}
 		sizes := ([^]u64)(raw_data(data))[:MAX_ACCEL_SIZES]
 		for &e in r.residency.entries[:r.residency.count] {
-			if e.kind != .Mesh {
+			m, is_mesh := &e.current.(Resident_Mesh)
+			if !is_mesh {
 				continue
 			}
-			if s, sizing := e.current.mesh.accel_state.(Accel_Sizing); sizing && s.slot == slot {
-				change_mesh_accel(&r.residency, &e.current.mesh, Accel_Size_Read{sizes[s.index]})
+			if s, sizing := m.accel_state.(Accel_Sizing); sizing && s.slot == slot {
+				change_mesh_accel(&r.residency, m, Accel_Size_Read{sizes[s.index]})
 			}
 		}
 		c.copied -= {slot}
@@ -234,9 +235,12 @@ add_accel_size_passes :: proc(f: ^Frame) {
 	}
 	meshes := make([dynamic]^Resident_Mesh, r.platform.frame_allocator)
 	for &e in r.residency.entries[:r.residency.count] {
-		if _, built := e.current.mesh.accel_state.(Accel_Built);
-		   e.kind == .Mesh && e.ready && built {
-			append(&meshes, &e.current.mesh)
+		m, is_mesh := &e.current.(Resident_Mesh)
+		if !is_mesh || !e.ready {
+			continue
+		}
+		if _, built := m.accel_state.(Accel_Built); built {
+			append(&meshes, m)
 			if len(meshes) == MAX_ACCEL_SIZES {
 				break
 			}
@@ -282,9 +286,12 @@ add_compaction_pass :: proc(f: ^Frame) {
 	r, rf, g := f.renderer, f.ray_scene, f.graph
 	meshes := make([dynamic]^Resident_Mesh, r.platform.frame_allocator)
 	for &e in r.residency.entries[:r.residency.count] {
-		if _, compacting := e.current.mesh.accel_state.(Accel_Compacting);
-		   e.kind == .Mesh && e.ready && compacting {
-			append(&meshes, &e.current.mesh)
+		m, is_mesh := &e.current.(Resident_Mesh)
+		if !is_mesh || !e.ready {
+			continue
+		}
+		if _, compacting := m.accel_state.(Accel_Compacting); compacting {
+			append(&meshes, m)
 		}
 	}
 	if len(meshes) == 0 {
