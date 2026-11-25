@@ -184,10 +184,10 @@ Player :: struct {
 }
 
 // Player_Driven is the clock of a player that the caller moves to exact times, as a render out does (see
-// docs/editor/cutscene-editor.md#render-out): target is the time that the next advance_real takes the player to.
-// Neither the game's ticks nor the real clock move it.
+// docs/editor/cutscene-editor.md#render-out): target is the time that the next advance_real takes the player to, or nil
+// before the first drive. Neither the game's ticks nor the real clock move it.
 Player_Driven :: struct {
-	target: i32,
+	target: Maybe(i32),
 }
 
 // Player_Event is a change of a player's state, which change_cutscene records.
@@ -402,7 +402,7 @@ drive :: proc(s: ^State, w: ^ecs.World, h: Player_Handle, t: i32) -> Command_Res
 		log.errorf("cutscene: a %v player is not driven", status_of(p.state))
 		return .Refused
 	}
-	if t < live_of(&p.state).evaluation.time || t < driven.target {
+	if t < live_of(&p.state).evaluation.time || t < (driven.target.? or_else t) {
 		log.errorf("cutscene: a driven player goes forward only, not to %d", t)
 		return .Refused
 	}
@@ -760,7 +760,7 @@ begin :: proc(
 	}
 	p.priority = desc.priority
 	p.caller = desc.caller
-	p.clock = Player_Driven{target = min(i32)} if desc.driven else nil
+	p.clock = Player_Driven{} if desc.driven else nil
 	p.order = s.started
 	s.started += 1
 	overrides := make([dynamic]Binding_Override, 0, len(desc.overrides), w.platform.heap_allocator)

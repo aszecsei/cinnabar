@@ -946,8 +946,8 @@ advance_real :: proc(s: ^State, w: ^ecs.World, dt: time.Duration) {
 			continue
 		}
 		if driven, is_driven := p.clock.?; is_driven {
-			if driven.target > e.time {
-				e.time = min(driven.target, blob.range_end)
+			if target, driven_to := driven.target.?; driven_to && target > e.time {
+				e.time = min(target, blob.range_end)
 				e.carry = 0
 			}
 		} else if blob.clock == .Real {
