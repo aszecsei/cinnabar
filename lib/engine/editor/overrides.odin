@@ -117,7 +117,7 @@ begin_override :: proc(e: ^Editor, id: u64) {
 	o.last = id
 	_, mirrors := e.session.mirror.?
 	switch {
-	case e.session.mode != .Edit || !mirrors:
+	case mode_of(e.session.mode) != .Edit || !mirrors:
 		send_override_ended(e, id, .Not_Editing)
 	case len(o.live) >= MAX_OVERRIDES:
 		send_override_ended(e, id, .Full)

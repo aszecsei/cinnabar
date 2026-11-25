@@ -446,12 +446,12 @@ a_playing_perceiver_draws_its_rays_and_memory :: proc(t: ^testing.T) {
 	append(&agents.agents.generations, 1)
 	ecs.add(&f.world, e, ai.Agent_State{agent = {0, 1}})
 	f.editor.ai = &agents
-	f.editor.session.mode = .Play
+	f.editor.session.mode = Mode_Play{}
 	testing.expect_value(t, line_count(f), 0)
 	append(&f.editor.session.view.selection, e)
 	spheres := 2 * 3 * debug.CIRCLE_SEGMENTS
 	testing.expect_value(t, line_count(f), debug.CIRCLE_SEGMENTS + 4 + 2 + spheres)
-	f.editor.session.mode = .Paused
+	f.editor.session.mode = Mode_Paused{}
 	testing.expect_value(t, line_count(f), debug.CIRCLE_SEGMENTS + 4 + 2 + spheres)
 	f.editor.session.view.viewports[0].settings.helpers = .None
 	testing.expect_value(t, line_count(f), 0)
@@ -505,13 +505,13 @@ a_playing_nav_agent_draws_its_corners_neighbors_and_velocities :: proc(t: ^testi
 	)
 	append(&f.nav.crowd.generations, 1)
 	ecs.add(&f.world, e, nav.Nav_Agent_State{crowd = {0, 1}})
-	f.editor.session.mode = .Play
+	f.editor.session.mode = Mode_Play{}
 	testing.expect_value(t, line_count(f), 0)
 	append(&f.editor.session.view.selection, e)
 	// The path between the corners and a cross at each, the neighbor's line, and two arrows of a line and a head of four.
 	want := 1 + 2 * 2 + 1 + 2 * 5
 	testing.expect_value(t, line_count(f), want)
-	f.editor.session.mode = .Paused
+	f.editor.session.mode = Mode_Paused{}
 	testing.expect_value(t, line_count(f), want)
 	f.editor.session.view.viewports[0].settings.helpers = .None
 	testing.expect_value(t, line_count(f), 0)
@@ -542,7 +542,7 @@ the_world_view_draws_the_bounds_of_its_scenes :: proc(t: ^testing.T) {
 	testing.expect(t, lines[0].color != lines[24].color)
 	testing.expect(t, lines[12].color.a < lines[0].color.a)
 
-	f.editor.session.mode = .Play
+	f.editor.session.mode = Mode_Play{}
 	testing.expect_value(t, line_count(f), 3 * 12)
 
 	preview := []link.Nav_Probe_Point{{position = far.raw}}

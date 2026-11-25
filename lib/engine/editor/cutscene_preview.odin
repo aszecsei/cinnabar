@@ -250,7 +250,7 @@ open_cutscene_preview :: proc(
 	previews.last = m.ticket
 	despawned = end_cutscene_preview(e, w, nil)
 	_, mirrors := e.session.mirror.?
-	if e.session.mode != .Edit || !mirrors || e.cutscenes == nil || e.assets == nil {
+	if mode_of(e.session.mode) != .Edit || !mirrors || e.cutscenes == nil || e.assets == nil {
 		send_preview_ended(e, m.ticket, .Not_Editing)
 		return
 	}

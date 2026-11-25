@@ -11,9 +11,81 @@ import "cinnabar:engine/script"
 // Play the full frame runs; and while Paused, only a frame for each step runs. Without an editor, the world always runs. The mode also decides what the viewport shows over the
 // game: the editor's overlays and the debug layer draw only in Edit.
 
+// Session_Mode is the mode that the editor set, with what each mode holds: the steps that wait for a paused frame.
+// change_mode is its one writer (see docs/overview/conventions.md#state-with-a-lifecycle). Its zero value is Edit, in
+// which a session starts.
+Session_Mode :: union #no_nil {
+	Mode_Edit,
+	Mode_Play,
+	Mode_Paused,
+}
+
+Mode_Edit :: struct {}
+
+Mode_Play :: struct {}
+
+// Mode_Paused counts the Step_Frame messages that wait for a paused frame.
+Mode_Paused :: struct {
+	steps: int,
+}
+
+// mode_of is the link's name of a session's mode.
+mode_of :: proc(m: Session_Mode) -> link.Editor_Mode {
+	switch _ in m {
+	case Mode_Edit:
+		return .Edit
+	case Mode_Play:
+		return .Play
+	case Mode_Paused:
+		return .Paused
+	}
+	return .Edit
+}
+
 // mode is the editor's mode, or Play without an editor.
 mode :: proc(e: ^Editor) -> link.Editor_Mode {
-	return e.session.mode if active(e) else .Play
+	return mode_of(e.session.mode) if active(e) else .Play
+}
+
+// change_mode is the one writer of the session's mode, for the editor's Set_Mode. Play and Pause start from the
+// document's world, and Edit waits for the editor's scene, which ends the overrides too. It gives whether the end of the
+// overrides despawned entities.
+change_mode :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	to: link.Editor_Mode,
+) -> (
+	despawned: bool,
+) {
+	from := mode_of(e.session.mode)
+	if end_overrides(e, w, link.Override_End_Reason.Mode) {
+		despawned = true
+		forget_dead(w, &e.session.view.selection)
+		forget_dead(w, &e.session.view.hidden)
+	}
+	switch to {
+	case .Edit:
+		e.session.mode = Mode_Edit{}
+	case .Play:
+		e.session.mode = Mode_Play{}
+	case .Paused:
+		// A pause of a pause keeps the steps that wait.
+		if _, paused := e.session.mode.(Mode_Paused); !paused {
+			e.session.mode = Mode_Paused{}
+		}
+	}
+	// The world runs, or stops as it is, and the editor sends its scene again before Edit edits it. The edits that
+	// follow in this poll run no script code outside Play, but the edit-mode behaviours' in Edit.
+	e.session.mirror = nil
+	if scripts != nil {
+		script.set_callbacks(scripts, callbacks_between_frames(e))
+		// Each Play from Edit draws the same numbers (see docs/scripting/api.md#random).
+		if from == .Edit && to == .Play {
+			script.restart_random(scripts)
+		}
+	}
+	return
 }
 
 // world_loads counts the times that the editor replaced the game's world with its scene, at Play, at Stop and when it
@@ -25,14 +97,14 @@ world_loads :: proc(e: ^Editor) -> u64 {
 
 // editing is true while a linked editor is in Edit: the editor's outline, gizmo, icons and helpers draw only then.
 editing :: proc(e: ^Editor) -> bool {
-	return active(e) && e.session.mode == .Edit
+	return active(e) && mode_of(e.session.mode) == .Edit
 }
 
 // debug_shown is whether the game's frame draws its debug layer when no viewport draws it: always without an editor,
 // and only while editing with one, so it shows what the game shows in Play and Paused. A scene view always has the debug
 // layer, and the Game view never has one (see plan_view).
 debug_shown :: proc(e: ^Editor) -> bool {
-	return !active(e) || e.session.mode == .Edit
+	return !active(e) || mode_of(e.session.mode) == .Edit
 }
 
 // playing is the Particle_Systems and the Sprite_Renderers that play while the world stands still, for render.Frame_Desc.playing: the editor's
@@ -72,8 +144,8 @@ simulation :: proc(
 	case .Play:
 		return .Run, dt
 	case .Paused:
-		if e.session.steps > 0 {
-			e.session.steps -= 1
+		if paused := &e.session.mode.(Mode_Paused); paused.steps > 0 {
+			paused.steps -= 1
 			return .Run, ecs.tick_length(w)
 		}
 	case .Edit:
