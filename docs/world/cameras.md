@@ -24,6 +24,7 @@ The game's views, their layout, and the camera stack of each view. Systems push 
 - **A push** puts a camera entity on one view's stack, with a priority: `push(views, world, view, camera, priority, blend, blend_out, owner)`. It fails when the view is not 0 to `MAX_VIEWS - 1`, when the entity is not alive or has no `Camera`, or when `MAX_ENTRIES` (64) pushes and claims are held. A view that the layout does not show takes pushes too.
 - **The choice** is the entry with the highest priority. On a tie, the last push wins.
 - **With no entries**, a view shows the world's first `Camera`, as `collect` finds it, and keeps it while it lives. A scene with one camera and no pushes draws as it did before stacks. With no camera at all, it shows a default view from the origin.
+- **The count.** `camera.held_count` is how many pushes and claims are held across every stack. The editor sends it as `Game_Stats.camera_entries`.
 - **A system needs no knowledge of the others.** A death camera, a vehicle camera and a dialogue camera each push with their own priority, and the highest one shows.
 
 ## Tokens

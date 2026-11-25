@@ -2,7 +2,7 @@
 
 How `core` selects the platform and the GPU backend at compile time, the `Platform_API` struct that is the whole porting surface, and what `core` does at the start and end of every frame. Read [Hot reload](../overview/hot-reload.md) first for why the host owns everything here.
 
-**In this document:** [Platform and backend abstraction](#platform-and-backend-abstraction) · [Platform_API](#platform_api) · [File reads](#file-reads) · [The frame](#the-frame)
+**In this document:** [Platform and backend abstraction](#platform-and-backend-abstraction) · [Platform_API](#platform_api) · [Environment variables](#environment-variables) · [File reads](#file-reads) · [The frame](#the-frame)
 
 ## Platform and backend abstraction
 
@@ -33,6 +33,17 @@ The porting surface is therefore exactly: the `*_windows.odin` files of `core`, 
 | Scripting | `script_open`, `script_close`, `script_push_binding`, `script_atom`, `script_direct_access` | The host trampolines. See [Scripting](../scripting/embedding.md#host-trampolines). |
 
 In release, `lib/engine/game/runtime` fills the same struct with direct references, so a game never knows which configuration it is in.
+
+## Environment variables
+
+The host reads these at its start. Each is for tests and tools.
+
+| Variable | Effect |
+|---|---|
+| `CINNABAR_DISABLE_FEATURES` | Hides the named GPU features (see [GPU: Interface](../gpu/interface.md)). |
+| `CINNABAR_OUTPUT` | Asks for an output mode (see [Scripting: API](../scripting/api.md)). |
+| `CINNABAR_TEST_TONE` | 1 asks the game to play the audio device's test tone (see [Audio](audio.md#test-tone)). |
+| `CINNABAR_STREAM_DELAY_FRAMES` | A number of frames. Each streamed transfer goes on reporting that it is not done, through `gpu_transfer_done`, for that many frames after the backend finished it. It tests what waits for streaming, such as a render out's frames (see [Cutscene editor: Determinism](../editor/cutscene-editor.md#determinism)). |
 
 ## File reads
 

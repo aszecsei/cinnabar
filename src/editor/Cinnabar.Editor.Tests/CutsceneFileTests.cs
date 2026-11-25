@@ -62,7 +62,7 @@ public sealed class CutsceneFileTests
     public void BlocksNestByKeywordAsTheCookerReadsThemAndNotByIndent()
     {
         var file = Parse(Sample("intro"));
-        Assert.Equal([1, 2, 3, 4, 5], file.Bindings.Select(b => b.Id!.Value));
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7], file.Bindings.Select(b => b.Id!.Value));
         Assert.Equal("Walking Fox", file.Bindings.First().Name);
         Assert.Equal("@f496b929575035d9c2626ed56d3165ba/79cea6d7586e3f48", file.Bindings.First().Get("possess"));
         var walk = file.Tracks.First();
@@ -165,7 +165,7 @@ public sealed class CutsceneFileTests
 
         // A new header setting goes after the header's last one, before the first binding.
         file.Root.Set("skip", "none");
-        Assert.Contains("skip_color = \"#000000\"\nskip = none\n\nbinding 1", file.Text);
+        Assert.Contains("hide_ui = [$bdeaa563d6faa121b2f06fde16f065e5]\nskip = none\n\nbinding 1", file.Text);
 
         // A block with no settings gets its first a level under its keyword line.
         var bare = Parse(Template);
@@ -187,7 +187,7 @@ public sealed class CutsceneFileTests
         Assert.Contains("\t\t\tkey 540000 5 bezier 0.5\n", file.Text);
         Assert.Equal("section:1/channel:position_x/key:1", CutsceneFile.PathOf(key));
         // Section IDs are the cutscene's, across its tracks.
-        Assert.Equal(14, file.NextId(CutsceneBlockKind.Section));
+        Assert.Equal(16, file.NextId(CutsceneBlockKind.Section));
     }
 
     [Fact]

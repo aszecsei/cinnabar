@@ -2,7 +2,7 @@
 
 The audio device in `core`: what the `audio_*` group of `Platform_API` does, how a writer keeps playback going across a code reload, and what happens when the device goes away. Read [Platform](platform.md#platform_api) first for the group's place.
 
-**In this document:** [The device](#the-device) · [Format](#format) · [Status](#status) · [Queue depth and code reload](#queue-depth-and-code-reload) · [Device loss](#device-loss) · [Test tone](#test-tone)
+**In this document:** [The device](#the-device) · [Format](#format) · [Status](#status) · [Queue depth and code reload](#queue-depth-and-code-reload) · [Device loss](#device-loss) · [The tap](#the-tap) · [Test tone](#test-tone)
 
 ## The device
 
@@ -44,6 +44,10 @@ A writer on its own host-side thread does not stop for any of these, so it can k
 Once a second, the thread compares the default endpoint with the one it has open, and opens the new one if they differ. A failed call on the stream, such as `AUDCLNT_E_DEVICE_INVALIDATED` for a device that was unplugged, closes the stream, and the thread tries to open the default endpoint once a second until it succeeds.
 
 Without an endpoint, the thread drains the queue at the sample rate, and logs one warning. So a writer keeps its pace, and old audio does not play when a device comes back.
+
+## The tap
+
+While a render out writes sound, the host reads the queue in place of the device (see [Cutscene editor: Render out](../editor/cutscene-editor.md#render-out)). `audio_tap_begin` makes the host the queue's one reader and drops what is queued, and the device plays silence. `audio_tap_take(out)` fills `out` with the queue's next frames. It then waits until the writer has filled the queue to `AUDIO_TAP_DEPTH`, the mixer's `QUEUE_TARGET`, again. So the mixer writes the same blocks after the same game frames in each run. A take that the writer does not satisfy within `AUDIO_TAP_WAIT` (1 s) gives false, with silence after what came. `audio_tap_end` gives the queue back to the device. A mutex keeps the reader single across the switch.
 
 ## Test tone
 

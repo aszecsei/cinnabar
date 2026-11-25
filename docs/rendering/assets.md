@@ -43,6 +43,8 @@ A texture that is not virtual streams only the mips that what draws it needs. Th
 - **Everything else** asks for every mip: sprites, the UI, particles, the sky, the clouds and the blue noise call `resident_texture`, which is not ready until the texture has all its mips. A texture that nothing asks for wants the last mip only, until it is unloaded.
 - **Refining is at once**, and **coarsening waits** `MIP_DROP_FRAMES` (120) frames of wanting less, so a camera that turns does not make textures stream back and forth. At most `MIP_STREAMS_PER_FRAME` (8) textures start a stream each frame. A texture streams first at the mip that is wanted when it is requested.
 - **A virtual texture** does not take part: it streams its pages by need (see [Virtual textures](#virtual-textures)).
+- **Exact mips.** With `residency_set_exact_mips`, a texture that wants a coarser mip takes it at once, and does not wait `MIP_DROP_FRAMES`. A render out sets it while it runs, so what a frame draws does not depend on the frames before it.
+- **Unsettled entries.** `residency_unsettled` counts the entries that the last frames asked for and that would draw differently in a later frame: those that are not ready or still stream, and the textures whose top mip is not the one that they want. A failed entry does not count. A render out draws until it is 0.
 - **Stats.** `residency_stats` gives the resident bytes, how many entries are ready, how many were unloaded and how many mips streamed, which the editor's Resource Monitor shows.
 
 ## Mesh pages

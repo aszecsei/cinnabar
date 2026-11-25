@@ -31,8 +31,8 @@ public sealed partial class EditorShell
     /// <summary>Starts playing the world that the game has, or goes on after a pause.</summary>
     public void Play()
     {
-        // The Play command needs a linked host. Without one, the mode only changes here.
-        if (Mode == EditorMode.Play)
+        // The Play command needs a linked host. Without one, the mode only changes here. A render out plays on its own.
+        if (Mode == EditorMode.Play || RenderOuts.InGame)
         {
             return;
         }
@@ -60,7 +60,7 @@ public sealed partial class EditorShell
     /// <summary>Pauses play, or goes on after a pause.</summary>
     public void TogglePause()
     {
-        if (Mode != EditorMode.Edit)
+        if (Mode != EditorMode.Edit && !RenderOuts.InGame)
         {
             SetModeTo(Mode == EditorMode.Play ? EditorMode.Paused : EditorMode.Play);
         }
@@ -82,6 +82,12 @@ public sealed partial class EditorShell
         {
             return;
         }
+        // Stop cancels a render out, whose end gives the world back.
+        if (RenderOuts.InGame)
+        {
+            RenderOuts.Cancel();
+            return;
+        }
         // The world goes back to the editor's scenes, so what the game had streamed in is not news to the world view.
         SetStreamed(null);
         SetModeTo(EditorMode.Edit);
@@ -89,10 +95,14 @@ public sealed partial class EditorShell
         Console.Add(LogLevel.Info, "editor: stopped, so the game has the scene again.");
     }
 
-    void SetModeTo(EditorMode mode)
+    // The one writer of the editor's mode. A render out's game changes its own mode, so the editor sends none then.
+    void SetModeTo(EditorMode mode, bool send = true)
     {
         Mode = mode;
-        SendMode();
+        if (send)
+        {
+            SendMode();
+        }
         OnModeChanged();
     }
 

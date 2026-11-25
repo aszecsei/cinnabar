@@ -178,7 +178,16 @@ Player :: struct {
 	order:      u64,
 	// The entity whose behaviour played it, which gets its lifecycle's events with the bindings, or 0.
 	caller:     ecs.Entity,
+	// nil for the clock that its cutscene names, or a driven clock, which only drive moves (see drive).
+	clock:      Maybe(Player_Driven),
 	state:      Player_State,
+}
+
+// Player_Driven is the clock of a player that the caller moves to exact times, as a render out does (see
+// docs/editor/cutscene-editor.md#render-out): target is the time that the next advance_real takes the player to, or nil
+// before the first drive. Neither the game's ticks nor the real clock move it.
+Player_Driven :: struct {
+	target: Maybe(i32),
 }
 
 // Player_Event is a change of a player's state, which change_cutscene records.
@@ -196,6 +205,8 @@ Play_Desc :: struct {
 	overrides: []Binding_Override,
 	start:     Maybe(i32),
 	caller:    ecs.Entity,
+	// The player's time moves only by drive, whatever clock its cutscene names.
+	driven:    bool,
 }
 
 // Player_Context is what update needs to load cutscenes and resolve bindings: the world, its scenes, the scripts that
@@ -374,6 +385,29 @@ set_time :: proc(s: ^State, w: ^ecs.World, h: Player_Handle, t: i32) -> Command_
 	}
 	log.errorf("cutscene: a %v player cannot seek", status_of(p.state))
 	return .Refused
+}
+
+// drive takes a playing player of a driven clock forward to a time on its cutscene's time, which the next
+// advance_real evaluates. Its events fire over (its last time, the time], as a play's do, and nothing jumps: a camera
+// cut track does not cut. A time before the player's is refused, as is a player that is not driven or not playing.
+drive :: proc(s: ^State, w: ^ecs.World, h: Player_Handle, t: i32) -> Command_Result {
+	slot := command_slot(s, h) or_return
+	p := &s.players[slot]
+	driven, is_driven := &p.clock.?
+	if !is_driven {
+		log.error("cutscene: only a player of a driven clock is driven")
+		return .Refused
+	}
+	if status_of(p.state) != .Playing {
+		log.errorf("cutscene: a %v player is not driven", status_of(p.state))
+		return .Refused
+	}
+	if t < live_of(&p.state).evaluation.time || t < (driven.target.? or_else t) {
+		log.errorf("cutscene: a driven player goes forward only, not to %d", t)
+		return .Refused
+	}
+	driven.target = t
+	return .Done
 }
 
 // release frees the slot of a player that is Restored or Failed, so its handle is stale. A player that has not ended
@@ -726,6 +760,7 @@ begin :: proc(
 	}
 	p.priority = desc.priority
 	p.caller = desc.caller
+	p.clock = Player_Driven{} if desc.driven else nil
 	p.order = s.started
 	s.started += 1
 	overrides := make([dynamic]Binding_Override, 0, len(desc.overrides), w.platform.heap_allocator)

@@ -65,6 +65,28 @@ public sealed class EditorSettings(string directory)
         }
     }
 
+    /// <summary>
+    /// The ffmpeg that render out makes videos with, as <c>"ffmpeg"</c> in <c>settings.json</c>: its path, or null
+    /// when it is not set or not there (see docs/editor/cutscene-editor.md#render-out).
+    /// </summary>
+    public string? Ffmpeg()
+    {
+        if (Read(SettingsFileName) is not { } text)
+        {
+            return null;
+        }
+        try
+        {
+            using var json = JsonDocument.Parse(text);
+            return json.RootElement.TryGetProperty("ffmpeg", out var path) && path.ValueKind == JsonValueKind.String
+                && path.GetString() is { Length: > 0 } file && File.Exists(file) ? file : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>The user's key bindings, and a warning if the file cannot be read.</summary>
     public (IReadOnlyDictionary<string, string> Bindings, string? Warning) ReadKeyBindings()
     {

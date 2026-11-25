@@ -1,5 +1,6 @@
 package render
 
+import "base:intrinsics"
 import "core:log"
 import "core:math"
 import "core:mem"
@@ -137,6 +138,33 @@ Renderer :: struct {
 	paper_white:            f32,
 	// A code reload may bring new descriptions, so the next frame updates every pipeline.
 	reloaded:               bool,
+	// The time that the frames read in place of the host's, or nil for the host's (see clock_seconds).
+	clock:                  Maybe(Fixed_Clock),
+}
+
+// Fixed_Clock is a time that the caller sets for each frame, in seconds, as a render out does, so what moves by the
+// clock between frames moves the same in every run (see docs/rendering/frame.md#the-clock).
+Fixed_Clock :: struct {
+	seconds: f64,
+}
+
+// set_render_clock is the one writer of the renderer's clock: a fixed time for the frames that follow, or nil for the
+// host's.
+set_render_clock :: proc(r: ^Renderer, clock: Maybe(Fixed_Clock)) {
+	r.clock = clock
+}
+
+// clock_seconds is the time that a frame reads, in seconds: the fixed clock's when one is set, and otherwise the host's
+// since it started, or 0 without one. The material time, the exposure's adaptation, the clouds' wind, the particles
+// that the editor plays and the reflection probes' capture read it.
+clock_seconds :: proc(r: ^Renderer) -> f64 {
+	if fixed, is_fixed := r.clock.?; is_fixed {
+		return fixed.seconds
+	}
+	if r.platform.time_seconds == nil {
+		return 0
+	}
+	return r.platform.time_seconds()
 }
 
 // Frame_Desc is what a game gives draw_frame each frame. It lives in frame memory, and so do its hooks' data.
@@ -608,6 +636,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 // docs/rendering/frame.md#views). It returns false if the frame's own graph could not execute.
 draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	profile.scope_text(&r.platform.profile, "Build frame", .Render)
+	intrinsics.atomic_store(&compiling_seen, 0)
 	residency_set_mesh_pool(&r.residency, r.quality.mesh_pool)
 	residency_set_texture_pool(&r.residency, r.quality.texture_pool)
 	residency_set_quality(&r.residency, r.quality)
@@ -1052,13 +1081,10 @@ draw_view :: proc(
 	return ok
 }
 
-// frame_time is the time that materials read, in seconds since the host started. It wraps every hour, so a float
+// frame_time is the time that materials read, in seconds, from clock_seconds. It wraps every hour, so a float
 // keeps its precision.
 frame_time :: proc(r: ^Renderer) -> f32 {
-	if r.platform.time_seconds == nil {
-		return 0
-	}
-	return f32(math.mod(r.platform.time_seconds(), 3600))
+	return f32(math.mod(clock_seconds(r), 3600))
 }
 
 // sync_frame_pipelines creates the renderer's pipelines from their shaders, and updates those whose shaders changed,

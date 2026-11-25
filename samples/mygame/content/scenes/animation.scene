@@ -2,9 +2,18 @@
 # near one plays fox.animation_graph, which its fox_walker behaviour sets the speed of and moves it by, and whose
 # footsteps it logs (see docs/animation/design.md#the-ecs); the far one runs, with an Animator that plays the run clip
 # alone. They face +x, so the camera sees them from the side. I plays the intro cutscene, which possesses the walking
-# fox, through the camera's intro_player behaviour (see docs/cinematics/scripts.md). Positions are raw World_Position
-# values in units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
+# fox and the running one, through the camera's intro_player behaviour (see docs/cinematics/scripts.md), and hides the
+# HUD while it plays. Positions are raw World_Position values in units of 2^-24 m. The editor writes this file; see
+# docs/editor/document-and-scenes.md#scenes.
 scene 3
+
+entity 3e8a51c07d2b94f6
+name = "HUD"
+component 112 Ui_Document
+	document = $bdeaa563d6faa121b2f06fde16f065e5
+	order = 0
+	visible = true
+behaviour cd4373c33c5acde016a81c398fa2dda0
 
 entity 756af5ffd7784831
 name = "Camera"

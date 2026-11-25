@@ -179,8 +179,10 @@ public sealed partial class EditorShell
                 return CaptureUiResponse(request);
             case "content":
                 return ContentResponse(request);
+            case "render-out":
+                return await RenderOutResponse(request);
             default:
-                return new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}; the commands are status, screenshot, gif, viewport, camera, timing, ui and content");
+                return new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}; the commands are status, screenshot, gif, viewport, camera, timing, ui, content and render-out");
         }
     }
 

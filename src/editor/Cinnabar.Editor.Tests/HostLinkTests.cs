@@ -12,7 +12,7 @@ namespace Cinnabar.Editor.Tests;
 /// shared frames, the picks that find what it drew, bakes, previews and the GPU's profile, and those that have not moved
 /// to <see cref="HostTests"/>. They are skipped when the host cannot start its GPU device, such as on a machine without one.
 /// </summary>
-public sealed class HostLinkTests() : HostTests("host.exe", "just build", () => ["--adapter", Adapter.Value.ToString("x16")])
+public sealed partial class HostLinkTests() : HostTests("host.exe", "just build", () => ["--adapter", Adapter.Value.ToString("x16")])
 {
     // The host renders on the adapter that the test names, so the test can open its shared objects.
     static readonly Lazy<ulong> Adapter = new(HighPerformanceAdapter);

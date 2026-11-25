@@ -164,7 +164,9 @@ advance_level0 :: proc(r: ^Residency, m: ^Resident_Mesh) {
 	case Level0_Streaming:
 		done := true
 		for t in s.transfers {
-			done &&= r.platform.gpu_transfer_done(t)
+			if !r.platform.gpu_transfer_done(t) {
+				done = false
+			}
 		}
 		if done {
 			change_level0(r, m, Level0_Landed{})

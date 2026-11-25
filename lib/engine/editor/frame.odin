@@ -22,6 +22,16 @@ draw_frame :: proc(
 	if !active(e) {
 		return render.draw_frame(r, w, desc)
 	}
+	if run := rendering(e); run != nil {
+		// A frame of a render out draws only its own view, once the host has room for what it writes.
+		planned, draws := plan_render_frame(e, w, run, desc)
+		if !draws || !render_has_room(e, run) {
+			return true
+		}
+		drew := render.draw_frame(r, w, planned)
+		render_drew(e, w, run, drew)
+		return drew
+	}
 	draw_helpers(e, w, &r.debug)
 	return render.draw_frame(
 		r,

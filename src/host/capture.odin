@@ -55,6 +55,9 @@ Capture :: struct {
 	done:           [dynamic]link.Capture_Result,
 	// The worker's own.
 	ring:           Ring,
+	// The render out that the host writes, and the frames that the worker wrote, under mutex (see render_out.odin).
+	render_output:  Render_Output,
+	render_done:    [dynamic]Render_Written,
 }
 
 In_Flight :: struct {
@@ -80,10 +83,13 @@ Job_Kind :: enum u8 {
 	Screenshot,
 	Gif,
 	Thumbnail,
+	Render_Frame,
 }
 
 Job :: struct {
 	kind:    Job_Kind,
+	// The render out that a Render_Frame is of.
+	run:     u64,
 	capture: gpu.Frame_Capture,
 	frame:   u64,
 	tick:    time.Tick,
@@ -124,6 +130,7 @@ capture_start :: proc(c: ^Capture, l: ^Link) {
 	c.requests = make([dynamic]Request, runtime.heap_allocator())
 	c.jobs = make([dynamic]Job, runtime.heap_allocator())
 	c.done = make([dynamic]link.Capture_Result, runtime.heap_allocator())
+	c.render_done = make([dynamic]Render_Written, runtime.heap_allocator())
 	c.ring_last = time.tick_now()
 	when CAPTURE {
 		c.worker = thread.create_and_start_with_poly_data(c, capture_worker, context)
@@ -145,6 +152,7 @@ capture_stop :: proc(c: ^Capture) {
 	for job in c.jobs {
 		free_job(job)
 	}
+	render_out_stop(c)
 	for r in c.done {
 		free_result(r)
 	}
@@ -219,7 +227,11 @@ capture_tick :: proc(c: ^Capture) {
 		}
 		switch done.source {
 		case .Texture:
-			take_thumbnail(c, done)
+			if done.ticket & RENDER_TICKET_BIT != 0 {
+				take_render_frame(c, done)
+			} else {
+				take_thumbnail(c, done)
+			}
 		case .Frame:
 			take_frame(c, done)
 		}
@@ -236,9 +248,11 @@ capture_tick :: proc(c: ^Capture) {
 		free_result(r)
 	}
 	delete(results)
+	render_out_tick(c)
 
 	when CAPTURE {
-		if time.tick_since(c.ring_last) >= RING_INTERVAL {
+		// A render out's frames take the backend's copies while it runs.
+		if time.tick_since(c.ring_last) >= RING_INTERVAL && !render_out_active(c) {
 			c.ring_due = true
 		}
 	}
@@ -381,6 +395,14 @@ take_frame :: proc(c: ^Capture, done: gpu.Frame_Capture) {
 	}
 }
 
+// post_render_job gives the worker a render out's frame, to write to path, from the heap.
+post_render_job :: proc(c: ^Capture, copy: gpu.Frame_Capture, run: u64, frame: i32, path: string) {
+	post_job(
+		c,
+		Job{kind = .Render_Frame, capture = copy, run = run, frame = u64(frame), path = path},
+	)
+}
+
 @(private = "file")
 post_job :: proc(c: ^Capture, job: Job) {
 	when !CAPTURE {
@@ -453,6 +475,9 @@ free_temp_allocator :: proc() {
 run_job :: proc(c: ^Capture, job: Job) -> (result: link.Capture_Result, send: bool) {
 	heap := runtime.heap_allocator()
 	switch job.kind {
+	case .Render_Frame:
+		run_render_frame(c, job)
+		return {}, false
 	case .Thumbnail:
 		img, ok := capture.to_rgb8(job.capture, heap)
 		size := job.capture.size

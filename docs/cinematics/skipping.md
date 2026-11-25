@@ -4,7 +4,7 @@ A player can skip a cutscene, all of it or one part. A skip must leave the world
 
 This document describes the skip in `lib/engine/cutscene/player.odin` and `evaluation.odin`, and the skip action in `skipping.odin`. Read [Player](player.md) and [Evaluation](evaluation.md) first.
 
-**In this document:** [The policy](#the-policy) · [The state](#the-state) · [Events](#events) · [Input](#input) · [The fade](#the-fade) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
+**In this document:** [The policy](#the-policy) · [The state](#the-state) · [Events](#events) · [Input](#input) · [The fade](#the-fade) · [Other tracks and scripts](#other-tracks-and-scripts) · [Procedures](#procedures)
 
 ## The policy
 
@@ -94,9 +94,9 @@ The overlay draws the skip's fade over the frame ([Tracks: Presentation tracks](
   - A fade that a presentation track keeps wins over the fade back ([Tracks: Presentation tracks](tracks.md#presentation-tracks)).
 - **A skip that plays on** has its fade in at the target, as before.
 
-## Not built yet
+## Other tracks and scripts
 
-The skip exposes what later tracks need, but some are not built yet:
+The skip serves the other tracks and the scripts:
 - **Sub-sequences** skip with their parent, through the same jump: their tracks evaluate at the target, mapped to their time, and their keys marked `fire_when_skipped` fire in time order with the parent's ([Tracks: Sub-sequence tracks](tracks.md#sub-sequence-tracks)).
 
 Scripts skip through the `Cutscene` library: `:skip()`, and `on_cutscene_finished(cutscene, skipped)` and `wait_cutscene` say whether a skip took the cutscene to its end ([Scripts](scripts.md)).

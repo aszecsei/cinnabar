@@ -1,13 +1,15 @@
 cutscene 1
 # The sample's intro (see docs/content/kinds/cutscenes.md): the animation scene's walking fox walks 4 m, past a guard
-# that the cutscene spawns, to a bark, after the fox_walk shot. Times are ticks, 60000 a second. The fox's track is
+# that the cutscene spawns, to a bark, after the fox_walk shot, while the running fox runs 3 m beside it and a stone that
+# the cutscene spawns rolls away from the guard as it barks. Times are ticks, 60000 a second. The fox's track is
 # relative, so it walks from where it stands, and its walk clip loops in place while that track moves it. The shot, which
 # the intro binds to the fox, turns the fox to its path as the intro begins. Three spawned shot cameras cut the scene: a
 # wide shot that blends in from gameplay, a close shot that racks its focus, and a tracking shot that blends back out.
 # Music swells under it and plays on into gameplay, a line of dialogue plays over the wide shot, and the guard's bark is
 # heard where the guard stands. A story track tells every behaviour when the guard barks, and that the intro was seen,
 # also when it is skipped. The shot fades the intro in from black, letterbox bars slide in and out again as gameplay
-# comes back, and a subtitle shows the line of dialogue.
+# comes back, and a subtitle shows the line of dialogue. While it plays, it pushes the cutscene input context, in which
+# the player can hold the skip action, and hides the HUD.
 length = 720000
 # The range ends at 10 s. The music runs 2 s past it, into gameplay.
 range = [0, 600000]
@@ -16,6 +18,8 @@ clock = game
 # A skip fades to black over a quarter of a second, and back from it over gameplay.
 skip_fade = 15000
 skip_color = "#000000"
+input_context = "cutscene"
+hide_ui = [$bdeaa563d6faa121b2f06fde16f065e5]
 
 binding 1 "Walking Fox"
 	possess = @f496b929575035d9c2626ed56d3165ba/79cea6d7586e3f48
@@ -34,6 +38,15 @@ binding 4 "Close Shot"
 binding 5 "Tracking Shot"
 	spawn = $7fb86acbe194450180b90ee9fb0ecf42
 	position = [150000000002, 1.2, -3]
+binding 6 "Running Fox"
+	# Optional, so the intro plays in a scene without it.
+	possess = @f496b929575035d9c2626ed56d3165ba/76b64f812f12cecf
+	policy = optional
+binding 7 "Stone"
+	# The prefab's own scale, which a spawned binding's scale replaces.
+	spawn = $9a2728bfc2e9b1d21ce27d2eb945c856
+	position = [150000000002.5, 0.12, 1.2]
+	scale = [0.12, 0.12, 0.12]
 
 track 1 transform "Fox walks"
 	binding = 1
@@ -136,3 +149,21 @@ track 10 presentation "Presentation"
 		text = "The fox walks this path every evening."
 		key = "intro.narrator.path"
 		audio = 10
+track 11 transform "Fox runs"
+	# The running fox runs on from where it stands, along its own forward, its z, to near the floor's edge, and is back
+	# there when the intro ends.
+	binding = 6
+	section 14 0 600000
+		channel position_z
+			key 0 0 linear
+			key 600000 3 linear
+track 12 transform "Stone rolls"
+	# Kicked by the bark, the stone rolls 1.5 m, two turns of its 0.12 m radius.
+	binding = 7
+	section 15 360000 480000
+		channel position_x
+			key 0 0 auto
+			key 120000 1.5 auto
+		channel rotation_z
+			key 0 0 auto
+			key 120000 -716 auto

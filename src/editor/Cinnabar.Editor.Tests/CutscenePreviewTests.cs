@@ -186,7 +186,7 @@ public sealed class CutscenePreviewTests : IDisposable
     }
 
     [Fact]
-    public void ScrubbingAndPlayingLeaveTheDocumentsCleanAndTheirHistoriesEmpty()
+    public void ScrubbingPlayingAndLoopingLeaveTheDocumentsCleanAndTheirHistoriesEmpty()
     {
         var (shell, editor) = NewShell();
         using var _ = shell;
@@ -198,6 +198,26 @@ public sealed class CutscenePreviewTests : IDisposable
         shell.CutscenePreview.PlayPause();
         shell.OnGameMessage(new CutscenePreviewTick(ticket, 90000, true));
         shell.OnGameMessage(new CutscenePreviewTick(ticket, 120000, false));
+
+        // A loop between in and out points, played through its end and back to its start a few times, and scrubbed.
+        editor.SetKeyboardPane(CutscenePane.Timeline);
+        editor.SetPlayhead(30000);
+        Run(shell, EditorCommands.CutsceneSetIn);
+        editor.SetPlayhead(90000);
+        Run(shell, EditorCommands.CutsceneSetOut);
+        Run(shell, EditorCommands.CutsceneLoop);
+        Run(shell, EditorCommands.CutscenePlayPause);
+        for (var lap = 0; lap < 3; lap++)
+        {
+            shell.OnGameMessage(new CutscenePreviewTick(ticket, 60000, true));
+            shell.OnGameMessage(new CutscenePreviewTick(ticket, 89000, true));
+            shell.OnGameMessage(new CutscenePreviewTick(ticket, 31000, true));
+        }
+        editor.SetPlayhead(45000);
+        shell.CutscenePreview.Flush();
+        Run(shell, EditorCommands.CutscenePlayPause);
+        Run(shell, EditorCommands.CutsceneClearInOut);
+        Run(shell, EditorCommands.CutsceneLoop);
 
         Assert.False(shell.Scene!.IsDirty);
         Assert.Empty(shell.Scene.History);

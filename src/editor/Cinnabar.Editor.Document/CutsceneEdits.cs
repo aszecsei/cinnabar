@@ -808,6 +808,123 @@ public static class CutsceneEdits
         return CutsceneFile.PathOf(trigger);
     }
 
+    /// <summary>
+    /// Adds a presentation section of a kind, <c>fade</c>, <c>letterbox</c> or <c>subtitle</c>, from start for length ticks
+    /// (see docs/editor/cutscene-editor.md#presentation), on the cutscene's first presentation track, or on a new one, named
+    /// Presentation, with the tracks of no binding. A fade starts black and opaque, a letterbox at 2.39, and a subtitle
+    /// with a line to type over, as each needs one to cook. The section has the next section ID, goes among the track's
+    /// sections in start order, and grows the length when it ends past it. Returns its path, or null for another kind or
+    /// a locked track.
+    /// </summary>
+    public static string? AddPresentation(CutsceneFile file, string kind, int start, int length, IReadOnlySet<int>? locked = null)
+    {
+        if (kind is not ("fade" or "letterbox" or "subtitle"))
+        {
+            return null;
+        }
+        var track = file.Tracks.FirstOrDefault(t => t.TrackKind == "presentation");
+        if (track != null && IsLocked(track, locked))
+        {
+            return null;
+        }
+        if (track == null)
+        {
+            var id = file.NextId(CutsceneBlockKind.Track);
+            track = CutsceneBlock.Of(CutsceneBlockKind.Track, $"track {Format(id)} presentation \"Presentation\"");
+            file.Insert(file.Root, InsertAt(file, null), track);
+        }
+        start = Math.Max(start, 0);
+        var end = start + Math.Max(length, 1);
+        var sectionId = file.NextId(CutsceneBlockKind.Section);
+        var section = CutsceneBlock.Of(CutsceneBlockKind.Section, $"{CutsceneKeying.IndentUnder(track)}section {Format(sectionId)} {Format(start)} {Format(end)}");
+        file.Insert(track, track.Children.Count, section);
+        section.Set("kind", kind);
+        switch (kind)
+        {
+            case "fade":
+                section.Set("color", "\"#000000\"");
+                AddConstantChannel(file, section, "opacity", "1");
+                break;
+            case "letterbox":
+                AddConstantChannel(file, section, "aspect", "2.39");
+                break;
+            case "subtitle":
+                section.Set("text", "\"…\"");
+                break;
+        }
+        CutsceneFile.SortChildren(track);
+        if (file.Length is { } cutsceneLength && end > cutsceneLength)
+        {
+            file.Root.Set("length", Format(end));
+        }
+        return CutsceneFile.PathOf(section);
+    }
+
+    // A channel of one constant key at the section's start, which the curve editor keys on from.
+    static void AddConstantChannel(CutsceneFile file, CutsceneBlock section, string name, string value)
+    {
+        var channel = CutsceneBlock.Of(CutsceneBlockKind.Channel, $"{CutsceneKeying.IndentUnder(section)}channel {name}");
+        file.Insert(section, section.Children.Count, channel);
+        file.Insert(channel, 0, CutsceneBlock.Of(CutsceneBlockKind.Key, $"{CutsceneKeying.IndentUnder(channel)}key 0 {value} constant"));
+    }
+
+    /// <summary>
+    /// Adds an event range from start to end with a name (see docs/editor/cutscene-editor.md#events), on the track that
+    /// <see cref="AddEvent"/> finds or adds: every behaviour hears its name's _begin at the start and its _end at the end.
+    /// The range has the next event ID, shared with the triggers, and goes among the track's events in time order. Returns
+    /// its path, or null for an empty span or a locked track.
+    /// </summary>
+    public static string? AddEventRange(CutsceneFile file, CutsceneBlock? target, int start, int end, string name, IReadOnlySet<int>? locked = null)
+    {
+        start = Math.Clamp(start, 0, LengthOf(file));
+        end = Math.Clamp(end, 0, LengthOf(file));
+        if (end <= start)
+        {
+            return null;
+        }
+        var track = ClipTrack(file, "event", target, out var binding);
+        if (track != null && IsLocked(track, locked))
+        {
+            return null;
+        }
+        if (track == null)
+        {
+            var id = file.NextId(CutsceneBlockKind.Track);
+            track = CutsceneBlock.Of(CutsceneBlockKind.Track, $"track {Format(id)} event \"Events\"");
+            file.Insert(file.Root, InsertAt(file, binding), track);
+            track.Set("binding", binding is { } b ? Format(b) : null);
+        }
+        var eventId = file.NextId(CutsceneBlockKind.Trigger);
+        var range = CutsceneBlock.Of(CutsceneBlockKind.Range, $"{CutsceneKeying.IndentUnder(track)}range {Format(eventId)} {Format(start)} {Format(end)} {name}");
+        file.Insert(track, track.Children.Count, range);
+        CutsceneFile.SortChildren(track);
+        return CutsceneFile.PathOf(range);
+    }
+
+    /// <summary>
+    /// Adds a gain key to an audio section at a time on the cutscene's (see docs/cinematics/tracks.md#audio-tracks): the
+    /// section's <c>gain</c> channel, which it adds when there is none, gets a key there, at the gain that the channel has
+    /// there or 1, which the curve editor then moves. Returns the channel's path, or null for a section that is not an
+    /// audio track's, a time outside it, or a locked track.
+    /// </summary>
+    public static string? AddGainKey(CutsceneFile file, string sectionPath, int tick, IReadOnlySet<int>? locked = null)
+    {
+        if (file.Find(sectionPath) is not { Kind: CutsceneBlockKind.Section, Start: { } start, End: { } end } section
+            || TrackOf(section)?.TrackKind != "audio" || IsLocked(section, locked) || tick < start || tick > end)
+        {
+            return null;
+        }
+        if (section.Children.FirstOrDefault(c => c.Kind == CutsceneBlockKind.Channel && c.Name == "gain") is not { } channel)
+        {
+            AddConstantChannel(file, section, "gain", "1");
+            channel = section.Children.First(c => c.Kind == CutsceneBlockKind.Channel && c.Name == "gain");
+        }
+        var path = CutsceneFile.PathOf(channel);
+        // A key that is there already stays as it is.
+        CutsceneCurveEdits.AddKey(file, path, tick - start, locked: locked);
+        return path;
+    }
+
     // The end of the cutscene's range, from its range = [start, end], or null.
     static int? RangeEnd(CutsceneFile file) =>
         file.Root.Get("range")?.Trim().TrimStart('[').TrimEnd(']').Split(',') is [_, var end] && CutsceneFile.TryParseTicks(end.Trim(), out var ticks) ? ticks : null;

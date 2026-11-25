@@ -1442,8 +1442,7 @@ add_reflection_probe_passes :: proc(f: ^Frame) {
 	on_executed(g, proc(data: rawptr) {
 			f := (^Frame)(data)
 			pf := f.reflection_probes
-			platform := f.renderer.platform
-			now := platform.time_seconds != nil ? platform.time_seconds() : 0
+			now := clock_seconds(f.renderer)
 			advance_reflection_probe_capture(
 				&f.renderer.reflection_probes,
 				pf.face_count,

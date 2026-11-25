@@ -10,6 +10,11 @@
 //   editorctl [--automation <file>] [--json] timing [--samples <n>] [--skip <n>] [--pass <name>]...
 //   editorctl [--automation <file>] [--json] ui [--window <panel>] [--out <path>]
 //   editorctl [--automation <file>] [--json] content [--set <name>=<value>]...
+//   editorctl [--automation <file>] [--json] render-out <cutscene> <folder> [whole|inout|shot:<name>|<from>-<to>] [<w>x<h>]
+//             [--rate <fps>] [--format png|exr] [--pattern <names>] [--warmup <frames>] [--camera <binding>] [--no-audio] [--video]
+//
+// render-out waits until the run ends, however long it takes, and prints its files (see
+// docs/editor/cutscene-editor.md#render-out).
 package editorctl
 
 import "base:runtime"
@@ -56,6 +61,15 @@ Options :: struct {
 	samples:    Maybe(int),
 	skip:       Maybe(int),
 	passes:     [dynamic]string,
+	// render-out's cutscene, folder, range and size, and its options.
+	positional: [dynamic]string,
+	rate:       Maybe(int),
+	format:     string,
+	pattern:    string,
+	warmup:     Maybe(int),
+	camera:     Maybe(int),
+	no_audio:   bool,
+	video:      bool,
 }
 
 // Request matches AutomationRequest in Cinnabar.Editor.Model.
@@ -73,6 +87,26 @@ Request :: struct {
 	samples:  Maybe(int) `json:"samples"`,
 	skip:     Maybe(int) `json:"skip"`,
 	passes:   []string `json:"passes"`,
+	cutscene: string `json:"cutscene"`,
+	range:    string `json:"range"`,
+	size:     string `json:"size"`,
+	rate:     Maybe(int) `json:"rate"`,
+	format:   string `json:"format"`,
+	pattern:  string `json:"pattern"`,
+	warmup:   Maybe(int) `json:"warmup"`,
+	camera:   Maybe(int) `json:"camera"`,
+	audio:    Maybe(bool) `json:"audio"`,
+	video:    Maybe(bool) `json:"video"`,
+}
+
+// Render_Out matches AutomationRenderOut.
+Render_Out :: struct {
+	outcome: string `json:"outcome"`,
+	reason:  string `json:"reason"`,
+	frames:  int `json:"frames"`,
+	folder:  string `json:"folder"`,
+	audio:   string `json:"audio"`,
+	video:   string `json:"video"`,
 }
 
 // Viewport_Size matches AutomationViewportSize.
@@ -126,13 +160,14 @@ Content :: struct {
 
 // Response matches AutomationResponse.
 Response :: struct {
-	id:      i64 `json:"id"`,
-	ok:      bool `json:"ok"`,
-	files:   []string `json:"files"`,
-	error:   string `json:"error"`,
-	status:  Maybe(Status) `json:"status"`,
-	content: Maybe(Content) `json:"content"`,
-	timing:  Maybe(Timing) `json:"timing"`,
+	id:         i64 `json:"id"`,
+	ok:         bool `json:"ok"`,
+	files:      []string `json:"files"`,
+	error:      string `json:"error"`,
+	status:     Maybe(Status) `json:"status"`,
+	content:    Maybe(Content) `json:"content"`,
+	timing:     Maybe(Timing) `json:"timing"`,
+	render_out: Maybe(Render_Out) `json:"renderOut"`,
 }
 
 // Info matches AutomationInfo.
@@ -147,7 +182,7 @@ main :: proc() {
 	if problem != "" {
 		fmt.eprintfln("editorctl: %s", problem)
 		fmt.eprintln(
-			"usage: editorctl [--automation <file>] [--json] status | screenshot [--view <name>]... [--viewport <number>] [--out <path>] | gif [--viewport <number>] [--out <path>] | viewport [--viewport <number>] --set <name>=<value>... | camera [--viewport <number>] --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>] | timing [--samples <n>] [--skip <n>] [--pass <name>]... | ui [--window <panel>] [--out <path>] | content [--set <name>=<value>]...",
+			"usage: editorctl [--automation <file>] [--json] status | screenshot [--view <name>]... [--viewport <number>] [--out <path>] | gif [--viewport <number>] [--out <path>] | viewport [--viewport <number>] --set <name>=<value>... | camera [--viewport <number>] --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>] | timing [--samples <n>] [--skip <n>] [--pass <name>]... | ui [--window <panel>] [--out <path>] | content [--set <name>=<value>]... | render-out <cutscene> <folder> [range] [<w>x<h>] [--rate <fps>] [--format png|exr] [--pattern <names>] [--warmup <frames>] [--camera <binding>] [--no-audio] [--video]",
 		)
 		os.exit(2)
 	}
@@ -248,6 +283,30 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 				o.skip = v
 			}
 			i += 1
+		case (arg == "--rate" || arg == "--warmup" || arg == "--camera") && i + 1 < len(args):
+			v, ok := strconv.parse_int(args[i + 1])
+			if !ok || v < 0 {
+				return o, fmt.tprintf("%s takes a whole number, not %s", arg, args[i + 1])
+			}
+			switch arg {
+			case "--rate":
+				o.rate = v
+			case "--warmup":
+				o.warmup = v
+			case:
+				o.camera = v
+			}
+			i += 1
+		case arg == "--format" && i + 1 < len(args):
+			o.format = args[i + 1]
+			i += 1
+		case arg == "--pattern" && i + 1 < len(args):
+			o.pattern = args[i + 1]
+			i += 1
+		case arg == "--no-audio":
+			o.no_audio = true
+		case arg == "--video":
+			o.video = true
 		case arg == "--pass" && i + 1 < len(args):
 			append(&o.passes, args[i + 1])
 			i += 1
@@ -287,19 +346,45 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 			return o, fmt.tprintf("unknown or incomplete option %s", arg)
 		case o.command == "":
 			o.command = arg
+		case o.command == "render-out" && len(o.positional) < 4:
+			append(&o.positional, arg)
 		case:
 			return o, fmt.tprintf("unexpected argument %s", arg)
 		}
 	}
 	switch o.command {
-	case "status", "screenshot", "gif", "viewport", "camera", "timing", "ui", "content":
+	case "status",
+	     "screenshot",
+	     "gif",
+	     "viewport",
+	     "camera",
+	     "timing",
+	     "ui",
+	     "content",
+	     "render-out":
 	case "":
-		return o, "no command: status, screenshot, gif, viewport, camera, timing, ui or content"
+		return o,
+			"no command: status, screenshot, gif, viewport, camera, timing, ui, content or render-out"
 	case:
 		return o, fmt.tprintf(
-			"unknown command %s: status, screenshot, gif, viewport, camera, timing, ui or content",
+			"unknown command %s: status, screenshot, gif, viewport, camera, timing, ui, content or render-out",
 			o.command,
 		)
+	}
+	render_options :=
+		o.rate != nil ||
+		o.warmup != nil ||
+		o.camera != nil ||
+		o.format != "" ||
+		o.pattern != "" ||
+		o.no_audio ||
+		o.video
+	if o.command == "render-out" && len(o.positional) < 2 {
+		return o, "render-out takes a cutscene and a folder"
+	}
+	if render_options && o.command != "render-out" {
+		return o,
+			"--rate, --format, --pattern, --warmup, --camera, --no-audio and --video go with render-out"
 	}
 	if o.command != "content" && (len(o.settings) > 0) != (o.command == "viewport") {
 		return o,
@@ -401,6 +486,9 @@ process_alive :: proc(pid: u32) -> bool {
 // not this one.
 request_line :: proc(o: Options, id: i64, allocator: runtime.Allocator) -> []byte {
 	path := o.out
+	if o.command == "render-out" && len(o.positional) >= 2 {
+		path = o.positional[1]
+	}
 	if path != "" {
 		if absolute, err := os.get_absolute_path(path, context.temp_allocator); err == nil {
 			path = absolute
@@ -420,6 +508,22 @@ request_line :: proc(o: Options, id: i64, allocator: runtime.Allocator) -> []byt
 		samples  = o.samples,
 		skip     = o.skip,
 		passes   = o.passes[:],
+		rate     = o.rate,
+		format   = o.format,
+		pattern  = o.pattern,
+		warmup   = o.warmup,
+		camera   = o.camera,
+	}
+	if o.command == "render-out" {
+		request.cutscene = o.positional[0]
+		if len(o.positional) > 2 {
+			request.range = o.positional[2]
+		}
+		if len(o.positional) > 3 {
+			request.size = o.positional[3]
+		}
+		request.audio = !o.no_audio
+		request.video = o.video
 	}
 	data, _ := json.marshal(request, allocator = context.temp_allocator)
 	line := make([]byte, len(data) + 1, allocator)
@@ -529,6 +633,24 @@ print_response :: proc(r: Response) {
 		for name in timing.missing {
 			fmt.printfln("missing: %s", name)
 		}
+	}
+	if render, has := r.render_out.?; has {
+		fmt.printfln(
+			"render out: %s, %d frames to %s",
+			render.outcome,
+			render.frames,
+			render.folder,
+		)
+		if render.reason != "" {
+			fmt.printfln("reason: %s", render.reason)
+		}
+		if render.audio != "" {
+			fmt.printfln("sound: %s", render.audio)
+		}
+		if render.video != "" {
+			fmt.printfln("video: %s", render.video)
+		}
+		return
 	}
 	for file in r.files {
 		fmt.println(file)

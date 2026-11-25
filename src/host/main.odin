@@ -133,6 +133,7 @@ main :: proc() {
 	capture: Capture
 	capture_start(&capture, &editor)
 	defer capture_stop(&capture)
+	core.platform_api().render_out = render_out_procs(&capture)
 
 	if load_dir == "" {
 		load_dir = filepath.dir(source_path)
@@ -192,6 +193,10 @@ main :: proc() {
 					audio_after.starved - audio_before.starved,
 				)
 				editor.layout_hash = game.api.layout_hash()
+				// A soft restart makes a new game, which no longer has the render out that it was writing.
+				if kind == .Soft_Restart {
+					render_out_abort(&capture, "the game restarted")
+				}
 				link_send(&editor, link.Game_Reloaded{kind = kind})
 			case .Refused:
 				// The refused copy stays loaded and locked, so the next build needs the next version's file name.

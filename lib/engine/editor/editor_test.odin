@@ -593,7 +593,7 @@ another_connection_has_a_session_of_its_own :: proc(t: ^testing.T) {
 	testing.expect(t, s.previews[1].open)
 	testing.expect(t, s.view.viewports[0].camera != nil)
 	testing.expect_value(t, len(s.view.picks), 1)
-	testing.expect_value(t, s.steps, 1)
+	testing.expect_value(t, s.mode.(Mode_Paused).steps, 1)
 
 	step(f, 2)
 
@@ -608,8 +608,8 @@ another_connection_has_a_session_of_its_own :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(s.view.picks), 0)
 	testing.expect(t, !s.previews[1].open)
 	testing.expect_value(t, s.next_preview, 0)
-	testing.expect_value(t, s.mode, link.Editor_Mode.Edit)
-	testing.expect_value(t, s.steps, 0)
+	_, editing := s.mode.(Mode_Edit)
+	testing.expect(t, editing)
 }
 
 @(test)

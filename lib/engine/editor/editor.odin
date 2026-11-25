@@ -90,9 +90,7 @@ Session :: struct {
 	// The editor's viewports, each with its camera and gizmo, its selection and its picks (see viewport.odin).
 	view:              View,
 	// The mode that the editor set (see modes.odin).
-	mode:              link.Editor_Mode,
-	// Step_Frame messages that wait for a paused frame.
-	steps:             int,
+	mode:              Session_Mode,
 	last_scan:         f64,
 	last_values:       f64,
 	last_stats:        f64,
@@ -329,6 +327,8 @@ poll :: proc(
 		if end_overrides(e, w, nil) {
 			despawned = true
 		}
+		// A render out of an editor that went stops, and its files stay as they are.
+		end_render_out(e, w)
 		end_session(e)
 		begin_session(e, connection)
 		// A new editor is in Edit, so its first scene replaces the world without the old behaviours' callbacks.
@@ -365,6 +365,7 @@ poll :: proc(
 		case link.Unwatch_Entity:
 			unwatch(e, ecs.Entity(v.entity))
 		case link.Load_Scene:
+			fail_render_out(e, w, "the editor replaced the world")
 			end_overrides(e, w, link.Override_End_Reason.Scene_Loaded)
 			problems := make([dynamic]link.Edit_Problem, frame)
 			load_scenes(e, w, scripts, v, &problems)
@@ -375,7 +376,7 @@ poll :: proc(
 				script.settle(scripts)
 			}
 			e.session.mirror = nil
-			if e.session.mode == .Edit {
+			if mode_of(e.session.mode) == .Edit {
 				e.session.mirror = Mirror {
 					scene = v.ticket,
 				}
@@ -431,26 +432,8 @@ poll :: proc(
 				link.write_message(out, edit_problems(problems[:], false))
 			}
 		case link.Set_Mode:
-			started := e.session.mode == .Edit && v.mode == .Play
-			// Play and Pause start from the document's world, and Edit waits for the editor's scene, which ends them too.
-			if end_overrides(e, w, link.Override_End_Reason.Mode) {
+			if change_mode(e, w, scripts, v.mode) {
 				despawned = true
-				forget_dead(w, &e.session.view.selection)
-				forget_dead(w, &e.session.view.hidden)
-			}
-			e.session.mode = v.mode
-			if v.mode != .Paused {
-				e.session.steps = 0
-			}
-			// The world runs, or stops as it is, and the editor sends its scene again before Edit edits it. The edits that
-			// follow in this poll run no script code outside Play, but the edit-mode behaviours' in Edit.
-			e.session.mirror = nil
-			if scripts != nil {
-				script.set_callbacks(scripts, callbacks_between_frames(e))
-				// Each Play from Edit draws the same numbers (see docs/scripting/api.md#random).
-				if started {
-					script.restart_random(scripts)
-				}
 			}
 		case link.Run_Game_Command:
 			run_command(e, w, scripts, user, v.id, out, frame)
@@ -470,9 +453,17 @@ poll :: proc(
 			link.write_message(out, answer)
 		case link.Behaviour_Operations_Answer:
 			answer_behaviour_operations(e, v)
+		case link.Render_Out_Begin:
+			if begin_render_out(e, w, scripts, v, out) {
+				despawned = true
+				forget_dead(w, &e.session.view.selection)
+				forget_dead(w, &e.session.view.hidden)
+			}
+		case link.Render_Out_Cancel:
+			cancel_render_out(e, w, v.ticket)
 		case link.Step_Frame:
-			if e.session.mode == .Paused {
-				e.session.steps += 1
+			if paused, is_paused := &e.session.mode.(Mode_Paused); is_paused {
+				paused.steps += 1
 			}
 		case link.Begin_Override:
 			begin_override(e, v.override)
@@ -552,6 +543,9 @@ poll :: proc(
 		stats_interval := now - s.last_stats
 		s.last_stats = now
 		stats := game_stats(w, scripts, frame)
+		if e.views != nil {
+			stats.camera_entries = u32(camera.held_count(e.views))
+		}
 		if e.streaming != nil {
 			work := streaming.stats(e.streaming)
 			stats.scenes_loading = u32(work.scenes_loading)

@@ -38,6 +38,7 @@ The blob's `clock` says which time the cutscene follows:
 - **The game's clock moves by whole world ticks.** A frame that runs no tick does not move it, so it can be up to one world tick behind the frames.
 - **The end.** The time stops at the range's end. The player then finishes ([Player: The frame](player.md#the-frame)).
 - **Seeks.** `seek` sets the time, inside the range, for a debugger, a scrub or the editor. It marks each phase as sought to the new time, so no event that it jumps over fires, except the keys that an event track marks to fire on seek ([Events](#events)). It also counts the jump in `Evaluation.jumps`, as `skip_to` does: an empty event range alone does not tell a seek from a pause, and a seek cuts the camera.
+- **A driven player** follows neither clock. A player loaded with `driven` set has a `Player_Driven` clock, which only `drive(state, world, handle, t)` moves, as a render out does (see [Cutscene editor: Render out](../editor/cutscene-editor.md#render-out)). `drive` sets the time that the next `advance_real` takes the player to. It refuses a time before the player's, a player that is not driven, and a player that is not `Playing`. Events fire over `(last, t]` as a play's do, and nothing jumps: a camera cut track does not cut.
 - **The editor's Edit mode** runs no ticks and no frame code for the world, so no player advances a cutscene there. The cutscene editor's preview evaluates one itself with `seek` and `evaluate`, and moves it by the frame's real time while it plays. Its writes lay over the document as the editor's overrides do. `lift` puts them back and forgets them, and keeps the drives, the camera cut's claim and the voices (see [Cutscene editor: Preview](../editor/cutscene-editor.md#preview)).
 
 ## The order in the frame
@@ -172,7 +173,7 @@ The editor also lays its own values over a paused preview's evaluation, outside 
 | `seek(state, e, world, data, blob, t)` | Sets the time, so no event between fires, except the event tracks' keys marked to fire on seek when it goes forward |
 | `skip_to(state, e, world, data, blob, target)` | Moves the time to a later target and evaluates each phase there as a skip |
 | `evaluate(state, e, world, data, blob, phase)` | Evaluates one phase's tracks at the time, and follows a reload |
-| `advance_real(state, world, dt)` | Advances the real-clock cutscenes and evaluates their `Fixed` tracks |
+| `advance_real(state, world, dt)` | Advances the real-clock cutscenes, takes the driven ones to their targets, and evaluates their `Fixed` tracks |
 | `restore(state, e, world, data, blob)`, `restore_all(state, e, world)` | Put back the fields of `restore` tracks, or every field when the blob is gone, empty the snapshot, give back the driven `Animator`s, and release the camera cut track's claim |
 | `section_at(blob, section, t)`, `ease(x)` | A section's local time and weight at a time in a blob alone, and the ease's shape |
 | `sample_section(ctx, section, t)` | A section's local time and weight at a time on its track's cutscene's time, through the sub-sequence sections above it |

@@ -271,7 +271,8 @@ is_host_message :: proc(kind: u16) -> bool {
 	     link.kind_of(link.Host_Stats),
 	     link.kind_of(link.Profile_Summary),
 	     link.kind_of(link.Profile_Capture),
-	     link.kind_of(link.Capture_Result):
+	     link.kind_of(link.Capture_Result),
+	     link.kind_of(link.Render_Out_Written):
 		// Only the host sends these, so handle_message reports them.
 		return true
 	}
@@ -364,7 +365,8 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 	     link.Host_Stats,
 	     link.Profile_Summary,
 	     link.Profile_Capture,
-	     link.Capture_Result:
+	     link.Capture_Result,
+	     link.Render_Out_Written:
 		log.warnf(
 			"host: editor link: the editor sent a message that only the host sends: %v",
 			message,
@@ -447,7 +449,12 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 	     link.Viewport_Look,
 	     link.Viewport_Look_Shown,
 	     link.Cutscene_Preview_Shown,
-	     link.Cutscene_Preview_Fired:
+	     link.Cutscene_Preview_Fired,
+	     link.Render_Out_Begin,
+	     link.Render_Out_Cancel,
+	     link.Render_Out_Progress,
+	     link.Render_Out_Frame,
+	     link.Render_Out_Ended:
 	// is_host_message sends these to the game.
 	}
 }

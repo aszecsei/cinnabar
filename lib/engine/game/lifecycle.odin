@@ -147,9 +147,13 @@ register_world :: proc(g: ^Game, h: Hooks) {
 }
 
 @(private)
-game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: bool) {
+game_update :: proc(g: ^Game, host_dt: time.Duration, h: Hooks) -> (keep_running: bool) {
 	defer end_frame(g)
 	g.frame_count += 1
+	// A render out steps the frame by its own time, a frame of the cutscene at a time, and takes no input (see
+	// docs/editor/cutscene-editor.md#render-out).
+	dt := editor.render_frame_time(&g.editor, &g.world, host_dt)
+	rendering_out := editor.rendering(&g.editor) != nil
 
 	update_project(g, h)
 	if h.begin_frame != nil {
@@ -167,6 +171,9 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	// A hold of the skip action skips before the players move on, so its skip fades from this frame (see
 	// docs/cinematics/skipping.md#input).
 	frame_input := g.platform.input()
+	if rendering_out {
+		frame_input = {}
+	}
 	cutscene.update_skip(&g.cutscenes, &g.world, &frame_input, dt)
 	// The players load, resolve their bindings and give the world back here, outside the systems and the script phase,
 	// once the frame's scenes are in place (see docs/cinematics/player.md#the-frame).
@@ -275,7 +282,7 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	shown := camera.advance(&g.views, &g.world, {g.frame_step, f32(time.duration_seconds(dt))})
 	send_camera_events(g)
 	// A minimized window has no size, and nothing is rendered.
-	size := g.platform.window_size()
+	size := editor.frame_size(&g.editor, g.platform.window_size())
 	if size.x <= 0 || size.y <= 0 {
 		return g.run != .Quitting
 	}
@@ -473,6 +480,8 @@ game_shutdown :: proc(g: ^Game, h: Hooks) {
 	// The editor's overrides and cutscene preview, and then the players, give the world back, and their assets, while
 	// the world, the scripts and the assets are alive.
 	editor.end_overrides(&g.editor, &g.world, nil)
+	// A render out gives back its player, its target and its views while the renderer and the players are alive.
+	editor.end_render_out(&g.editor, &g.world)
 	cutscene.destroy(&g.cutscenes, &g.world)
 	editor.destroy(&g.editor)
 	script.destroy(&g.scripts)
