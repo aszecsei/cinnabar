@@ -8,7 +8,10 @@ namespace Cinnabar.Editor.Tests;
 public sealed partial class HostLinkTests
 {
     // The first run streams and compiles from cold, and the second finds everything resident, so they wait for
-    // different numbers of draws; the frames are the same to the bit.
+    // different numbers of draws, past the intro's fade from black, so the frames show the scene. The frames are the
+    // same but for the GPU's own order: the split cascades' probes take their slots in the order that the GPU's
+    // threads reach them, so a few pixels of their light differ from run to run by a few levels (see
+    // docs/editor/cutscene-editor.md#render-out).
     [Fact]
     public async Task TenFramesRenderTheSameTwice()
     {
@@ -17,31 +20,60 @@ public sealed partial class HostLinkTests
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<Welcome>();
         var scene = AnimationSceneFile();
-        var root = Path.Combine(Environment.GetEnvironmentVariable("CINNABAR_KEEP_RENDERS") ?? Path.GetTempPath(), $"cinnabar-render-{Guid.NewGuid():N}");
+        var root = Path.Combine(Path.GetTempPath(), $"cinnabar-render-{Guid.NewGuid():N}");
         try
         {
-            var cold = await RenderOut(editor, scene, 1, Path.Combine(root, "cold"), frames: 10);
-            var warm = await RenderOut(editor, scene, 2, Path.Combine(root, "warm"), frames: 10);
+            var cold = await RenderOut(editor, scene, 1, Path.Combine(root, "cold"), frames: 10, rangeStart: 120000);
+            var warm = await RenderOut(editor, scene, 2, Path.Combine(root, "warm"), frames: 10, rangeStart: 120000);
             Assert.Equal(10, cold.Written.Count);
             Assert.Equal(10, warm.Written.Count);
             for (var i = 0; i < 10; i++)
             {
-                var a = File.ReadAllBytes(cold.Written[i].Path);
-                var b = File.ReadAllBytes(warm.Written[i].Path);
-                Assert.True(a.AsSpan().SequenceEqual(b), $"frame {i} differs between the runs");
+                var (count, most) = Difference(cold.Written[i].Path, warm.Written[i].Path);
+                Assert.True(count <= 320 * 180 / 50 && most <= 16, $"frame {i}: {count} pixels differ, by up to {most}");
             }
-            // The frames are at the rate's exact ticks, and the first waited for what it shows.
-            Assert.Equal(Enumerable.Range(0, 10).Select(n => n * 2000), cold.Frames.Select(f => f.Tick));
-            Assert.True(cold.Frames[0].SettleDraws >= 3);
+            // The frames are at the rate's exact ticks, and each waited for what it shows.
+            Assert.Equal(Enumerable.Range(0, 10).Select(n => 120000 + n * 2000), cold.Frames.Select(f => f.Tick));
+            Assert.All(cold.Frames, f => Assert.True(f.SettleDraws >= 3));
             Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
         }
         finally
         {
-            if (Directory.Exists(root) && Environment.GetEnvironmentVariable("CINNABAR_KEEP_RENDERS") == null)
+            if (Directory.Exists(root))
             {
                 Directory.Delete(root, true);
             }
         }
+    }
+
+    // How many pixels of two frames differ, and by how much at most, in any channel.
+    static (int Count, int Most) Difference(string a, string b)
+    {
+        var x = Pixels(a);
+        var y = Pixels(b);
+        Assert.Equal(x.Length, y.Length);
+        var count = 0;
+        var most = 0;
+        for (var k = 0; k < x.Length; k += 4)
+        {
+            var d = 0;
+            for (var c = 0; c < 3; c++)
+            {
+                d = Math.Max(d, Math.Abs(x[k + c] - y[k + c]));
+            }
+            if (d > 0)
+            {
+                count++;
+                most = Math.Max(most, d);
+            }
+        }
+        return (count, most);
+    }
+
+    static byte[] Pixels(string path)
+    {
+        using var bitmap = SkiaSharp.SKBitmap.Decode(path);
+        return bitmap.Bytes;
     }
 
     // A render out's run: its frames as the game drew them, the files as the host wrote them, and its end.

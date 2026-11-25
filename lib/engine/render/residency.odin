@@ -173,6 +173,9 @@ Residency :: struct {
 	texture_pool:  Texture_Pool,
 	// When assets that nothing uses go, and how their textures' mips follow their size on the screen.
 	policy:        Residency_Policy,
+	// Textures take the mip that they want at once, coarser as well as finer, so that what a frame draws does not
+	// depend on what drew before it, as a render out needs (see residency_set_exact_mips).
+	exact_mips:    bool,
 	// What is resident, and what the policy did. Only set_bytes writes stats.resident_bytes.
 	stats:         Residency_Stats,
 	// The textures whose finer mips came in this frame, which change the shadows of masked materials (see
@@ -494,6 +497,12 @@ residency_set_quality :: proc(r: ^Residency, q: Quality) {
 	)
 }
 
+// residency_set_exact_mips sets whether a texture that wants a coarser mip streams it at once, rather than after
+// MIP_DROP_FRAMES. A render out sets it while it runs, so two runs draw the same mips whatever was drawn before them.
+residency_set_exact_mips :: proc(r: ^Residency, exact: bool) {
+	r.exact_mips = exact
+}
+
 // residency_set_policy sets when the residency unloads what nothing uses, and how coarse its textures' mips may be.
 residency_set_policy :: proc(r: ^Residency, policy: Residency_Policy) {
 	r.policy = policy
@@ -717,8 +726,9 @@ resident_streaming :: proc(r: ^Residency) -> (count: int) {
 }
 
 // residency_unsettled is how many of the entries that the last frames asked for would draw differently in a later frame:
-// those that are not ready or still stream, and the textures whose top mip is coarser than the one that they want. A
-// render out waits until it is 0 (see docs/editor/cutscene-editor.md#render-out), so no frame shows a lower mip.
+// those that are not ready or still stream, and the textures whose top mip is not the one that they want. A
+// render out waits until it is 0 (see docs/editor/cutscene-editor.md#render-out), so no frame shows a lower mip, nor,
+// with exact mips, a finer one that an earlier frame left.
 residency_unsettled :: proc(r: ^Residency) -> (count: int) {
 	for &e in r.entries[:r.count] {
 		// A failed entry draws its default in every frame until its retry, so it does not hold the frame back.
@@ -730,7 +740,7 @@ residency_unsettled :: proc(r: ^Residency) -> (count: int) {
 			continue
 		}
 		if res, is_texture := &e.current.(Texture_Resources); is_texture && res.texture.virtual == 0 {
-			if res.texture.top_mip > wanted_mip(r, &e, res.texture.size, res.texture.mip_count) {
+			if res.texture.top_mip != wanted_mip(r, &e, res.texture.size, res.texture.mip_count) {
 				count += 1
 			}
 		}
@@ -1296,7 +1306,7 @@ retarget_mips :: proc(r: ^Residency, e: ^Resident_Entry) -> bool {
 			since = r.frame
 			e.coarser_since = since
 		}
-		if r.frame - since < MIP_DROP_FRAMES {
+		if r.frame - since < MIP_DROP_FRAMES && !r.exact_mips {
 			return false
 		}
 	}

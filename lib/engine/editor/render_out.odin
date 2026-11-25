@@ -445,6 +445,7 @@ end_render_run :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run) {
 			}
 		}
 		render.set_render_clock(e.renderer, nil)
+		render.residency_set_exact_mips(&e.renderer.residency, false)
 	}
 	run.view, run.probe = nil, nil
 	if run.target != {} {
@@ -529,6 +530,7 @@ prepare_render :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run, s: Render_Pr
 	run.probe = new(render.View_State, heap)
 	render.view_state_init(run.view, e.renderer)
 	render.view_state_init(run.probe, e.renderer)
+	render.residency_set_exact_mips(&e.renderer.residency, true)
 	ecs.align_clock(w)
 	cutscene.start(e.cutscenes, w, run.player)
 	// One step of no time, so the world and the cutscene's tracks are at the first frame before anything draws.
