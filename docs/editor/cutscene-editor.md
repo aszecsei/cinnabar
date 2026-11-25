@@ -1056,7 +1056,7 @@ The command blocks until the run ends, with no time limit, and the automation se
 
 - **It renders the saved cutscene.** A tab with unsaved changes is refused, with "save the cutscene first: a render out renders the saved cutscene".
 - **It starts in Edit,** with a game linked and a scene open, and runs one at a time.
-- **EXR is not built.** The renderer has no HDR target.
+- **EXR is not built.** The renderer has no HDR target ([#655](https://github.com/aszecsei/cinnabar/issues/655)).
 - **The frames are near-identical,** not identical (see [Determinism](#determinism)).
 - **The device is silent** during a run, because the sound goes to the file.
 - **The rate is 15 or more,** because a lower rate makes a frame of more ticks than one game frame runs.
