@@ -34,6 +34,14 @@ public class AssetIndexTests
         Assert.Equal("01", index.FindByPath("E:\\game\\content\\scripts\\door.luau")?.Guid);
     }
 
+    [Fact]
+    public void AnAssetsLengthIsInTicksAndNoneBeforeItCooks()
+    {
+        Assert.Equal(90000, AssetIndex.LengthOf(TestAssets.Make("01", AssetKind.Audio, "audio/line.wav", length: 90000)));
+        Assert.Null(AssetIndex.LengthOf(TestAssets.Make("02", AssetKind.Audio, "audio/line.wav")));
+        Assert.Equal(int.MaxValue, AssetIndex.LengthOf(TestAssets.Make("03", AssetKind.Audio, "audio/long.wav", length: ulong.MaxValue)));
+    }
+
     static Asset Model(string guid, string path) =>
         TestAssets.Make(guid, AssetKind.Model, path);
 

@@ -98,6 +98,7 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 			params       = clone_params(a.params, allocator),
 			permutations = u32(a.permutations),
 			size         = a.size,
+			length       = a.length,
 		}
 		if a.tool_texture != {} {
 			buffer: [32]u8
@@ -138,6 +139,7 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 				status    = entry.status,
 				parent    = entry.guid,
 				subasset  = clone(s.name, allocator),
+				length    = s.length,
 				generated = clone(generated[s.guid] or_else "", allocator),
 			}
 			index.assets[sub.guid] = sub
@@ -380,6 +382,7 @@ asset_equal :: proc(a, b: cook_link.Asset) -> bool {
 	   a.subasset != b.subasset ||
 	   a.permutations != b.permutations ||
 	   a.size != b.size ||
+	   a.length != b.length ||
 	   a.tool_texture != b.tool_texture {
 		return false
 	}

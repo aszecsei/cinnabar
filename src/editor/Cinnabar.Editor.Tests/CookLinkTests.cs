@@ -452,6 +452,9 @@ public sealed class CookLinkTests : IDisposable
         // The index reads them after the model's parse has been freed.
         Assert.Equal(["Run", "Survey", "Walk"], index.Assets.Values.Where(a => a.Kind == AssetKind.Animation).Select(a => a.Subasset).Order(StringComparer.Ordinal));
         Assert.Contains(index.Assets.Values, a => a.Kind == AssetKind.Mesh && a.Subasset == "fox1");
+        // Each clip has its length in ticks from its blob, and a mesh has none.
+        Assert.All(index.Assets.Values.Where(a => a.Kind == AssetKind.Animation), a => Assert.True(AssetIndex.LengthOf(a) > 0, a.Subasset));
+        Assert.All(index.Assets.Values.Where(a => a.Kind == AssetKind.Mesh), a => Assert.Null(AssetIndex.LengthOf(a)));
     }
 
     [Fact]

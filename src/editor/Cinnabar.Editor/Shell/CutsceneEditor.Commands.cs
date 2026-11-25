@@ -95,6 +95,9 @@ public sealed partial class CutsceneEditor
         EditorCommands.CutscenePaste => new(() => Paste(), () => CanPaste),
         EditorCommands.CutsceneFind => new(RequestFind),
         EditorCommands.CutsceneKeysUnderSelection => new(() => SetKeysUnderSelection(!KeysUnderSelection)),
+        EditorCommands.CutsceneRevealClip => new(RevealClip, () => SelectedClip != null),
+        EditorCommands.CutsceneOpenClip => new(OpenClip, () => SelectedClip != null),
+        EditorCommands.CutsceneMatchClipLength => new(MatchClipLength, () => CanMatchClipLength),
         _ => null,
     };
 

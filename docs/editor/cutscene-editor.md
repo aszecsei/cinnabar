@@ -2,9 +2,9 @@
 
 The cutscene editor edits a cutscene (see [Content: Cutscenes](../content/kinds/cutscenes.md)), which the game plays as [Cinematics](../cinematics/README.md) describes. Each open one is a tab, a `GraphEditorDocument` with the ID `cutscene.{guid}`, over a `CutsceneEditor` in the shell, which holds its state. Docking can rebuild the view, and tests drive the editor without a window.
 
-The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, the bindings, and the cameras with their lenses and focus. The clips' display comes next ([#556](https://github.com/aszecsei/cinnabar/issues/556)).
+The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, the bindings, the cameras with their lenses and focus, and the first part of the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)): names, loops, eases, drops and the section menu. Waveforms, a clip's events and thumbnails come next.
 
-**In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Preview](#preview) · [Keying](#keying) · [Bindings](#bindings) · [Curves](#curves) · [Cameras](#cameras)
+**In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Sections](#sections) · [Preview](#preview) · [Keying](#keying) · [Bindings](#bindings) · [Curves](#curves) · [Cameras](#cameras)
 
 ## The file
 
@@ -228,16 +228,63 @@ Each action is a command, so it is in the command palette, and `keybindings.json
 | Weighted Tangents | `cutscene.tangentWeighted` | 7 (`D7`) |
 | Next Pre-Infinity, Next Post-Infinity | `cutscene.preInfinity`, `cutscene.postInfinity` | 8, 9 (`D8`, `D9`) |
 | Value Snap | `cutscene.curveValueSnap` | Alt+V |
+| Reveal in Content Browser | `cutscene.revealClip` | None |
+| Open Clip | `cutscene.openClip` | None |
+| Match Clip Length | `cutscene.matchClipLength` | None |
 
 ### Cost
 
-A redraw reads only the draw list that `CutsceneTimelineLayout.Visible` gives: the rows in view, and the items in view in each row. It finds the keys with a binary search. Each bar's label is made when the rows are built. `CutsceneFile` keeps an index of its blocks by path, which a change of a keyword line or of the tree drops, so a lookup of a selected path does not search the file.
+A redraw reads only the draw list that `CutsceneTimelineLayout.Visible` gives: the rows in view, and the items in view in each row. It finds the keys with a binary search. Each bar's label, and its clip's name and length from the index, are found when the rows are built, not when they draw. A clip's loop marks are made only for the part in view. `CutsceneFile` keeps an index of its blocks by path, which a change of a keyword line or of the tree drops, so a lookup of a selected path does not search the file.
 
 A test with 50 tracks and 5,000 keys checks two times:
 - the draw list takes less than 4 ms;
 - a drag's step takes less than 50 ms. A step reads the text again, edits it, and builds the rows again, through a search filter that keeps every row.
 
 The test does not measure Avalonia's drawing.
+
+## Sections
+
+An animation or audio section shows what plays in it, so a designer can time to it without playing. `CutsceneTimelineLayout` finds what each bar shows when the rows are built, and its pure helpers, which tests call, place the marks: `Hints`, `ClipMarks`, `LabelRoom`, `Overlaps` and `Handles`.
+
+### Labels
+
+- **The name.** An animation section shows its clip's name in its model, and an audio section its sound's file name. A section whose clip is not in the index shows its ID, as other sections do.
+- **The visible part.** A label starts 4 pixels into the part of its bar in view, so a section that starts off screen still shows its name. It is clipped to that part, and a part narrower than 16 pixels shows no label.
+
+### Lengths
+
+The daemon's index has a sound's and an animation clip's length in ticks, from its cooked blob (see [Daemon and operations](../content/daemon-and-operations.md#cook-daemon)). `AssetIndex.LengthOf` gives it, or null when there is none: before the asset has cooked, and for a clip of one pose, whose length is 0. A clip with no length shows its name, but no loops and no hints.
+
+### Loops and hints
+
+The clip's time at a time t on the cutscene is `offset + (t - start) × speed`. An audio section's speed is 1.
+- **Loops.** A section with `loop = true` has a mark at each point where its clip starts again. Marks closer than 2 pixels draw as one band.
+- **The clip's end.** A section with no loop that is longer than what is left of its clip has a dashed line where the clip ends. The rest of the bar is darker: there, the pose holds, or the sound is silent.
+- **Hints.** A faint bar past each edge shows the part of the clip's pass that the section cuts off: before its start, back to the start of that pass, and after its end, on to the end of that pass. With no loop, the hint before the start is the part of the clip before its `offset`.
+- **Pitch.** A sound's `pitch` channel changes its rate over the section, so an audio section with one shows no loops and no hints. Match Clip Length does not act on it.
+
+### Eases and blends
+
+- **Ramps.** Each section but a camera cut draws its `ease_in` and `ease_out` as ramps of the runtime's smoothstep shape (see [Cinematics: Evaluation](../cinematics/evaluation.md#sections-and-blending)). An audio section's eases are its fade in and fade out.
+- **Handles.** A small square at the top of the bar marks each ease's end: the ease in's at its start and its ease in, the ease out's at its end less its ease out. In the top 9 pixels of a row, a handle is nearer than a key or an edge, so a key at the end of an ease does not take its handle. A bar narrower than 15 pixels has no handles.
+- **A drag of a handle** sets its ease, as one undo entry that snaps and that Esc cancels. Its tooltip shows the ease. The ease is clamped to 0 and to the section's duration less its other ease, as the cooker needs, and 0 removes the setting. A locked track's handles do not move.
+- **Blends.** Where two sections on a track overlap, the overlap is darker, and the earlier section's ease out and the later one's ease in, across it, are the blend's curve. Their handles are at the two ends of the overlap when both eases are 0. A drag of either one to the overlap's other end, which is a snap target, makes a crossfade whose weights sum to 1.
+- **Camera cuts** have no eases: their `blend_in` and `blend_out` blend with gameplay, and the details edit them.
+
+### Drops
+
+An animation clip or a sound dropped from the content browser adds a section at the drop's time, snapped as a drag is, with the clip's length. A clip that has not cooked yet has no length, so its section is a second long.
+- **An animation** goes on the animation track of the binding under the pointer, on the binding's row or on one of its tracks' rows. The drop adds the track, after the binding's tracks, when the binding has none. Elsewhere, an animation has no binding to play on, and the drop is refused.
+- **A sound** goes on the audio track under the pointer. On a binding's rows, it goes on that binding's audio track, which the drop adds when there is none, so the sound plays at the entity. Elsewhere, it goes on the first audio track of no binding, which the drop adds when there is none.
+- **Several clips** go one after another, from the drop's time. A model file is not a clip: it spawns its prefab, as before.
+- The drop is one undo entry, and it selects the new sections. A section goes among its track's sections in start order, and the length grows when the section ends past it. A locked track takes nothing.
+
+### The section menu
+
+A right click on an animation or audio section selects it, unless it is selected already, and opens its menu. Alt and a right drag still pans.
+- **Reveal in Content Browser** shows the section's clip or sound in the content browser. A clip shows in its model.
+- **Open Clip** shows it, and opens it as the content browser does. Animations and sounds have no editor or preview yet, so for now it only shows and selects them.
+- **Match Clip Length** trims the end of each selected animation or audio section that does not loop to where its clip ends: `(length - offset) / speed` after its start. It is one undo entry, and it keeps the trim's limits: the keys, the eases, a frame and the length.
 
 ## Preview
 

@@ -212,6 +212,113 @@ public sealed class CutsceneTimelineLayoutTests
         Assert.True(layout.Rows.First(r => r.Path == "track:7").AssetMuted);
         Assert.False(layout.Rows.First(r => r.Path == "track:5").AssetMuted);
     }
+
+    // The intro's fox walk clip, its bark and its line, as the index knows them, by GUID.
+    const string Walk = "dea303d3f0374a9e56b0bb58f4a85315";
+    const string BarkSound = "7ce894b4b95e68b918869459e5cd9c93";
+
+    static CutsceneClipInfo? Clips(string guid) => guid switch
+    {
+        Walk => new CutsceneClipInfo("Walk", 100000),
+        BarkSound => new CutsceneClipInfo("bark", null),
+        _ => null,
+    };
+
+    [Fact]
+    public void ALoopingClipHasAMarkAtEachLoopAndCloseMarksAreOneRun()
+    {
+        var clip = new CutsceneClipSpan(0, 1, true, 100000);
+        var marks = L.ClipMarks(0, 350000, clip, Thousand, 1000);
+        Assert.Equal([(100.0, 100.0), (200.0, 200.0), (300.0, 300.0)], marks.Loops);
+        // The pass that the section ends in goes on past its end, faded.
+        Assert.Equal((null, (350.0, 400.0)), (marks.Head, marks.Tail));
+        Assert.Null(marks.End);
+
+        // An offset moves the loops, and shows the rest of the first pass before the start.
+        var offset = L.ClipMarks(0, 350000, clip with { Offset = 30000 }, Thousand, 1000);
+        Assert.Equal([(70.0, 70.0), (170.0, 170.0), (270.0, 270.0)], offset.Loops);
+        Assert.Equal(((-30.0, 0.0), (350.0, 370.0)), (offset.Head, offset.Tail));
+        // At twice the speed, a pass is half as long.
+        Assert.Equal(6, L.ClipMarks(0, 350000, clip with { Speed = 2 }, Thousand, 1000).Loops.Count);
+        // Only the marks in view: from 150000 to 250000.
+        Assert.Equal([(50.0, 50.0)], L.ClipMarks(0, 350000, clip, new TimelineView(150000, 1000, TimelineZoom.Ticks), 100).Loops);
+        // Marks closer than 2 pixels are one run over the part in view.
+        var dense = L.ClipMarks(0, 350000, clip, new TimelineView(0, 60000, TimelineZoom.Ticks), 1000);
+        var run = Assert.Single(dense.Loops);
+        Assert.Equal((100000 / 60000.0, 349999 / 60000.0), run);
+        // A section that ends where a pass ends has no tail, and the reach of its bar is its own span.
+        Assert.Null(L.ClipMarks(0, 300000, clip, Thousand, 1000).Tail);
+        Assert.Equal((0.0, 300000.0), new CutsceneTimelineItem(CutsceneItemKind.Section, 0, 300000, "section:1") { Clip = clip }.Reach);
+    }
+
+    [Fact]
+    public void AClipThatDoesNotLoopShowsWhereItEndsAndItsCutOffPartsAsHints()
+    {
+        var clip = new CutsceneClipSpan(20000, 1, false, 100000);
+        // Shorter than its clip: the part before the offset and the part past the end are hints, and the clip does not end
+        // inside it.
+        Assert.Equal(new CutsceneClipHints(-20000, 80000, null), L.Hints(0, 50000, clip));
+        Assert.Equal((-20000.0, 80000.0), new CutsceneTimelineItem(CutsceneItemKind.Section, 0, 50000, "section:1") { Clip = clip }.Reach);
+        // Longer than its clip: the clip ends at 80000, after which the pose holds, and no tail.
+        Assert.Equal(new CutsceneClipHints(-20000, null, 80000), L.Hints(0, 200000, clip));
+        var marks = L.ClipMarks(0, 200000, clip, Thousand, 1000);
+        Assert.Equal((80.0, 0), (marks.End, marks.Loops.Count));
+        // An offset past the clip's end has ended at the start.
+        Assert.Equal(new CutsceneClipHints(null, null, 0), L.Hints(0, 200000, clip with { Offset = 150000 }));
+        // At half the speed, the clip lasts twice as long.
+        Assert.Equal(new CutsceneClipHints(-40000, null, 160000), L.Hints(0, 200000, clip with { Speed = 0.5 }));
+        // A clip as long as its section ends at its end: nothing to show.
+        Assert.Equal(new CutsceneClipHints(null, null, null), L.Hints(0, 100000, clip with { Offset = 0 }));
+    }
+
+    [Fact]
+    public void ASectionsLabelIsItsClipsNameAndStaysInTheVisiblePartOfItsBar()
+    {
+        var layout = L.Build(Intro(), new HashSet<string>(), null, null, Clips);
+        CutsceneTimelineItem Bar(string path) => layout.Rows.SelectMany(r => r.Bars).Single(b => b.Path == path);
+        // A clip that the index knows is named and has its span; a sound that has not cooked is named, with no span; one
+        // that the index does not have shows the ID.
+        Assert.Equal(("Walk", new CutsceneClipSpan(0, 1, true, 100000)), (Bar("section:2").Label, Bar("section:2").Clip));
+        Assert.Equal(("bark", null), (Bar("section:3").Label, Bar("section:3").Clip));
+        Assert.Equal("#10", Bar("section:10").Label);
+        Assert.Equal((15000, 15000), (Bar("section:2").EaseIn, Bar("section:2").EaseOut));
+        // A camera cut's blends are its own, not eases.
+        Assert.Equal((0, 0), (Bar("section:5").EaseIn, Bar("section:5").EaseOut));
+
+        // A section that starts off screen has its label at the left of the time area, to its visible end.
+        Assert.Equal((4.0, 292.0), L.LabelRoom(-200, 300, 1000));
+        Assert.Equal((104.0, 492.0), L.LabelRoom(100, 600, 1000));
+        // It stops at the time area's right, and a part too small for a label has none.
+        Assert.Equal((504.0, 492.0), L.LabelRoom(500, 1500, 1000));
+        Assert.Null(L.LabelRoom(990, 1500, 1000));
+        Assert.Null(L.LabelRoom(100, 120, 1000));
+    }
+
+    [Fact]
+    public void AnEaseHandleIsInTheTopOfItsBarBeforeAKeyAndOverlapsAreWhereSectionsBlend()
+    {
+        var layout = L.Build(Intro(), new HashSet<string>());
+        CutsceneHit Hit(double x, double y) => layout.HitTest(x, y, Thousand, 0);
+        double Top(string path) => L.RulerHeight + layout.Rows.First(r => r.Path == path && r.Kind == CutsceneRowKind.Track).Top + 4;
+
+        // The fox's walk, section 1, eases in over 15000 ticks: its handle is at x 15 in the top of its row.
+        var walks = Top("track:1");
+        Assert.Equal((CutsceneHitKind.EaseIn, "section:1"), (Hit(X(15000), walks).Kind, Hit(X(15000), walks).Paths[0]));
+        // Its ease out handle is at its end, where a key is too: the top of the row is the handle, the middle the key.
+        Assert.Equal(CutsceneHitKind.EaseOut, Hit(X(600000) - 2, walks).Kind);
+        Assert.Equal(CutsceneHitKind.Key, Hit(X(600000) - 2, Y(layout, "track:1")).Kind);
+        // Away from a handle, the top of a bar is its body, and a camera cut has no handles.
+        Assert.Equal(CutsceneHitKind.Body, Hit(X(300000), walks).Kind);
+        Assert.Equal(CutsceneHitKind.StartEdge, Hit(X(200000) + 1, Top("track:5")).Kind);
+        Assert.Equal((15.0, 600.0), L.Handles(layout.Rows.First(r => r.Path == "track:1").Bars[0], Thousand));
+        // A bar too narrow for its edges has no handles.
+        Assert.Null(L.Handles(new CutsceneTimelineItem(CutsceneItemKind.Section, 0, 10000, "section:1"), Thousand));
+
+        // Sections overlap where one starts before the ones before it end.
+        CutsceneVisibleBar Bar(double x0, double x1) => new(x0, x1, new CutsceneTimelineItem(CutsceneItemKind.Section, 0, 1, "section:1"));
+        Assert.Equal([(80.0, 100.0), (150.0, 170.0)], L.Overlaps([Bar(0, 100), Bar(80, 200), Bar(150, 170)]));
+        Assert.Empty(L.Overlaps([Bar(0, 100), Bar(100, 200)]));
+    }
 }
 
 /// <summary>

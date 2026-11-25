@@ -582,7 +582,7 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     public CutsceneRowFilter RowFilter => new(FilterText, _keysUnder?.Span, SelectedOnly ? BindingsOfEntities(_shell.Selection.Entities) : null);
 
     /// <summary>The timeline's rows, as the filter and the folds have them, with each binding's state.</summary>
-    public CutsceneTimelineLayout Layout() => CutsceneTimelineLayout.Build(File, _folds, RowFilter, InfoOf);
+    public CutsceneTimelineLayout Layout() => CutsceneTimelineLayout.Build(File, _folds, RowFilter, InfoOf, ClipOf);
 
     public void SetFilterText(string text)
     {

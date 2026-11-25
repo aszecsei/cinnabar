@@ -418,20 +418,7 @@ remove_texture_blob :: proc(out_dir: string, a: Asset_Source, problems: ^Problem
 
 // texture_blob_size is the size of a cooked texture blob, from its header, or zero for a file that is not one.
 texture_blob_size :: proc(path: string) -> (size: [2]u32) {
-	f, open_err := os.open(path)
-	if open_err != nil {
-		return
-	}
-	defer os.close(f)
-	blob: format.Texture_Blob
-	n, read_err := os.read(f, ([^]byte)(&blob)[:size_of(blob)])
-	if read_err != nil ||
-	   n < size_of(blob) ||
-	   blob.header.magic != format.BLOB_MAGIC ||
-	   blob.header.kind != .Texture ||
-	   blob.header.layout != format.texture_layout() {
-		return
-	}
+	blob, _ := blob_start(path, format.Texture_Blob, .Texture, format.texture_layout())
 	return blob.size
 }
 

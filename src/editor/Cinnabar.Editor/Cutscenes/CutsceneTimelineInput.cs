@@ -26,6 +26,8 @@ public sealed class CutsceneTimelineInput
         Box,
         Scrub,
         Handle,
+        /// <summary>A drag of a section's ease handle, which sets its <c>ease_in</c> or <c>ease_out</c>.</summary>
+        Ease,
         Pan,
     }
 
@@ -125,7 +127,7 @@ public sealed class CutsceneTimelineInput
     public Point Pointer => _pointer;
 
     /// <summary>Whether a drag that changes the cutscene is under way.</summary>
-    public bool Dragging => _gesture is Gesture.Move or Gesture.Trim or Gesture.Slip or Gesture.Handle;
+    public bool Dragging => _gesture is Gesture.Move or Gesture.Trim or Gesture.Slip or Gesture.Handle or Gesture.Ease;
 
     /// <summary>The view should draw again.</summary>
     public event Action? Invalidated;
@@ -304,7 +306,8 @@ public sealed class CutsceneTimelineInput
             case CutsceneHitKind.Header:
                 _editor.Select([hit.Row!.Path], ModeOf(modifiers));
                 return false;
-            case CutsceneHitKind.Key or CutsceneHitKind.Trigger or CutsceneHitKind.Marker or CutsceneHitKind.Body or CutsceneHitKind.StartEdge or CutsceneHitKind.EndEdge:
+            case CutsceneHitKind.Key or CutsceneHitKind.Trigger or CutsceneHitKind.Marker or CutsceneHitKind.Body or CutsceneHitKind.StartEdge or CutsceneHitKind.EndEdge
+                or CutsceneHitKind.EaseIn or CutsceneHitKind.EaseOut:
             {
                 // A press on a selected item with no modifier keeps the selection, so a drag moves all of it.
                 var selected = hit.Paths.All(_editor.SelectedPaths.Contains);
@@ -316,6 +319,7 @@ public sealed class CutsceneTimelineInput
                 _pending = hit.Kind switch
                 {
                     CutsceneHitKind.StartEdge or CutsceneHitKind.EndEdge => Gesture.Trim,
+                    CutsceneHitKind.EaseIn or CutsceneHitKind.EaseOut => Gesture.Ease,
                     CutsceneHitKind.Body when modifiers.HasFlag(KeyModifiers.Alt) => Gesture.Slip,
                     _ => Gesture.Move,
                 };
@@ -364,7 +368,7 @@ public sealed class CutsceneTimelineInput
             case Gesture.Scrub:
                 _editor.SetPlayhead(SnapToFrame(TickAt(x)));
                 break;
-            case Gesture.Move or Gesture.Trim or Gesture.Slip or Gesture.Handle:
+            case Gesture.Move or Gesture.Trim or Gesture.Slip or Gesture.Handle or Gesture.Ease:
                 Step(TickAt(x) - _press!.Tick, !modifiers.HasFlag(KeyModifiers.Control) && _editor.Snap);
                 break;
             case Gesture.Box:
@@ -383,6 +387,49 @@ public sealed class CutsceneTimelineInput
     /// <summary>The binding's row under a point, for a drop on it, or null.</summary>
     public CutsceneTimelineRow? BindingRowAt(double x, double y) =>
         Layout.HitTest(x, y, View, ScrollY) is { Row: { Kind: CutsceneRowKind.Binding } row } ? row : null;
+
+    // The row under a point of the time area or its headers, for a drop, and the time there, snapped as a drag's is.
+    (string? Row, int Tick) DropAt(double x, double y)
+    {
+        var hit = Layout.HitTest(x, y, View, ScrollY);
+        var targets = Layout.SnapTargets(new HashSet<string>()).Append(_editor.Playhead).Order().ToList();
+        var (tick, _) = TimelineSnap.Snap(Math.Max(TickAt(Math.Max(x, CutsceneTimelineLayout.Gutter)), 0), targets, View.PerPixel, _editor.FrameTicks, _editor.Snap);
+        return (hit.Row?.Path, tick);
+    }
+
+    /// <summary>Whether animations or sounds, by GUID, dropped at a point would add a section (see docs/editor/cutscene-editor.md#drops).</summary>
+    public bool CanDropClips(IEnumerable<string> assets, double x, double y) => _editor.CanDropClips(assets, DropAt(x, y).Row);
+
+    /// <summary>Drops animations or sounds, by GUID, at a point: their sections start at the time there, snapped.</summary>
+    public IReadOnlyList<string> DropClips(IEnumerable<string> assets, double x, double y)
+    {
+        var (row, tick) = DropAt(x, y);
+        return _editor.DropClips(assets, row, tick);
+    }
+
+    /// <summary>
+    /// A right press, which opens the section menu over an animation or audio section (see
+    /// docs/editor/cutscene-editor.md#the-section-menu): it selects the section, unless it is selected already, and
+    /// returns its path. Null elsewhere, where there is no menu.
+    /// </summary>
+    public string? ContextAt(double x, double y)
+    {
+        if (_gesture != Gesture.None)
+        {
+            return null;
+        }
+        var hit = Layout.HitTest(x, y, View, ScrollY);
+        if (hit is not { Kind: CutsceneHitKind.Body or CutsceneHitKind.StartEdge or CutsceneHitKind.EndEdge or CutsceneHitKind.EaseIn or CutsceneHitKind.EaseOut,
+                Row.TrackKind: "animation" or "audio", Paths: [var path] })
+        {
+            return null;
+        }
+        if (!_editor.SelectedPaths.Contains(path))
+        {
+            _editor.Select([path], SelectMode.Replace);
+        }
+        return path;
+    }
 
     // The press moved past the slop: the pending drag begins.
     void Start()
@@ -431,8 +478,15 @@ public sealed class CutsceneTimelineInput
         {
             Gesture.Trim => _ripple ? "Ripple Trim" : "Trim",
             Gesture.Slip => "Slip",
+            Gesture.Ease => "Set Ease",
             _ => "Move",
         };
+        // An ease drags its handle, from where it is: the end of the ease in, or the start of the ease out.
+        if (_pending == Gesture.Ease)
+        {
+            var at = hit.Kind == CutsceneHitKind.EaseIn ? item.Start + item.EaseIn : item.End - item.EaseOut;
+            _grabbed = (at, at);
+        }
         // What moves does not snap to itself: a moving section's keys move with it.
         var moving = new HashSet<string>(_moving);
         foreach (var path in _moving)
@@ -487,6 +541,18 @@ public sealed class CutsceneTimelineInput
                 _editor.StepDrag(f => CutsceneEdits.Trim(f, path, edge, to - from, ripple, _editor.Locked, _editor.ChildStart));
                 var now = _editor.File.Find(path);
                 _dragTip = Describe(now?.Start ?? _grabbed.Start, now?.End ?? _grabbed.End, (edge == CutsceneEdge.Start ? now?.Start : now?.End) - from ?? 0);
+                break;
+            }
+            case Gesture.Ease:
+            {
+                var edge = _press!.Kind == CutsceneHitKind.EaseIn ? CutsceneEdge.Start : CutsceneEdge.End;
+                var (to, guide) = TimelineSnap.Snap(_grabbed.Start + raw, targets, perPixel, frame, snap);
+                Guide = guide;
+                var path = _moving[0];
+                _editor.StepDrag(f => CutsceneEdits.SetEaseAt(f, path, edge, to, _editor.Locked));
+                var now = _editor.File.Find(path);
+                var ease = now?.Get(edge == CutsceneEdge.Start ? "ease_in" : "ease_out") is { } text && CutsceneFile.TryParseTicks(text.Trim(), out var ticks) ? ticks : 0;
+                _dragTip = $"{(edge == CutsceneEdge.Start ? "ease in" : "ease out")} {Units(ease)}";
                 break;
             }
             case Gesture.Slip:
@@ -568,7 +634,7 @@ public sealed class CutsceneTimelineInput
                 _editor.Select(paths, ModeOf(modifiers));
                 break;
             }
-            case Gesture.Move or Gesture.Trim or Gesture.Slip or Gesture.Handle:
+            case Gesture.Move or Gesture.Trim or Gesture.Slip or Gesture.Handle or Gesture.Ease:
                 _editor.EndDrag(cancel: false);
                 break;
         }

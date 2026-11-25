@@ -16,7 +16,7 @@ import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/wire"
 
 // Change it to drop every saved index, when what a pass learns of an asset changes.
-SAVED_INDEX_VERSION :: 2
+SAVED_INDEX_VERSION :: 3
 SAVED_INDEX_FILE :: ".index"
 
 // Saved_Source is what a pass learnt of one source, a file of the content or a stage's generated text, which the next
@@ -45,6 +45,7 @@ Saved_Source :: struct {
 	size:         [2]u32,
 	tool_texture: format.Guid,
 	hotspots:     [][4]u32,
+	length:       u64,
 	inputs:       []Input_Stamp,
 	// The problems in its source and its .meta file.
 	problems:     []Problem,
@@ -105,7 +106,7 @@ index_keep_sources :: proc(index: ^Index, pass: Pass) {
 		append(&problems, ..by_file[fmt.tprintf("%s%s", a.path, format.META_EXTENSION)][:])
 		subassets := make([]Subasset, len(a.subassets), allocator)
 		for s, j in a.subassets {
-			subassets[j] = {s.kind, strings.clone(s.name, allocator), s.guid}
+			subassets[j] = {s.kind, strings.clone(s.name, allocator), s.guid, s.length}
 		}
 		inputs := make([]Input_Stamp, len(a.inputs), allocator)
 		for input, j in a.inputs {
@@ -133,6 +134,7 @@ index_keep_sources :: proc(index: ^Index, pass: Pass) {
 			size         = a.size,
 			tool_texture = a.tool_texture,
 			hotspots     = slice.clone(a.hotspots, allocator),
+			length       = a.length,
 			inputs       = inputs,
 			problems     = slice.clone(problems[:], allocator),
 		}

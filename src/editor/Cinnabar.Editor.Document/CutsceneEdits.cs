@@ -694,6 +694,76 @@ public static class CutsceneEdits
         return true;
     }
 
+    /// <summary>
+    /// Sets a section's ease in or ease out from where its handle is dragged to on the cutscene's time (see
+    /// docs/editor/cutscene-editor.md#eases-and-blends): the ease in runs from the start to it, the ease out from it to the
+    /// end. It is clamped to 0 and to the section's duration less its other ease, as the cooker needs, and 0 removes the
+    /// setting. Nothing for a camera cut, whose blends are its own, or on a locked track.
+    /// </summary>
+    public static IReadOnlyList<string> SetEaseAt(CutsceneFile file, string path, CutsceneEdge edge, int at, IReadOnlySet<int>? locked = null)
+    {
+        if (file.Find(path) is not { Kind: CutsceneBlockKind.Section, Start: { } start, End: { } end } section || IsLocked(section, locked)
+            || TrackOf(section)?.TrackKind == "camera_cut")
+        {
+            return [];
+        }
+        var (key, other) = edge == CutsceneEdge.Start ? ("ease_in", "ease_out") : ("ease_out", "ease_in");
+        var ticks = Math.Clamp(edge == CutsceneEdge.Start ? at - start : end - at, 0, Math.Max(end - start - Ticks(section, other), 0));
+        section.Set(key, ticks == 0 ? null : Format(ticks));
+        return [path];
+    }
+
+    /// <summary>
+    /// The track that a dropped clip of a kind (<c>animation</c> or <c>audio</c>) goes on (see docs/editor/cutscene-editor.md#drops),
+    /// or null when it has none: the dropped-on track when it is of that kind, or else the first track of that kind of
+    /// the dropped-on binding, or of none for a sound dropped off every binding. An animation needs a binding.
+    /// </summary>
+    public static CutsceneBlock? ClipTrack(CutsceneFile file, string kind, CutsceneBlock? target, out int? binding)
+    {
+        binding = TargetBinding(target);
+        if (TrackOf(target ?? file.Root) is { } track && track.TrackKind == kind)
+        {
+            return track;
+        }
+        var b = binding;
+        return file.Tracks.FirstOrDefault(t => t.TrackKind == kind && BindingOf(t) == b);
+    }
+
+    /// <summary>
+    /// Adds a section of a clip or a sound by its GUID, from start for length ticks, on the track of a kind that
+    /// <see cref="ClipTrack"/> finds, or on a new one, named for its kind, after the binding's tracks. The section has the
+    /// next section ID, goes among its track's sections in start order, and grows the length when it ends past it.
+    /// Returns its path, or null for an animation without a binding, or a locked track.
+    /// </summary>
+    public static string? AddClipSection(CutsceneFile file, string kind, CutsceneBlock? target, int start, int length, string guid, IReadOnlySet<int>? locked = null)
+    {
+        var track = ClipTrack(file, kind, target, out var binding);
+        if ((kind == "animation" && binding == null) || (track != null && IsLocked(track, locked)))
+        {
+            return null;
+        }
+        if (track == null)
+        {
+            var id = file.NextId(CutsceneBlockKind.Track);
+            var name = kind == "animation" ? "Animation" : "Audio";
+            track = CutsceneBlock.Of(CutsceneBlockKind.Track, $"track {Format(id)} {kind} \"{name}\"");
+            file.Insert(file.Root, InsertAt(file, binding), track);
+            track.Set("binding", binding is { } b ? Format(b) : null);
+        }
+        start = Math.Max(start, 0);
+        var end = start + Math.Max(length, 1);
+        var sectionId = file.NextId(CutsceneBlockKind.Section);
+        var section = CutsceneBlock.Of(CutsceneBlockKind.Section, $"{CutsceneKeying.IndentUnder(track)}section {Format(sectionId)} {Format(start)} {Format(end)}");
+        file.Insert(track, track.Children.Count, section);
+        section.Set("asset", "$" + guid);
+        CutsceneFile.SortChildren(track);
+        if (file.Length is { } cutsceneLength && end > cutsceneLength)
+        {
+            file.Root.Set("length", Format(end));
+        }
+        return CutsceneFile.PathOf(section);
+    }
+
     // The end of the cutscene's range, from its range = [start, end], or null.
     static int? RangeEnd(CutsceneFile file) =>
         file.Root.Get("range")?.Trim().TrimStart('[').TrimEnd(']').Split(',') is [_, var end] && CutsceneFile.TryParseTicks(end.Trim(), out var ticks) ? ticks : null;
