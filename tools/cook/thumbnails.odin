@@ -248,7 +248,7 @@ thumbnail_make :: proc(job: Thumbnail_Job) -> bool {
 }
 
 // blob_header_key is the key in a blob's header, or 0 for a blob that is missing or is not one.
-@(private = "file")
+@(private)
 blob_header_key :: proc(path: string) -> u64 {
 	f, err := os.open(path)
 	if err != nil {

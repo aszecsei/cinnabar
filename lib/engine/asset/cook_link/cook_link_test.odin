@@ -41,6 +41,7 @@ every_message_round_trips :: proc(t: ^testing.T) {
 					settings = {{"native", "true"}},
 					dependencies = {"ffeeddccbbaa99887766554433221100"},
 					length = 90000,
+					peaks = "C:/cache/peaks/00112233445566778899aabbccddeeff.0123456789abcdef.peaks",
 				},
 			},
 			folders = {{"game", "scripts"}},

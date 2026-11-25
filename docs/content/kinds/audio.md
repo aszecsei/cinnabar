@@ -34,6 +34,8 @@ These are for music. A smooth sound does better: the sample's `ambience.wav`, mo
 | `format` | `pcm`, `adpcm`, `vorbis`, `opus` | `pcm` | How the blob stores the sound. |
 | `seek` | `true`, `false` | `true` | Write a seek table for a `vorbis` or `opus` sound that streams. Without one, a start or a seek after the first frame decodes from the start, which costs little for a short sound. |
 
+**Peaks.** The cook daemon also writes each sound's peak file, its lowest and highest sample in each run of 256 frames, from which the cutscene editor draws its waveform (see [Daemon and operations](../daemon-and-operations.md#peaks)).
+
 **The cache key** covers the cooker version, the miniaudio, Opus and Vorbis versions, the layout, the source path, the source, the `.meta` file and the GUID. A sound that fails to decode keeps its old blob, so the running game keeps the last good version.
 
 **A big source costs every pass.** The scan reads each asset's source to key it, on every pass of the daemon ([Daemon and operations](../daemon-and-operations.md#cook-daemon)). A very long `.wav` adds that read to each one, and a compressed source costs less.

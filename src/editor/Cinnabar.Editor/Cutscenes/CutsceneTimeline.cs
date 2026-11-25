@@ -65,6 +65,8 @@ sealed class CutsceneTimeline : Control
     static readonly IPen EasePen = new Pen(new SolidColorBrush(Color.FromArgb(0xB0, 0x10, 0x10, 0x12)), 1.2);
     static readonly IBrush EaseHandle = new SolidColorBrush(Color.FromArgb(0xE0, 0xF4, 0xF4, 0xF6));
     static readonly IPen EaseHandlePen = new Pen(new SolidColorBrush(Color.FromArgb(0xC0, 0x10, 0x10, 0x12)), 1);
+    static readonly IBrush WaveBrush = new SolidColorBrush(Color.FromArgb(0x90, 0x10, 0x10, 0x12));
+    static readonly IPen EventPen = new Pen(new SolidColorBrush(Color.FromArgb(0xE0, 0xF4, 0xF4, 0xF6)), 1.5);
     static readonly Typeface Face = new("Inter");
 
     readonly CutsceneEditor _editor;
@@ -88,10 +90,13 @@ sealed class CutsceneTimeline : Control
         void Played() => Input.OnPlayStarted();
         void Reveal(string path) => Input.Reveal(path);
         void Viewed() => InvalidateVisual();
+        // A sound's peaks that arrive draw at once, with no new build of the rows (see docs/editor/cutscene-editor.md#waveforms).
+        void WaveLoaded(string path) => InvalidateVisual();
         // Tells the editor when the keyboard is in the timeline.
         FocusFollower.Follow(this, () => _editor.SetKeyboardPane(CutscenePane.Timeline), () => _editor.LeaveKeyboardPane(CutscenePane.Timeline));
         new ViewSubscriptions(this, attached: Input.Refresh)
             .Add(() => _editor.TimeViewChanged += Viewed, () => _editor.TimeViewChanged -= Viewed)
+            .Add(() => WaveformCache.Shared.Loaded += WaveLoaded, () => WaveformCache.Shared.Loaded -= WaveLoaded)
             .Add(() => _editor.RevealRequested += Reveal, () => _editor.RevealRequested -= Reveal)
             .Add(() => _editor.PlayStarted += Played, () => _editor.PlayStarted -= Played)
             .Add(() => _editor.Changed += Changed, () => _editor.Changed -= Changed)
@@ -392,6 +397,10 @@ sealed class CutsceneTimeline : Control
             var x0 = Layout.Gutter + bar.X0;
             var rect = new Rect(x0, bar.Item.Kind == CutsceneItemKind.Range ? top + height / 4 : top, Math.Max(bar.X1 - bar.X0, 2), bar.Item.Kind == CutsceneItemKind.Range ? height / 2 : height);
             context.FillRectangle(silent ? SilentFill : Fill(row.Row.TrackKind, locked || row.Row.Kind == CutsceneRowKind.Channel), rect, 2);
+            if (track && bar.Item is { Peaks: { } peaksPath, Clip: { } waveClip } && WaveformCache.Shared.Get(peaksPath) is { } peaks)
+            {
+                DrawWaveform(context, CutsceneWaveform.Columns(bar.Item, waveClip, bar.Item.Gain, peaks, view, area), top, height);
+            }
             if (marks.TryGetValue(bar, out var clipMarks))
             {
                 // Past a clip that does not loop, the pose holds or the sound is silent.
@@ -410,6 +419,15 @@ sealed class CutsceneTimeline : Control
                     {
                         context.FillRectangle(LoopRun, new Rect(Layout.Gutter + l0, top + 2, l1 - l0, height - 4));
                     }
+                }
+            }
+            // A clip's events, from its binding's graph, as ticks along the bar's bottom (see docs/editor/cutscene-editor.md#events).
+            if (track && bar.Item is { Clip: { } eventClip, Events.Count: > 0 })
+            {
+                foreach (var tick in CutsceneWaveform.EventTicks(bar.Item, eventClip, bar.Item.Events, view, area))
+                {
+                    var ex = Layout.Gutter + tick.X;
+                    context.DrawLine(EventPen, new Point(ex, top + height - Layout.EventBand + 1), new Point(ex, top + height));
                 }
             }
             if (track && !cuts && bar.Item.Kind == CutsceneItemKind.Section)
@@ -477,6 +495,34 @@ sealed class CutsceneTimeline : Control
             var radius = glyph.Items.Count > 1 ? 4.5 : 3.5;
             Diamond(context, Layout.Gutter + glyph.X, middle, radius, glyph.Paths.Any(selected.Contains) ? SelectedKey : KeyBrush, glyph.Paths.Any(problems.Contains));
         }
+    }
+
+    // A sound's waveform: a line for each column, about the bar's middle, as tall as the bar at full scale.
+    static void DrawWaveform(DrawingContext context, List<CutsceneWaveColumn> columns, double top, double height)
+    {
+        if (columns.Count == 0)
+        {
+            return;
+        }
+        var middle = top + height / 2;
+        var half = height / 2 - 1;
+        var g = new StreamGeometry();
+        using (var c = g.Open())
+        {
+            foreach (var column in columns)
+            {
+                var x = Layout.Gutter + column.X;
+                // A column at least one pixel tall, so a quiet part still shows where the sound is.
+                var y0 = middle - Math.Max(column.High * half, 0.5);
+                var y1 = middle - Math.Min(column.Low * half, -0.5);
+                c.BeginFigure(new Point(x, y0), true);
+                c.LineTo(new Point(x + 1, y0));
+                c.LineTo(new Point(x + 1, y1));
+                c.LineTo(new Point(x, y1));
+                c.EndFigure(true);
+            }
+        }
+        context.DrawGeometry(WaveBrush, null, g);
     }
 
     // A section's eases as smoothstep ramps, the shape that the runtime weighs them by: up from its bottom left over
