@@ -2,9 +2,9 @@
 
 The cutscene editor edits a cutscene (see [Content: Cutscenes](../content/kinds/cutscenes.md)), which the game plays as [Cinematics](../cinematics/README.md) describes. Each open one is a tab, a `GraphEditorDocument` with the ID `cutscene.{guid}`, over a `CutsceneEditor` in the shell, which holds its state. Docking can rebuild the view, and tests drive the editor without a window.
 
-The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, the bindings, the cameras with their lenses and focus, and the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)): names, loops, eases, drops, the section menu, sounds' waveforms and clips' events. Pose thumbnails wait for render out ([#559](https://github.com/aszecsei/cinnabar/issues/559)). Event keys ([#558](https://github.com/aszecsei/cinnabar/issues/558)) take their names from the bound behaviours' handlers, with typed payloads and Jump to Handler. Their flags with names and their flashes in the preview are not built yet.
+The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, the bindings, the cameras with their lenses and focus, and the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)): names, loops, eases, drops, the section menu, sounds' waveforms and clips' events. Pose thumbnails wait for render out ([#559](https://github.com/aszecsei/cinnabar/issues/559)). Event keys ([#558](https://github.com/aszecsei/cinnabar/issues/558)) take their names from the bound behaviours' handlers, with typed payloads and Jump to Handler. Sub-sequences ([#557](https://github.com/aszecsei/cinnabar/issues/557)) open in context in the tab, with breadcrumbs and the parent's time on the ruler. The shot list and New Shot at Playhead are not built yet.
 
-**In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Sections](#sections) · [Preview](#preview) · [Keying](#keying) · [Bindings](#bindings) · [Curves](#curves) · [Cameras](#cameras) · [Events](#events)
+**In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Sections](#sections) · [Preview](#preview) · [Keying](#keying) · [Bindings](#bindings) · [Curves](#curves) · [Cameras](#cameras) · [Events](#events) · [Sub-sequences](#sub-sequences)
 
 ## The file
 
@@ -296,12 +296,13 @@ An animation section shows its clip's events as ticks along the bottom of its ba
 An animation clip or a sound dropped from the content browser adds a section at the drop's time, snapped as a drag is, with the clip's length. A clip that has not cooked yet has no length, so its section is a second long.
 - **An animation** goes on the animation track of the binding under the pointer, on the binding's row or on one of its tracks' rows. The drop adds the track, after the binding's tracks, when the binding has none. Elsewhere, an animation has no binding to play on, and the drop is refused.
 - **A sound** goes on the audio track under the pointer. On a binding's rows, it goes on that binding's audio track, which the drop adds when there is none, so the sound plays at the entity. Elsewhere, it goes on the first audio track of no binding, which the drop adds when there is none.
+- **A cutscene** goes on a sub-sequence track of no binding, as a section that plays it, as long as its range. When that track is locked, or a section covers the drop's span on it, the drop adds a track named Shots, since a sub-sequence track's sections do not overlap. A cutscene that plays the one shown, at any depth, is refused at the drop, with the cycle's path in the console (see [Cycles](#cycles)).
 - **Several clips** go one after another, from the drop's time. A model file is not a clip: it spawns its prefab, as before.
 - The drop is one undo entry, and it selects the new sections. A section goes among its track's sections in start order, and the length grows when the section ends past it. A locked track takes nothing.
 
 ### The section menu
 
-A right click on an animation or audio section selects it, unless it is selected already, and opens its menu. Alt and a right drag still pans.
+A right click on an animation, audio or sub-sequence section selects it, unless it is selected already, and opens its menu. Alt and a right drag still pans. A sub-sequence's menu has **Open Sub-sequence** and **Open in Own Tab** (see [Sub-sequences](#sub-sequences)).
 - **Reveal in Content Browser** shows the section's clip or sound in the content browser. A clip shows in its model.
 - **Open Clip** shows it, and opens it as the content browser does. Animations and sounds have no editor or preview yet, so for now it only shows and selects them.
 - **Match Clip Length** trims the end of each selected animation or audio section that does not loop to where its clip ends: `(length - offset) / speed` after its start. It is one undo entry, and it keeps the trim's limits: the keys, the eases, a frame and the length.
@@ -361,6 +362,7 @@ A text without problems goes in the cache's preview area, `<cache>/dev/preview/<
 - **Values over the preview.** `Cutscene_Preview_Values` lays the editor's [preview values](#preview-values) over the preview, after its evaluation in `lay_cutscene_preview` and again in `update_cutscene_preview`. They are an `Override`'s fields and poses, which save what they write over once, so the lift gives back the document, also of a field that no track writes. They show only while the preview is paused at their tick. A `Time`, a `Play`, a `Close`, a new ticket and `end_overrides` drop them, so a lost message from the editor cannot leave them at another time. Their fields are in `Entity_Values.held`, and `shown_preview.values` names their serial while they show.
 - **The frame.** In Edit, `update_cutscene_preview` runs once a frame after the players. It follows a newer unsaved blob and a reload's bindings, moves a playing preview by the frame's real time, and evaluates it. Forward play moves as a player's clock does, so camera cuts blend.
 - **The mix.** `Cutscene_Preview_Settings` calls `cutscene.set_mix` (see [Evaluation: The editor's mix](../cinematics/evaluation.md#the-editors-mix)). A silenced track evaluates as a muted one: it writes no field, so the next lay leaves the document's value; it plays no voice and drives no `Animator`; and a silenced camera cut track gives the views back. A silenced sub-sequence track plays no child, though the child stays loaded. With events on, `update_cutscene_preview` sends the events that a play crossed in the same frame, with `cutscene.send_events`.
+- **Unsaved children.** `Cutscene_Preview_Children` names the nested cutscenes whose blobs are the cook daemon's from unsaved text. `update_cutscene_preview` sets each live from the preview area, as it does the root's, before it follows the children, so the parent's preview shows their edits. Each message replaces the last, a cutscene that drops out gives its saved blob back, and the end of the preview clears them all. At most `asset.MAX_LIVE_ASSETS` less one are kept.
 - **Marks.** The bound entities and the spawned ones are in `Overridden_Entities`, so the Outliner marks them. The fields that the preview writes are in `Entity_Values.held`.
 - **Ends.** `end_overrides` ends the preview with the overrides: at `Set_Mode`, `Load_Scene`, a code reload and a new link. `close_live` restores what the tracks wrote, despawns the spawned entities and unloads the assets. A new game state frees the preview without the world.
 
@@ -869,6 +871,59 @@ While **Events in Preview** is on and the preview plays (see [Scrub, play and st
 
 ### Limits
 
-- **A sub-sequence's events log but do not flash.** Their IDs are the child's, which the parent's tab cannot find until a child opens in context (#557). An event whose ID the tab's text no longer has, after an edit that the game has not cooked yet, also only logs.
+- **A sub-sequence's events log but do not flash.** Their IDs are the child's, and the game does not say which child sent one. In context, the parent's events do not flash either, since the timeline shows the child. An event whose ID the tab's text no longer has, after an edit that the game has not cooked yet, also only logs.
 - **A name wider than its flag's estimate** is cut at the flag's end.
 - **The list is read when the rows are built.** A script that the daemon cooks again changes the list at the next build.
+
+## Sub-sequences
+
+A shot is often a sub-sequence: a section that plays another cutscene, its child (see [Cinematics: Sub-sequence tracks](../cinematics/tracks.md#sub-sequence-tracks)). The tab edits a child **in context**: at the parent's time, while the preview plays the parent with its other tracks around the shot. A sub-sequence section's bar shows its child's file name.
+
+### In context
+
+- **Open.** A double-click on a sub-sequence section, **Open Sub-sequence** (Ctrl+Enter in the timeline) or the section menu shows the child in the tab. Enter is Key Preview Values' everywhere, so the command takes Ctrl+Enter.
+- **The levels** are one value, `CutsceneLevels`: the way down from the tab's cutscene, with a section path and a GUID for each level. `SetLevels` is its one writer, and it is refused while a drag is open in any level. Each level keeps its own selection, folds and curves, which come back when the tab shows it again. The filter clears.
+- **What changes.** The timeline, the curve editor, the details, the keys, the drops and the clipboard act on the child's text, as they act on the tab's own at the top level: `CutsceneEditor.Document`, `File` and `Playhead` are the shown level's. `RootDocument`, `RootFile` and `RootPlayhead` are the tab's own cutscene's, which the preview, the tab's cook, the title and the frame counter read.
+- **Locks and stand-ins** are the shown level's, in its own settings, since its tracks' and bindings' IDs are its own.
+- **Mute and solo** are the tab's own cutscene's, which the preview plays. In context they show nothing and do nothing, and the console says so. The loop, the in and out points and the play rate stay the tab's, and the timeline does not draw them in context.
+- **Up.** The breadcrumb bar shows `parent › child › …` while a child is shown. A click on a crumb goes up to it, and **Up One Level** (Backspace in the timeline) goes up one. An edit that takes a level's section away, or points it at another cutscene, as an undo or another tab's edit can, shows the deepest level that is still there.
+
+### Time
+
+- **The playhead** stays on the tab's own cutscene's time, so the preview does not move when the tab goes down or up. The shown level's playhead is it mapped down through each section, as the runtime's `child_time` maps it: `SubSequenceMap` is the editor's copy of `trim_of` and `child_time`. A move of the playhead on the child's time maps up with `ToParent`, on the pass of each loop that the playhead is on. With a scale above 1 the child skips ticks, so a time between them maps to the first parent's time that reaches it.
+- **The ruler** shows the parent's time, at its rate, mapped up through each section's trim and scale, and on past the section's edges at the same rate. **Local time** in the breadcrumb bar shows the child's own time.
+- **The shade.** The child's time outside its section's span, which the parent never plays, is shaded darker than the outside of a loop: from the trim's start to the trim's end for a loop, or to where the section's end holds.
+
+### Documents
+
+- **One document for each cutscene.** `CutsceneDocuments` in the shell holds the open cutscenes' documents by GUID, and each holder takes a lease. A child shown in context and open in its own tab is one document, so an edit in one shows in the other at once, with one undo stack. The document closes with its last lease.
+- **Open in Own Tab** in the breadcrumb bar, or in the section menu, opens the child as its own asset, on its own time, with the same document.
+- **Undo and Redo** move the shown level's stack alone (`IGraphEditor.UndoDocument`). Each document keeps its own stack and its own dirty state.
+- **Dirty and save.** The tab holds each child that it showed with changes until they save, and its title marks it dirty while any of its documents is. Save writes each of them that has changes, and the tab's own. Closing the tab asks only about changes that no other tab holds (`LosesChangesOnClose`).
+- **Reads.** The start of a sub-sequence section without a trim, the drop's length and the cycle check read a child from its open document, unsaved, or else from its file, by the file's time.
+
+### The preview in context
+
+- **The parent plays.** The preview stays the tab's own cutscene. Each child that the tab holds has its own checks, which cook its unsaved text into the preview area.
+- **Unsaved children.** `Cutscene_Preview_Children` names the children whose text cooked clean. It goes after each Open's settings, and whenever the levels or a child's clean cook change. The game puts their preview blobs live, so the parent's preview plays their edits (see [The game's side](#the-games-side)). At most 15 go; past that, the console says how many play their saved files.
+- **Keys in context** go to the child, at the playhead on its time, by the child's own bindings. The keying waits until the child's last edit has cooked, as well as the parent's.
+
+### Cycles
+
+A drop of a cutscene that plays the shown level, at any depth, is refused at the drop, and the console names the cycle's path as the cooker does: `sub-sequence cycle: child -> parent -> child`. `CutsceneSubSequences.Cycle` walks the children breadth first, from the open documents' unsaved text and the other cutscenes' files, so the path is the shortest. A section whose child plays a cutscene above it does not open in context.
+
+### Sub-sequence commands
+
+| Command | Default | What it does |
+|---|---|---|
+| Open Sub-sequence | Ctrl+Enter | Shows the selected sub-sequence's child in context. |
+| Up One Level | Backspace | Shows the cutscene that plays the shown child. |
+| Open in Own Tab | | Opens the shown child, or the selected section's, as its own asset. |
+
+They are timeline commands, which the timeline and the curve editor have, and they are not in the ribbon.
+
+### Sub-sequence limits
+
+- **The parent's cook reads its children's files.** The cook daemon checks the parent against each child's saved file, so a problem that a child's unsaved edit makes or fixes in the parent shows after the child saves. The preview still plays the child's unsaved blob.
+- **Bindings that a section maps** (`bind <child> = <parent>`) show as the child's own bindings in context, which possess or spawn as at the top level. Keys go to a binding that possesses the selected entity itself.
+- **The shot list and New Shot at Playhead** are not built yet.

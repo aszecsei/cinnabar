@@ -430,7 +430,7 @@ public sealed class CutsceneTimelineLayout
             {
                 case { Kind: CutsceneBlockKind.Section, Start: { } s, End: { } e }:
                 {
-                    var guid = track.TrackKind is "animation" or "audio" && child.Get("asset") is { } asset ? asset.Trim().TrimStart('$') : null;
+                    var guid = track.TrackKind is "animation" or "audio" or "sub_sequence" && child.Get("asset") is { } asset ? asset.Trim().TrimStart('$') : null;
                     var clip = guid != null ? sources.Info?.Invoke(guid) : null;
                     var eased = track.TrackKind != "camera_cut";
                     var audio = track.TrackKind == "audio";
@@ -509,11 +509,11 @@ public sealed class CutsceneTimelineLayout
         }
     }
 
-    // What a section's bar says: a presentation section's line or kind, a camera cut's camera, an animation's or a
-    // sound's clip, or else its ID.
+    // What a section's bar says: a presentation section's line or kind, a camera cut's camera, an animation's, a
+    // sound's or a sub-sequence's clip, or else its ID.
     static string SectionLabel(CutsceneFile file, CutsceneBlock track, CutsceneBlock section, CutsceneClipInfo? clip) => track.TrackKind switch
     {
-        "animation" or "audio" when clip != null => clip.Name,
+        "animation" or "audio" or "sub_sequence" when clip != null => clip.Name,
         "presentation" => section.Get("text") is { } text ? TextQuote.Unquote(text) ?? text : section.Get("kind") ?? "",
         "camera_cut" => section.Get("camera") is { } camera && CutsceneFile.TryParseId(camera, out var id)
             ? file.Bindings.FirstOrDefault(b => b.Id == id)?.Name ?? $"binding {id}"

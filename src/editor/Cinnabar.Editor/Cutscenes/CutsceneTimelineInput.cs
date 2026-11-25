@@ -279,8 +279,11 @@ public sealed class CutsceneTimelineInput
         Invalidated?.Invoke();
     }
 
-    /// <summary>A press. Returns whether the view should capture the pointer.</summary>
-    public bool Press(double x, double y, MouseButton button, KeyModifiers modifiers)
+    /// <summary>
+    /// A press, the clicks'th in a row. Returns whether the view should capture the pointer. A double-click on a
+    /// sub-sequence section opens it in context.
+    /// </summary>
+    public bool Press(double x, double y, MouseButton button, KeyModifiers modifiers, int clicks = 1)
     {
         if (_gesture != Gesture.None)
         {
@@ -330,6 +333,9 @@ public sealed class CutsceneTimelineInput
                 return false;
             case CutsceneHitKind.Header:
                 _editor.Select([hit.Row!.Path], ModeOf(modifiers));
+                return false;
+            case CutsceneHitKind.Body when clicks == 2 && hit.Row?.TrackKind == "sub_sequence" && hit.Paths is [var shot]:
+                _editor.OpenSubSequence(shot);
                 return false;
             case CutsceneHitKind.Key or CutsceneHitKind.Trigger or CutsceneHitKind.Marker or CutsceneHitKind.Body or CutsceneHitKind.StartEdge or CutsceneHitKind.EndEdge
                 or CutsceneHitKind.EaseIn or CutsceneHitKind.EaseOut:
@@ -445,7 +451,7 @@ public sealed class CutsceneTimelineInput
         }
         var hit = Layout.HitTest(x, y, View, ScrollY);
         if (hit is not { Kind: CutsceneHitKind.Body or CutsceneHitKind.StartEdge or CutsceneHitKind.EndEdge or CutsceneHitKind.EaseIn or CutsceneHitKind.EaseOut,
-                Row.TrackKind: "animation" or "audio", Paths: [var path] })
+                Row.TrackKind: "animation" or "audio" or "sub_sequence", Paths: [var path] })
         {
             return null;
         }

@@ -38,6 +38,9 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     /// <summary>The cutscene editor's preview in the game, for one tab at a time (see docs/editor/cutscene-editor.md#preview).</summary>
     public CutscenePreview CutscenePreview { get; }
 
+    /// <summary>The open cutscenes' documents, one for each GUID, which tabs and the levels in context share.</summary>
+    public CutsceneDocuments CutsceneDocuments { get; }
+
     /// <summary>The values that the world shows over the cutscene preview, outside the document and the cutscene.</summary>
     public PreviewValues PreviewValues { get; }
 
@@ -102,6 +105,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Host = new HostSession(options);
         Overrides = new WorldOverrides(this);
         CutscenePreview = new CutscenePreview(this);
+        CutsceneDocuments = new CutsceneDocuments(this);
         PreviewValues = new PreviewValues(this);
         Looks = new ViewLooks(this);
         Looks.Changed += _ => LooksChanged();

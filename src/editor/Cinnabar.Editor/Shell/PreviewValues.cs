@@ -268,7 +268,7 @@ public sealed class PreviewValues(EditorShell shell)
 
     // The time that a session shows at the tab's playhead: the game holds its time within the cutscene's range.
     static int TickOf(CutscenePreviewState.Open open) =>
-        Math.Clamp(open.Editor.Playhead, open.RangeStart, Math.Max(open.RangeStart, open.RangeEnd));
+        Math.Clamp(open.Editor.RootPlayhead, open.RangeStart, Math.Max(open.RangeStart, open.RangeEnd));
 
     /// <summary>Puts back values as they were, as when a drag of them is cancelled.</summary>
     internal void Restore(PreviewValuesState state)

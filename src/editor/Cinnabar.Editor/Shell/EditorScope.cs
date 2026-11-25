@@ -19,9 +19,9 @@ sealed class EditorScope(EditorShell shell) : ICommandScope
         return commandId switch
         {
             EditorCommands.Save when shell.ActiveGraphEditor is { } graph =>
-                new(() => _ = shell.SaveGraph(graph), () => !graph.Document.InTransaction),
-            EditorCommands.Undo when shell.UndoEditor is { } graph => new(graph.Document.Undo, () => graph.Document.CanUndo),
-            EditorCommands.Redo when shell.UndoEditor is { } graph => new(graph.Document.Redo, () => graph.Document.CanRedo),
+                new(() => _ = shell.SaveGraph(graph), () => !graph.Documents.Any(d => d.InTransaction)),
+            EditorCommands.Undo when shell.UndoEditor is { } graph => new(graph.UndoDocument.Undo, () => graph.UndoDocument.CanUndo),
+            EditorCommands.Redo when shell.UndoEditor is { } graph => new(graph.UndoDocument.Redo, () => graph.UndoDocument.CanRedo),
             _ => null,
         };
     }

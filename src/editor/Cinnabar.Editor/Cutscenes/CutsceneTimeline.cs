@@ -47,6 +47,8 @@ sealed class CutsceneTimeline : Control
     static readonly IBrush LoopBrush = new SolidColorBrush(Color.Parse("#5B8DEF"), 0.35);
     static readonly IBrush InOutBrush = new SolidColorBrush(Color.Parse("#5B8DEF"));
     static readonly IBrush OutsideLoop = new SolidColorBrush(Color.Parse("#000000"), 0.25);
+    // A sub-sequence's time outside its section, in context: darker than outside the loop, since the parent never plays it.
+    static readonly IBrush OutsideSection = new SolidColorBrush(Color.Parse("#000000"), 0.4);
     static readonly IPen GuidePen = new Pen(new SolidColorBrush(Color.Parse("#FFD24A")), 1, new DashStyle([4, 3], 0));
     static readonly IPen LengthPen = new Pen(new SolidColorBrush(Color.FromArgb(0xA0, 0xFF, 0xFF, 0xFF)), 1);
     static readonly IPen LockPen = new Pen(new SolidColorBrush(Color.Parse("#9A9AA2")), 1.2);
@@ -177,6 +179,15 @@ sealed class CutsceneTimeline : Control
         ? CutsceneTime.Frames(ticks, _editor.File.Rate).ToString(CultureInfo.InvariantCulture)
         : CutsceneTime.Timecode(ticks, _editor.File.Rate);
 
+    // The ruler's label of a time of the shown level: in context, the tab's own cutscene's time, at its rate (see
+    // CutsceneEditor.RulerTicks).
+    string RulerUnits(int ticks)
+    {
+        var rate = _editor.InContext && !_editor.LocalTime ? _editor.RootFile.Rate : _editor.File.Rate;
+        var at = _editor.RulerTicks(ticks);
+        return _editor.ShowFrames ? CutsceneTime.Frames(at, rate).ToString(CultureInfo.InvariantCulture) : CutsceneTime.Timecode(at, rate);
+    }
+
     public override void Render(DrawingContext context)
     {
         // A fired event's flash fades on the next frames, also after the play stops (see docs/editor/cutscene-editor.md#events-in-the-preview).
@@ -237,7 +248,16 @@ sealed class CutsceneTimeline : Control
             {
                 context.FillRectangle(PastLength, new Rect(gutter, 0, X(0) - gutter, size.Height));
             }
-            if (_editor.Loop && _editor.LoopRange is { } loop)
+            // In context, the child's time outside its section's span is shaded: the parent does not play it there.
+            if (_editor.ContextSpan is { } span)
+            {
+                context.FillRectangle(OutsideSection, new Rect(gutter, Layout.RulerHeight, Math.Clamp(X(span.Start) - gutter, 0, width), size.Height));
+                var end = Math.Clamp(X(span.End), gutter, gutter + width);
+                context.FillRectangle(OutsideSection, new Rect(end, Layout.RulerHeight, gutter + width - end, size.Height));
+            }
+            // The loop and the in and out points are on the tab's own cutscene's time, which the timeline shows only at
+            // the top level.
+            if (_editor.Loop && !_editor.InContext && _editor.LoopRange is { } loop)
             {
                 // Outside the loop, a shade.
                 context.FillRectangle(OutsideLoop, new Rect(gutter, Layout.RulerHeight, Math.Max(X(loop.Start) - gutter, 0), size.Height));
@@ -290,7 +310,7 @@ sealed class CutsceneTimeline : Control
         {
             var at = x(t);
             context.DrawLine(LengthPen, new Point(at, Layout.RulerHeight - Layout.RangeBarHeight - 6), new Point(at, Layout.RulerHeight - Layout.RangeBarHeight));
-            context.DrawText(Text(Units((int)t), DimText, 10), new Point(at + 3, 2));
+            context.DrawText(Text(RulerUnits((int)t), DimText, 10), new Point(at + 3, 2));
         }
         // The range bar, with a handle at each end, and the length's handle above it.
         var (start, end) = layout.Range;
@@ -307,6 +327,10 @@ sealed class CutsceneTimeline : Control
     // each of those points.
     void DrawInOut(DrawingContext context, Func<double, double> x)
     {
+        if (_editor.InContext)
+        {
+            return;
+        }
         if ((_editor.Loop || _editor.InPoint != null || _editor.OutPoint != null) && _editor.LoopRange is { } loop)
         {
             var y = Layout.RulerHeight - Layout.RangeBarHeight - 4;
@@ -710,7 +734,7 @@ sealed class CutsceneTimeline : Control
             }
         }
         context.FillRectangle(RulerBrush, new Rect(0, 0, Layout.Gutter, Layout.RulerHeight));
-        context.DrawText(Text(Units(_editor.Playhead), TextBrush, 12), new Point(8, 7));
+        context.DrawText(Text(RulerUnits(_editor.Playhead), TextBrush, 12), new Point(8, 7));
     }
 
     // A camera binding's look-through toggle: a small camera, lit while the active scene view looks through it.
@@ -806,7 +830,7 @@ sealed class CutsceneTimeline : Control
         e.Handled = true;
     }
 
-    // The section menu, over an animation or audio section (see docs/editor/cutscene-editor.md#the-section-menu).
+    // The section menu, over an animation, audio or sub-sequence section (see docs/editor/cutscene-editor.md#the-section-menu).
     void OpenSectionMenu()
     {
         var shell = _editor.Shell;
@@ -818,7 +842,9 @@ sealed class CutsceneTimeline : Control
             _editor.SetKeyboardPane(CutscenePane.Timeline);
         }
         MenuBuilder.Build(menu.Items,
-            [EditorCommands.CutsceneRevealClip, EditorCommands.CutsceneOpenClip, new MenuSeparator(), EditorCommands.CutsceneMatchClipLength],
+            _editor.SelectedSubSequence != null
+                ? [EditorCommands.CutsceneOpenSubSequence, EditorCommands.CutsceneOpenInOwnTab]
+                : [EditorCommands.CutsceneRevealClip, EditorCommands.CutsceneOpenClip, new MenuSeparator(), EditorCommands.CutsceneMatchClipLength],
             shell.Commands, shell.KeyBindings, MenuBinding.Snapshot, Refocus);
         menu.Open(this);
     }
@@ -846,7 +872,7 @@ sealed class CutsceneTimeline : Control
         {
             OpenSectionMenu();
         }
-        else if (Input.Press(point.Position.X, point.Position.Y, button, e.KeyModifiers))
+        else if (Input.Press(point.Position.X, point.Position.Y, button, e.KeyModifiers, e.ClickCount))
         {
             e.Pointer.Capture(this);
         }

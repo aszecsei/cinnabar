@@ -40,8 +40,8 @@ public sealed partial class CutsceneEditor
             BeginShuttleHold();
             _shell.CutscenePreview.Pause();
         }),
-        EditorCommands.CutsceneSetIn => new(() => SetIn(Playhead)),
-        EditorCommands.CutsceneSetOut => new(() => SetOut(Playhead)),
+        EditorCommands.CutsceneSetIn => new(() => SetIn(RootPlayhead)),
+        EditorCommands.CutsceneSetOut => new(() => SetOut(RootPlayhead)),
         EditorCommands.CutsceneClearInOut => new(ClearInOut, () => InPoint != null || OutPoint != null),
         EditorCommands.CutsceneLoop => new(() => Loop = !Loop),
         EditorCommands.CutscenePreviousKey => new(() => SetPlayhead(KeyEdges().LastOrDefault(t => t < Playhead))),
@@ -100,6 +100,9 @@ public sealed partial class CutsceneEditor
         EditorCommands.CutsceneMatchClipLength => new(MatchClipLength, () => CanMatchClipLength),
         EditorCommands.CutsceneAddEvent => new(AddEvent, () => !Document.InTransaction),
         EditorCommands.CutsceneJumpToHandler => new(JumpToHandler, () => JumpToHandlerRefusal() == null),
+        EditorCommands.CutsceneOpenSubSequence => new(() => OpenSubSequence(SelectedSubSequence!), () => OpenSubSequenceRefusal(SelectedSubSequence) == null),
+        EditorCommands.CutsceneUpOneLevel => new(() => UpOneLevel(), () => InContext && !Documents.Any(d => d.InTransaction)),
+        EditorCommands.CutsceneOpenInOwnTab => new(OpenInOwnTab, () => CanOpenInOwnTab),
         _ => null,
     };
 

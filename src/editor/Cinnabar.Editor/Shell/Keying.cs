@@ -701,7 +701,7 @@ public sealed partial class Keying
             return "Pause the preview to key.";
         }
         // The game keeps the preview's time within the cutscene's range, so past its end the world holds the end's pose.
-        var playhead = Math.Clamp(open.Editor.Playhead, open.RangeStart, Math.Max(open.RangeStart, open.RangeEnd));
+        var playhead = Math.Clamp(open.Editor.RootPlayhead, open.RangeStart, Math.Max(open.RangeStart, open.RangeEnd));
         if (_shell.World.ShownPreviewOf(handle) is not { } shown || shown.Ticket != open.Ticket || shown.Tick != playhead)
         {
             return "Waiting for the preview to show the playhead.";
@@ -713,9 +713,14 @@ public sealed partial class Keying
             return "Waiting for the preview to show the values.";
         }
         // The world must show the cutscene as the tab has it: its unsaved text's blob, or the saved file unchanged.
-        if (open.Unsaved ? shown.Blob == 0 || shown.Blob != open.Editor.CleanBlob : open.Editor.Document.IsDirty)
+        if (open.Unsaved ? shown.Blob == 0 || shown.Blob != open.Editor.CleanBlob : open.Editor.RootDocument.IsDirty)
         {
             return "Waiting for the preview to show the cutscene's last edit.";
+        }
+        // In context, the keys go to the sub-sequence, whose last edit must have cooked for the game to play it.
+        if (!open.Editor.ShownCookedCurrent)
+        {
+            return "Waiting for the preview to show the sub-sequence's last edit.";
         }
         return null;
     }

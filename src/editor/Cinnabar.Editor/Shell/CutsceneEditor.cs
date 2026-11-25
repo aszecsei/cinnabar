@@ -29,6 +29,7 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     readonly EditorShell _shell;
     readonly List<string> _selection = [];
     readonly HashSet<string> _folds = [];
+    readonly CutsceneDocuments.Lease _rootLease;
     readonly HashSet<int> _locked;
     readonly HashSet<int> _muted;
     readonly HashSet<int> _soloed;
@@ -53,8 +54,10 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     internal CutsceneEditor(EditorShell shell, CutsceneDocument document)
     {
         _shell = shell;
-        Document = document;
-        Checks = new CookChecks<GraphProblem>(shell, document.Guid, () => CookText, () => Document.Path,
+        _rootLease = shell.CutsceneDocuments.Adopt(document);
+        RootDocument = document;
+        _shown = document;
+        Checks = new CookChecks<GraphProblem>(shell, document.Guid, () => CookText, () => RootDocument.Path,
             l => new GraphProblem(null, l.Text, l.Error, l.Line));
         Checks.Changed += OnChecked;
         Checks.CookedCleanChanged += () => _shell.CutscenePreview.OnCookedCleanChanged(this);
@@ -74,15 +77,28 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
         _entityBindings = BindingsOfEntities(_shell.Selection.Entities);
     }
 
-    public CutsceneDocument Document { get; }
+    /// <summary>
+    /// The document of the level that the tab shows, which every edit of the timeline, the curves and the keys goes to:
+    /// the tab's cutscene, or a sub-sequence that it shows in context (see <see cref="Levels"/>).
+    /// </summary>
+    public CutsceneDocument Document => _shown;
 
-    IGraphDocument IGraphEditor.Document => Document;
+    /// <summary>The tab's own cutscene, whose time the preview plays and the playhead keeps.</summary>
+    public CutsceneDocument RootDocument { get; }
+
+    /// <summary>The tab's own cutscene's text.</summary>
+    public CutsceneFile RootFile => RootDocument.Graph;
+
+    IGraphDocument IGraphEditor.Document => RootDocument;
 
     ICookChecks IGraphEditor.Checks => Checks;
 
     public string Noun => "cutscene";
 
-    public string Guid => Document.Guid;
+    public string Guid => RootDocument.Guid;
+
+    /// <summary>The GUID of the level that the tab shows: its own, or the sub-sequence's in context.</summary>
+    public string ShownGuid => Document.Guid;
 
     public CutsceneFile File => Document.Graph;
 
@@ -99,7 +115,7 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     public CutsceneBlock? Selected => Selection is { } path ? File.Find(path) : null;
 
     /// <summary>The problems of the last check, each with its line, or 0 for one of no line of this file.</summary>
-    public IReadOnlyList<GraphProblem> Problems => Checks.Problems;
+    public IReadOnlyList<GraphProblem> Problems => ShownChecks.Problems;
 
     /// <summary>The checks of the tab's text.</summary>
     public CookChecks<GraphProblem> Checks { get; }
@@ -122,7 +138,7 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
         Changed?.Invoke();
         if (!Document.InTransaction)
         {
-            Checks.Schedule();
+            ShownChecks.Schedule();
             // A track added, deleted or muted in the asset changes which tracks a solo silences.
             _shell.CutscenePreview.OnMixChanged(this);
         }
@@ -258,8 +274,15 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
         Flashed?.Invoke();
     }
 
-    /// <summary>The playhead in ticks: where a split, Home and End act. It is the editor's, not the document's, so it is in no undo entry.</summary>
-    public int Playhead => _playhead;
+    /// <summary>
+    /// The playhead in ticks on the time of the level that the tab shows: where a split, Home and End act. In context,
+    /// it is the tab's playhead mapped down through each sub-sequence section (see <see cref="SubSequenceMap"/>). It is
+    /// the editor's, not the document's, so it is in no undo entry.
+    /// </summary>
+    public int Playhead => ToShown(_playhead);
+
+    /// <summary>The playhead on the tab's own cutscene's time, which the preview plays.</summary>
+    public int RootPlayhead => _playhead;
 
     public event Action? PlayheadChanged;
 
@@ -289,8 +312,14 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     /// <summary>J and L while K is not held: plays this tab's preview that way, faster on each press (see <see cref="CutscenePreview.Shuttle"/>).</summary>
     public void Shuttle(int direction) => _shell.CutscenePreview.Shuttle(this, direction);
 
-    /// <summary>Moves the playhead, inside the length. The preview shows it, and a playing preview pauses.</summary>
-    public void SetPlayhead(int ticks)
+    /// <summary>
+    /// Moves the playhead to a time of the level that the tab shows, inside the length. In context, it maps up to the
+    /// tab's time on the pass of the loop that the playhead is on. The preview shows it, and a playing preview pauses.
+    /// </summary>
+    public void SetPlayhead(int ticks) => SetRootPlayhead(ToRoot(ticks));
+
+    /// <summary>Moves the playhead to a time of the tab's own cutscene. The preview shows it, and a playing preview pauses.</summary>
+    public void SetRootPlayhead(int ticks)
     {
         if (MovePlayhead(ticks))
         {
@@ -298,12 +327,12 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
         }
     }
 
-    /// <summary>Moves the playhead to the tick that the game reported, which the preview does not send back.</summary>
+    /// <summary>Moves the playhead to the tick on the tab's own cutscene's time that the game reported, which the preview does not send back.</summary>
     public void SetPlayheadFromGame(int ticks) => MovePlayhead(ticks);
 
     bool MovePlayhead(int ticks)
     {
-        var at = Math.Clamp(ticks, 0, File.Length ?? 0);
+        var at = Math.Clamp(ticks, 0, RootFile.Length ?? 0);
         if (at == _playhead)
         {
             return false;
@@ -318,7 +347,7 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     public void Step(int frames)
     {
         _shell.CutscenePreview.Pause();
-        SetPlayhead(_playhead + frames * FrameTicks);
+        SetRootPlayhead(_playhead + frames * (CutsceneFile.TicksPerSecond / RootFile.Rate));
     }
 
     /// <summary>Whether drags and nudges snap (see <see cref="TimelineSnap"/>). On at first; N turns it off and on.</summary>
@@ -375,10 +404,15 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     }
 
     /// <summary>The IDs of the tracks that this user muted, which the preview does not play. Each user's, for each cutscene.</summary>
-    public IReadOnlySet<int> Muted => _muted;
+    public IReadOnlySet<int> Muted => InContext ? NoTracks : _muted;
 
     /// <summary>The IDs of the tracks that this user soloed: with any, the preview plays only those. Each user's, for each cutscene.</summary>
-    public IReadOnlySet<int> Soloed => _soloed;
+    public IReadOnlySet<int> Soloed => InContext ? NoTracks : _soloed;
+
+    static readonly HashSet<int> NoTracks = [];
+
+    /// <summary>Why mute and solo do nothing, or null when they act: they are the tab's own cutscene's, which the preview plays.</summary>
+    public string? MixRefusal => InContext ? "Mute and solo act on the tab's own cutscene. Go up to it to mute or solo a track." : null;
 
     public void SetMuted(int track, bool muted) => Toggle(_muted, track, muted);
 
@@ -386,6 +420,11 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
 
     void Toggle(HashSet<int> set, int track, bool on)
     {
+        if (MixRefusal is { } why)
+        {
+            _shell.Console.Add(Model.LogLevel.Info, $"cutscene: {why}");
+            return;
+        }
         if (on ? set.Add(track) : set.Remove(track))
         {
             SaveView();
@@ -398,7 +437,7 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     /// The IDs of the tracks that the preview silences because <see cref="Audible"/> says no. A track that the asset
     /// mutes is left out, since its blob mutes it already.
     /// </summary>
-    public IEnumerable<int> SilentTracks() => File.Tracks
+    public IEnumerable<int> SilentTracks() => RootFile.Tracks
         .Where(t => t.Id is { } id && !Audible(id) && t.Get("muted")?.Trim() != "true")
         .Select(t => t.Id!.Value)
         .Distinct();
@@ -476,8 +515,8 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     {
         get
         {
-            var length = File.Length ?? 0;
-            var range = CutsceneEdits.RangeOf(File);
+            var length = RootFile.Length ?? 0;
+            var range = CutsceneEdits.RangeOf(RootFile);
             var a = Math.Clamp(_in ?? range.Start, 0, length);
             var b = Math.Clamp(_out ?? range.End, 0, length);
             var (start, end) = a <= b ? (a, b) : (b, a);
@@ -569,16 +608,38 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     /// </summary>
     public bool Audible(int track)
     {
-        if (_muted.Contains(track) || (!_soloed.Contains(track) && _soloed.Any(id => File.Tracks.Any(t => t.Id == id))))
+        if (_muted.Contains(track) || (!_soloed.Contains(track) && _soloed.Any(id => RootFile.Tracks.Any(t => t.Id == id))))
         {
             return false;
         }
-        return File.Tracks.FirstOrDefault(t => t.Id == track)?.Get("muted")?.Trim() != "true";
+        return RootFile.Tracks.FirstOrDefault(t => t.Id == track)?.Get("muted")?.Trim() != "true";
     }
 
-    void SaveView() => _shell.SaveCutsceneTimelineSettings(Guid,
-        new CutsceneTimelineView(_showFrames, [.. _locked.Order()], [.. _muted.Order()], [.. _soloed.Order()], _scrubSound, _previewEvents,
-            _standIns.Count == 0 ? null : new(_standIns)));
+    // The tab's own cutscene keeps the view's settings. In context, the locks and the stand-ins are the shown level's,
+    // since its tracks' and bindings' IDs are its own, and go to its settings.
+    void SaveView()
+    {
+        if (!InContext)
+        {
+            _shell.SaveCutsceneTimelineSettings(Guid,
+                new CutsceneTimelineView(_showFrames, [.. _locked.Order()], [.. _muted.Order()], [.. _soloed.Order()], _scrubSound, _previewEvents,
+                    _standIns.Count == 0 ? null : new(_standIns)));
+            return;
+        }
+        _shell.SaveCutsceneTimelineSettings(Guid, _shell.CutsceneTimelineSettingsOf(Guid) with
+        {
+            ShowFrames = _showFrames,
+            Muted = [.. _muted.Order()],
+            Soloed = [.. _soloed.Order()],
+            ScrubSound = _scrubSound,
+            Events = _previewEvents,
+        });
+        _shell.SaveCutsceneTimelineSettings(ShownGuid, _shell.CutsceneTimelineSettingsOf(ShownGuid) with
+        {
+            Locked = [.. _locked.Order()],
+            StandIns = _standIns.Count == 0 ? null : new(_standIns),
+        });
+    }
 
     /// <summary>The text that the track tree's search box filters by.</summary>
     public string FilterText { get; private set; } = "";
@@ -1038,7 +1099,7 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     {
         if (CutsceneEdits.Copy(File, _selection) is { } clip)
         {
-            _shell.CutsceneClipboard = clip with { Source = Guid };
+            _shell.CutsceneClipboard = clip with { Source = ShownGuid };
         }
     }
 
@@ -1060,7 +1121,7 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     /// Whether the clipboard holds something to paste here: a copy from this cutscene, since copied blocks name its
     /// bindings by ID.
     /// </summary>
-    public bool CanPaste => !Document.InTransaction && _shell.CutsceneClipboard?.Source == Guid;
+    public bool CanPaste => !Document.InTransaction && _shell.CutsceneClipboard?.Source == ShownGuid;
 
     /// <summary>
     /// The tracks that a paste needs and the cutscene lacks, by kind: the editor asks whether to add them before it
@@ -1091,7 +1152,7 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
         }
         var targetPath = target != null ? CutsceneFile.PathOf(target) : null;
         IReadOnlyList<string> pasted = [];
-        Own(() => Document.Edit("Paste", f => pasted = CutsceneEdits.Paste(f, clip, _playhead, targetPath != null ? f.Find(targetPath) : null, addTracks, _locked)));
+        Own(() => Document.Edit("Paste", f => pasted = CutsceneEdits.Paste(f, clip, Playhead, targetPath != null ? f.Find(targetPath) : null, addTracks, _locked)));
         Select(pasted, SelectMode.Replace);
     }
 
@@ -1164,13 +1225,14 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
             return;
         }
         var path = "";
-        if (File.Markers.FirstOrDefault(m => m.Start == _playhead) is { } there)
+        var playhead = Playhead;
+        if (File.Markers.FirstOrDefault(m => m.Start == playhead) is { } there)
         {
             path = CutsceneFile.PathOf(there);
         }
         else
         {
-            Own(() => Document.Edit("Add Marker", f => path = CutsceneEdits.AddMarker(f, _playhead)));
+            Own(() => Document.Edit("Add Marker", f => path = CutsceneEdits.AddMarker(f, playhead)));
         }
         Select([path], SelectMode.Replace);
     }
@@ -1293,28 +1355,15 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     public void EndNudge() => Document.EndMerge();
 
     /// <summary>
-    /// Where a sub-sequence's child starts to play, the start of its range, read from the child's file by GUID: what a
-    /// section without a trim plays from, which a split, a trim and a slip move. 0 when the child cannot be read.
+    /// Where a sub-sequence's child starts to play, the start of its range, by GUID, from its open document or else its
+    /// file: what a section without a trim plays from, which a split, a trim and a slip move. 0 when the child cannot be
+    /// read.
     /// </summary>
-    public int ChildStart(string guid)
-    {
-        if (_shell.Assets.Find(guid) is not { } asset || _shell.Assets.FullPath(asset) is not { } path)
-        {
-            return 0;
-        }
-        try
-        {
-            return CutsceneFile.Parse(System.IO.File.ReadAllText(path)).File is { } child ? CutsceneEdits.RangeOf(child).Start : 0;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            return 0;
-        }
-    }
+    public int ChildStart(string guid) => _shell.CutsceneDocuments.Read(guid) is { } child ? CutsceneEdits.RangeOf(child).Start : 0;
 
     /// <summary>Whether a split at the playhead has a selected section to split.</summary>
-    public bool CanSplit => !Document.InTransaction && _selection.Any(p => File.Find(p) is { Kind: CutsceneBlockKind.Section, Start: { } s, End: { } e } b
-        && s < _playhead && _playhead < e && !CutsceneEdits.IsLocked(b, _locked));
+    public bool CanSplit => !Document.InTransaction && Playhead is var playhead && _selection.Any(p => File.Find(p) is { Kind: CutsceneBlockKind.Section, Start: { } s, End: { } e } b
+        && s < playhead && playhead < e && !CutsceneEdits.IsLocked(b, _locked));
 
     /// <summary>Splits the selected sections at the playhead, and selects both halves of each.</summary>
     public void Split()
@@ -1325,7 +1374,7 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
         }
         var paths = _selection.ToList();
         IReadOnlyList<string> halves = [];
-        Own(() => Document.Edit("Split", f => halves = CutsceneEdits.Split(f, paths, _playhead, _locked, ChildStart)));
+        Own(() => Document.Edit("Split", f => halves = CutsceneEdits.Split(f, paths, Playhead, _locked, ChildStart)));
         Select(halves, SelectMode.Replace);
     }
 
@@ -1392,8 +1441,10 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
 
     public void Dispose()
     {
-        Checks.Dispose();
         Document.Changed -= OnDocumentChanged;
+        DisposeLevels();
+        Checks.Dispose();
+        _rootLease.Dispose();
         _shell.SceneChanged -= OnBindingTargetsChanged;
         _shell.Assets.Changed -= OnBindingTargetsChanged;
         _shell.Selection.Changed -= OnEntitiesSelected;

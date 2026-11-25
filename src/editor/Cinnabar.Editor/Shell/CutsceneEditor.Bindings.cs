@@ -22,7 +22,7 @@ public sealed partial class CutsceneEditor
     readonly Dictionary<int, string> _standIns;
 
     /// <summary>
-    /// The text that the preview cooks: the document's, with each script slot's stand-in in place of its
+    /// The text that the preview cooks: the tab's own cutscene's, with each script slot's stand-in in place of its
     /// <c>provided = true</c> (see <see cref="CutsceneStandIns.PreviewText"/>).
     /// </summary>
     public string CookText
@@ -30,10 +30,10 @@ public sealed partial class CutsceneEditor
         get
         {
             // The keying's waits read it often, so the text is made again only when the document or a stand-in changes.
-            var text = Document.Text;
+            var text = RootDocument.Text;
             if (_cookText is not { } made || !string.Equals(made.Source, text, StringComparison.Ordinal) || made.StandIns != _standInsVersion)
             {
-                made = (text, _standInsVersion, CutsceneStandIns.PreviewText(text, _standIns));
+                made = (text, _standInsVersion, CutsceneStandIns.PreviewText(text, RootStandIns));
                 _cookText = made;
             }
             return made.Text;
@@ -67,7 +67,7 @@ public sealed partial class CutsceneEditor
         }
         _standInsVersion++;
         SaveView();
-        Checks.Schedule();
+        ShownChecks.Schedule();
         _entityBindings = BindingsOfEntities(_shell.Selection.Entities);
         Changed?.Invoke();
     }

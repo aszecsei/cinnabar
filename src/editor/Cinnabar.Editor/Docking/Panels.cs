@@ -66,7 +66,10 @@ public sealed class GraphEditorDocument : EditorDocument
         Title = editor.Document.Title;
         CanFloat = false;
         CanPin = false;
-        editor.Document.Changed += () => Title = editor.Document.IsDirty ? $"{editor.Document.Title} •" : editor.Document.Title;
+        // A tab can hold more documents than its own, as a cutscene's levels in context, so its editor's changes mark it too.
+        void Mark() => Title = editor.IsDirty ? $"{editor.Document.Title} •" : editor.Document.Title;
+        editor.Document.Changed += Mark;
+        editor.Changed += Mark;
     }
 
     public Shell.IGraphEditor GraphEditor { get; }

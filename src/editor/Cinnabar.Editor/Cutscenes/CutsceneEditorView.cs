@@ -47,6 +47,12 @@ public sealed class CutsceneEditorView : DockPanel
     readonly GridSplitter _curveSplit = new() { ResizeDirection = GridResizeDirection.Rows, IsVisible = false };
     readonly ToggleButton _keysUnder = new() { Content = "Keys under selection", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(8, 0, 0, 0) };
     readonly Button _spawnPicker;
+    // The breadcrumb bar, from the tab's own cutscene down to the sub-sequence shown in context, with the crumbs it was
+    // built for.
+    readonly StackPanel _crumbs = new() { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+    readonly Border _crumbBar;
+    readonly ToggleButton _localTime = new() { Content = "Local time", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(8, 0, 0, 0) };
+    string? _crumbsShown;
 
     public CutsceneEditorView(EditorShell shell, CutsceneEditor editor)
     {
@@ -106,6 +112,19 @@ public sealed class CutsceneEditorView : DockPanel
         var top = new Border { Child = toolbar, BorderBrush = new SolidColorBrush(Color.Parse("#333337")), BorderThickness = new Thickness(0, 0, 0, 1) };
         SetDock(top, DockSide.Top);
         Children.Add(top);
+        // The breadcrumb bar shows while a sub-sequence is shown in context (see docs/editor/cutscene-editor.md#sub-sequences).
+        ToolTip.SetTip(_localTime, "Show the sub-sequence's own time on the ruler, in place of this cutscene's.");
+        _localTime.IsCheckedChanged += (_, _) => editor.LocalTime = _localTime.IsChecked == true;
+        var ownTab = SmallButton("Open in Own Tab", CommandViews.Tip(shell.KeyBindings, "Open the sub-sequence as its own asset, on its own time", EditorCommands.CutsceneOpenInOwnTab),
+            editor.OpenInOwnTab);
+        ownTab.Margin = new Thickness(8, 0, 0, 0);
+        var crumbRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(8, 2) };
+        crumbRow.Children.Add(_crumbs);
+        crumbRow.Children.Add(_localTime);
+        crumbRow.Children.Add(ownTab);
+        _crumbBar = new Border { Child = crumbRow, IsVisible = false, BorderBrush = new SolidColorBrush(Color.Parse("#333337")), BorderThickness = new Thickness(0, 0, 0, 1) };
+        SetDock(_crumbBar, DockSide.Top);
+        Children.Add(_crumbBar);
 
         var grid = new Grid { RowDefinitions = new RowDefinitions("*,4,220") };
         var timeline = _timeline = new CutsceneTimeline(editor);
@@ -246,6 +265,41 @@ public sealed class CutsceneEditorView : DockPanel
             .Add(() => _shell.Host.StateChanged += OnHostState, () => _shell.Host.StateChanged -= OnHostState);
     }
 
+    // The crumbs: a button for each level above the shown one, which goes up to it, then the shown level's name.
+    void ShowCrumbs()
+    {
+        _crumbBar.IsVisible = _editor.InContext;
+        if (_localTime.IsChecked != _editor.LocalTime)
+        {
+            _localTime.IsChecked = _editor.LocalTime;
+        }
+        var crumbs = _editor.Breadcrumbs;
+        var key = string.Join("\n", crumbs);
+        if (key == _crumbsShown)
+        {
+            return;
+        }
+        _crumbsShown = key;
+        _crumbs.Children.Clear();
+        for (var depth = 0; depth < crumbs.Count; depth++)
+        {
+            if (depth > 0)
+            {
+                _crumbs.Children.Add(new TextBlock { Text = "›", FontSize = 12, Margin = new Thickness(6, 0), VerticalAlignment = VerticalAlignment.Center });
+            }
+            if (depth == crumbs.Count - 1)
+            {
+                _crumbs.Children.Add(new TextBlock { Text = crumbs[depth], FontSize = 12, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+                continue;
+            }
+            var level = depth;
+            var tip = level == crumbs.Count - 2
+                ? CommandViews.Tip(_shell.KeyBindings, $"Go up to {crumbs[level]}", EditorCommands.CutsceneUpOneLevel)
+                : $"Go up to {crumbs[level]}";
+            _crumbs.Children.Add(SmallButton(crumbs[level], tip, () => _editor.GoToLevel(level)));
+        }
+    }
+
     // A paste needs tracks that the cutscene lacks: Add pastes with them, Cancel pastes nothing.
     async Task AskPasteTracks(IReadOnlyList<string> kinds)
     {
@@ -357,8 +411,9 @@ public sealed class CutsceneEditorView : DockPanel
         {
             _loop.IsChecked = _editor.Loop;
         }
+        ShowCrumbs();
         var range = _editor.LoopRange is { } loop
-            ? $"{CutsceneTime.Timecode(loop.Start, _editor.File.Rate)} to {CutsceneTime.Timecode(loop.End, _editor.File.Rate)}"
+            ? $"{CutsceneTime.Timecode(loop.Start, _editor.RootFile.Rate)} to {CutsceneTime.Timecode(loop.End, _editor.RootFile.Rate)}"
             : "nothing: the in and the out point are at one time";
         ToolTip.SetTip(_loop, $"Loop the preview (Ctrl+L) over {range}. I and O set the in and the out point.");
         var selected = Array.FindIndex(PlayRates, r => r == _editor.PlayRate);
@@ -373,7 +428,7 @@ public sealed class CutsceneEditorView : DockPanel
         var state = _editor.Checks.State;
         var described = preview.Describe(_editor);
         CookStatus.Show(_status, state, CookStatus.Describe(state, _editor.Problems.Count(p => p.Error), _shell.Cook.Linked),
-            _editor.Document.IsDirty ? "not saved" : null,
+            _editor.IsDirty ? "not saved" : null,
             preview.RateIn(_editor) is { } playing && playing != 1 ? $"{described} at {playing:0.##}×" : described);
     }
 }

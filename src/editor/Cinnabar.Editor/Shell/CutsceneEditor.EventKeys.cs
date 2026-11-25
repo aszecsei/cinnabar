@@ -134,7 +134,7 @@ public sealed partial class CutsceneEditor
         var binding = target?.Kind == CutsceneBlockKind.Binding ? target.Id : CutsceneEdits.BindingOf(target);
         var name = ChoicesFor(binding, range: false) is [var first, ..] ? first.Name : "event";
         string? path = null;
-        Key("Add Event", f => path = CutsceneEdits.AddEvent(f, targetPath == null ? null : f.Find(targetPath), _playhead, name, _locked));
+        Key("Add Event", f => path = CutsceneEdits.AddEvent(f, targetPath == null ? null : f.Find(targetPath), Playhead, name, _locked));
         if (path == null || File.Find(path) is not { } added || CutsceneEdits.TrackOf(added) is not { } track)
         {
             return;
