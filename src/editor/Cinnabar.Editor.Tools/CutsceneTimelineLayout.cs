@@ -750,7 +750,7 @@ public sealed class CutsceneTimelineLayout
             }
             result.Add(new CutsceneVisibleRow(row, RulerHeight + row.Top - scrollY, bars, Glyphs(row.Points, view, from, to), Glyphs(row.Keys, view, from, to))
             {
-                Flags = [.. FlagsInView(row, view).TakeWhile(f => f.X <= view.X(to))],
+                Flags = [.. RowFlags(row, view).Where(f => f.X + f.Width >= -Grab && f.X <= view.X(to))],
             });
         }
         return result;
@@ -794,10 +794,10 @@ public sealed class CutsceneTimelineLayout
     /// <summary>How wide a flag is that says the text.</summary>
     public static double FlagWidth(string text) => FlagInset + text.Length * FlagCharWidth + FlagPad;
 
-    // A row's flags from the left edge of the view on, which the draw and the hit test both group from, so a badge holds
-    // the same triggers in each.
-    static List<CutsceneEventFlag> FlagsInView(CutsceneTimelineRow row, TimelineView view) =>
-        row.Points.Count == 0 ? [] : Flags(Glyphs(row.Points, view, view.At(-Grab), double.PositiveInfinity));
+    // A row's flags, grouped from its first trigger, so the draw and the hit test agree on what a badge holds, and a pan
+    // does not change it.
+    static List<CutsceneEventFlag> RowFlags(CutsceneTimelineRow row, TimelineView view) =>
+        row.Points.Count == 0 ? [] : Flags(Glyphs(row.Points, view, double.NegativeInfinity, double.PositiveInfinity));
 
     static List<CutsceneKeyGlyph> Glyphs(List<CutsceneTimelineItem> items, TimelineView view, double from, double to)
     {
@@ -932,7 +932,7 @@ public sealed class CutsceneTimelineLayout
             return new CutsceneHit(CutsceneHitKind.Key, row, keys, tick);
         }
         // A trigger's diamond, with the others of its flag, then the bars, then the rest of a flag: its name or its badge.
-        var flags = FlagsInView(row, view);
+        var flags = RowFlags(row, view);
         if (flags.Where(f => Math.Abs(f.X - px) <= Grab).MinBy(f => Math.Abs(f.X - px)) is { } diamond)
         {
             return new CutsceneHit(CutsceneHitKind.Trigger, row, [.. diamond.Paths], tick);

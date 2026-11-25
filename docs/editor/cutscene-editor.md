@@ -236,7 +236,7 @@ Each action is a command, so it is in the command palette, and `keybindings.json
 
 ### Cost
 
-A redraw reads only the draw list that `CutsceneTimelineLayout.Visible` gives: the rows in view, and the items in view in each row. It finds the keys with a binary search. Each bar's label, and its clip's name and length from the index, are found when the rows are built, not when they draw. A clip's loop marks are made only for the part in view. `CutsceneFile` keeps an index of its blocks by path, which a change of a keyword line or of the tree drops, so a lookup of a selected path does not search the file.
+A redraw reads only the draw list that `CutsceneTimelineLayout.Visible` gives: the rows in view, and the items in view in each row. It finds the keys with a binary search. Each bar's label, and its clip's name and length from the index, are found when the rows are built, not when they draw. A clip's loop marks are made only for the part in view. An event track's row groups all of its triggers into flags on each redraw, one pass over them, so that a pan does not change a badge. `CutsceneFile` keeps an index of its blocks by path, which a change of a keyword line or of the tree drops, so a lookup of a selected path does not search the file.
 
 A test with 50 tracks and 5,000 keys checks two times:
 - the draw list takes less than 4 ms;
@@ -850,7 +850,7 @@ An event sends up to four values, in order (`value = <kind> <value>` lines).
 ### Flags on the timeline
 
 - **A flag.** A trigger draws as its diamond with a flag beside it that holds its name, and a range as its bar with its name in it. A flag is as wide as its name, at a fixed width for each character, so the draw and the hit test agree without a font (`CutsceneTimelineLayout.Flags`).
-- **A badge.** Triggers closer than the first one's flag is wide collapse into a badge with their count, as wide as its name or its count, whichever is wider. A glyph joins the flag before it while it is closer to that flag's start than the flag is wide. The grouping starts at the left edge of the view, so a zoom or a scroll can change it.
+- **A badge.** Triggers closer than the first one's flag is wide collapse into a badge with their count, as wide as its name or its count, whichever is wider. A glyph joins the flag before it while it is closer to that flag's start than the flag is wide. The grouping starts at the row's first trigger, so a zoom changes it and a pan does not. A flag whose diamond is left of the view still draws while its name is in it.
 - **A click** on a diamond, a name or a badge takes all of its triggers, as a merged glyph does, so a drag moves them together. A bar under the point comes before a flag's name, so a range under a name keeps its body and its edges. The box selects by time.
 - **A hover** on a badge lists its triggers' names in time order, and then the warning of any of them that has one (see [Names](#names)).
 

@@ -857,6 +857,15 @@ settings_silence_tracks_turn_grains_off_and_send_events_while_playing :: proc(t:
 	frame(f, 0)
 	testing.expect_value(t, beats, 1)
 	testing.expect_value(t, fired_count(step(f)), 0)
+
+	// A play whose last frame crosses the beat and stops at the end of the range still sends it.
+	step(f, link.Cutscene_Preview_Play{ticket = 1, tick = SECOND / 4, rate = 1})
+	frame(f, 10 * time.Second)
+	testing.expect_value(t, beats, 2)
+	messages = step(f)
+	testing.expect_value(t, fired_count(messages), 1)
+	stop, stopped := find_message(messages, link.Cutscene_Preview_Tick)
+	testing.expect(t, stopped && !stop.playing)
 }
 
 @(private = "file")

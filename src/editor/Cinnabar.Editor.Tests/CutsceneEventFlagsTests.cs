@@ -25,11 +25,11 @@ public sealed class CutsceneEventFlagsTests
 
         """;
 
-    static (Layout Layout, CutsceneVisibleRow Row) Shown(double perPixel)
+    static (Layout Layout, CutsceneVisibleRow Row) Shown(double perPixel, double start = 0)
     {
         var file = CutsceneFile.Parse(Text.ReplaceLineEndings("\n")).File!;
         var layout = Layout.Build(file, new HashSet<string>());
-        var row = layout.Visible(new TimelineView(0, perPixel, TimelineZoom.Ticks), 10000, 0, 1000).Single(r => r.Row.TrackKind == "event");
+        var row = layout.Visible(new TimelineView(start, perPixel, TimelineZoom.Ticks), 10000, 0, 1000).Single(r => r.Row.TrackKind == "event");
         return (layout, row);
     }
 
@@ -59,6 +59,17 @@ public sealed class CutsceneEventFlagsTests
         // Ten times further out, all three are one badge.
         (_, row) = Shown(1000);
         Assert.Equal("3", Assert.Single(row.Flags).Text);
+    }
+
+    [Fact]
+    public void APanThatPutsTheFirstDiamondLeftOfTheViewKeepsItsBadge()
+    {
+        // The badge's first diamond is 10 pixels left of the view, and its count still in it.
+        var (_, row) = Shown(100, 11000);
+
+        Assert.Equal(-10, row.Flags[0].X);
+        Assert.Equal(["a_long_name", "b"], Names(row.Flags[0]));
+        Assert.Equal("c", row.Flags[1].Text);
     }
 
     [Fact]

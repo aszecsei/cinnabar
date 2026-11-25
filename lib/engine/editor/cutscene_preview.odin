@@ -542,10 +542,11 @@ update_cutscene_preview :: proc(
 	if !ok {
 		return
 	}
+	stopped := false
 	if playing, is_playing := &p.clock.(Preview_Playing); is_playing {
 		if advance_preview(e, w, p, playing, data, blob, dt) {
+			stopped = true
 			p.clock = Preview_Paused{}
-			cutscene.set_audition(&p.live.evaluation, w, .Scrub)
 			link.write_message(
 				&e.session.outbox,
 				link.Cutscene_Preview_Tick {
@@ -571,6 +572,11 @@ update_cutscene_preview :: proc(
 	// update.
 	send_fired_events(e, p)
 	cutscene.send_events(e.cutscenes)
+	// A play that stopped at the end of the range evaluated this frame as it played, so the events up to the end went
+	// out, and is scrubbed from the next.
+	if stopped {
+		cutscene.set_audition(&p.live.evaluation, w, .Scrub)
+	}
 	return changed, despawned
 }
 
