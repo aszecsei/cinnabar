@@ -1,6 +1,6 @@
 cutscene 1
 # The sample's intro (see docs/content/kinds/cutscenes.md): the animation scene's walking fox walks 4 m, past a guard
-# that the cutscene spawns, to a bark, after the fox_walk shot, while the running fox runs 6 m beside it and a stone that
+# that the cutscene spawns, to a bark, after the fox_walk shot, while the running fox runs 3 m beside it and a stone that
 # the cutscene spawns rolls away from the guard as it barks. Times are ticks, 60000 a second. The fox's track is
 # relative, so it walks from where it stands, and its walk clip loops in place while that track moves it. The shot, which
 # the intro binds to the fox, turns the fox to its path as the intro begins. Three spawned shot cameras cut the scene: a
@@ -43,8 +43,10 @@ binding 6 "Running Fox"
 	possess = @f496b929575035d9c2626ed56d3165ba/76b64f812f12cecf
 	policy = optional
 binding 7 "Stone"
+	# The prefab's own scale, which a spawned binding's scale replaces.
 	spawn = $9a2728bfc2e9b1d21ce27d2eb945c856
 	position = [150000000002.5, 0.12, 1.2]
+	scale = [0.12, 0.12, 0.12]
 
 track 1 transform "Fox walks"
 	binding = 1
@@ -148,12 +150,13 @@ track 10 presentation "Presentation"
 		key = "intro.narrator.path"
 		audio = 10
 track 11 transform "Fox runs"
-	# The running fox runs on from where it stands, along its own forward, its z, and is back there when the intro ends.
+	# The running fox runs on from where it stands, along its own forward, its z, to near the floor's edge, and is back
+	# there when the intro ends.
 	binding = 6
 	section 14 0 600000
 		channel position_z
 			key 0 0 linear
-			key 600000 6 linear
+			key 600000 3 linear
 track 12 transform "Stone rolls"
 	# Kicked by the bark, the stone rolls 1.5 m, two turns of its 0.12 m radius.
 	binding = 7

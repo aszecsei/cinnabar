@@ -241,6 +241,7 @@ public sealed class CutsceneSampleBuildTests : IDisposable
         editor.Spawn([StonePrefab]);
         Rename(editor, editor.SelectedPaths.Single(), "Stone");
         Set(editor, BindingPath(editor, "Stone"), "position", "[150000000002.5, 0.12, 1.2]");
+        Set(editor, BindingPath(editor, "Stone"), "scale", "[0.12, 0.12, 0.12]");
         Assert.Equal([1, 2, 3, 4, 5, 6, 7], editor.File.Bindings.Select(b => b.Id!.Value));
 
         // The three transform tracks, keyed as the key button keys, while the length is still the template's. A key
@@ -252,7 +253,7 @@ public sealed class CutsceneSampleBuildTests : IDisposable
         Straighten(editor, walkSection, "position_x");
         EaseTo(editor, walkSection, CutsceneEdge.Start, 15000);
 
-        KeyTrack(editor, 6, "Fox runs", 0, 600000, [(PosePart.Position, [0, 0, 0], [0, 0, 6])], ["position_x", "position_y"]);
+        KeyTrack(editor, 6, "Fox runs", 0, 600000, [(PosePart.Position, [0, 0, 0], [0, 0, 3])], ["position_x", "position_y"]);
         Straighten(editor, SectionPath(editor, "Fox runs", 0), "position_z");
 
         KeyTrack(editor, 7, "Stone rolls", 360000, 480000,
