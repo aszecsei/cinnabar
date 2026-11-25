@@ -159,6 +159,9 @@ Asset :: struct {
 	// For a script that defines an action, the action's name, and its parameters sorted by name.
 	action:          string,
 	params:          []Action_Param,
+	// For a script that defines a behaviour, the event handlers of its class, sorted by name (see
+	// docs/scripting/behaviours.md#events), which the cutscene editor lists for event keys.
+	handlers:        []Behaviour_Handler,
 	// The import settings in its .meta file, in the file's order.
 	settings:        []Setting,
 	// The GUIDs of the assets that it depends on: a script's requires, and the scripts that a scene names.
@@ -213,6 +216,32 @@ Action_Param_Kind :: enum u8 {
 Action_Param :: struct {
 	name: string,
 	kind: Action_Param_Kind,
+}
+
+// Handler_Param_Kind is the type of an event handler's parameter, from its annotation, as an event key's value kinds
+// name them. Untyped for one with no annotation or another type.
+Handler_Param_Kind :: enum u8 {
+	Untyped,
+	Number,
+	Bool,
+	String,
+	Vector,
+	Entity,
+	Position,
+	Asset,
+}
+
+Handler_Param :: struct {
+	name: string,
+	kind: Handler_Param_Kind,
+}
+
+// Behaviour_Handler is a method on_<name> of a behaviour's class: the name without on_, the 1-based line where its function
+// starts, and its parameters after self.
+Behaviour_Handler :: struct {
+	name:   string,
+	line:   u32,
+	params: []Handler_Param,
 }
 
 Setting :: struct {

@@ -7,7 +7,7 @@ using Welcome = Cinnabar.Editor.Link.Cook.Welcome;
 namespace Cinnabar.Editor.Tests;
 
 /// <summary>
-/// What a section shows of its clip from outside the cutscene (see docs/editor/cutscene-editor.md#waveforms and #events):
+/// What a section shows of its clip from outside the cutscene (see docs/editor/cutscene-editor.md#waveforms and #clip-events):
 /// a sound's peak file from the index, and an animation clip's events from its binding's Animator's graph.
 /// </summary>
 public sealed class CutsceneClipEventsTests : IDisposable

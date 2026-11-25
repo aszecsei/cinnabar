@@ -7,6 +7,7 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 
+import cook_link "cinnabar:engine/asset/cook_link"
 import format "cinnabar:engine/asset/format"
 
 // The content of the saved index's tests: a scene that instantiates a door, which instantiates a lamp, a yard that
@@ -263,6 +264,12 @@ the_watcher_says_which_paths_changed :: proc(t: ^testing.T) {
 a_daemon_that_starts_again_reads_nothing_that_did_not_change :: proc(t: ^testing.T) {
 	tree := saved_tree(t)
 	defer remove_tree(tree)
+	// A behaviour with a handler, which a carried script keeps.
+	guard := "local Guard = Behaviour.define(\"Guard\", {})\nfunction Guard:on_ring(times: number) end\nreturn Guard"
+	testing.expect(
+		t,
+		os.write_entire_file(content_path(tree, "guard.luau"), transmute([]byte)guard) == nil,
+	)
 	options := tree_options(tree)
 	first := Daemon {
 		options = options,
@@ -285,6 +292,15 @@ a_daemon_that_starts_again_reads_nothing_that_did_not_change :: proc(t: ^testing
 	testing.expect_value(t, cooked, 0)
 	testing.expect_value(t, len(again.index.assets), len(first.index.assets))
 	testing.expect(t, !index_changed(index_diff(&first.index, &again.index)))
+	handlers := 0
+	for _, a in again.index.assets {
+		for h in a.handlers {
+			testing.expect_value(t, h.name, "ring")
+			testing.expect(t, slice.equal(h.params, []cook_link.Handler_Param{{"times", .Number}}))
+			handlers += 1
+		}
+	}
+	testing.expect_value(t, handlers, 1)
 	testing.expect(
 		t,
 		slice.equal(

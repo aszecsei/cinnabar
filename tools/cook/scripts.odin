@@ -56,6 +56,9 @@ Script_Source :: struct {
 	// The action that it defines, if it is one, and its parameters, sorted by name.
 	action:         string,
 	params:         []cook_link.Action_Param,
+	// The event handlers of the behaviour class that it defines, sorted by name, which find_requires reads from the
+	// source on every pass, so a script that is up to date has them too.
+	handlers:       []cook_link.Behaviour_Handler,
 }
 
 Resolved_Require :: struct {
@@ -95,6 +98,7 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 		a.edit_mode = s.options.edit_mode
 		a.action = s.action
 		a.params = s.params
+		a.handlers = s.handlers
 	}
 	by_path := make(map[string]int, len(scripts), context.temp_allocator)
 	for s, i in scripts {
@@ -299,9 +303,13 @@ Find_Context :: struct {
 	script:   ^Script_Source,
 	problems: ^Problems,
 	failed:   bool,
+	handlers: [dynamic]cook_link.Behaviour_Handler,
+	// Each handler's parameters, by the handler's index.
+	params:   [dynamic][dynamic]cook_link.Handler_Param,
 }
 
-// find_requires lists the script's require calls. A parse error or a require without a string literal is an error.
+// find_requires lists the script's require calls and its behaviour class's event handlers. A parse error or a require
+// without a string literal is an error.
 find_requires :: proc(s: ^Script_Source, problems: ^Problems) -> bool {
 	on_require :: proc "c" (
 		ud: rawptr,
@@ -329,10 +337,41 @@ find_requires :: proc(s: ^Script_Source, problems: ^Problems) -> bool {
 		report_error(f.problems, f.script.path, int(line), 0, "%s", string(text[:size]))
 		f.failed = true
 	}
+	on_handler :: proc "c" (ud: rawptr, name: [^]u8, size: c.size_t, line: c.int) {
+		f := (^Find_Context)(ud)
+		context = f.ctx
+		append(
+			&f.handlers,
+			cook_link.Behaviour_Handler {
+				name = strings.clone(string(name[:size]), context.temp_allocator),
+				line = u32(line),
+			},
+		)
+		append(&f.params, make([dynamic]cook_link.Handler_Param, context.temp_allocator))
+	}
+	on_param :: proc "c" (
+		ud: rawptr,
+		name: [^]u8,
+		size: c.size_t,
+		type: [^]u8,
+		type_size: c.size_t,
+	) {
+		f := (^Find_Context)(ud)
+		context = f.ctx
+		append(
+			&f.params[len(f.params) - 1],
+			cook_link.Handler_Param {
+				name = strings.clone(string(name[:size]), context.temp_allocator),
+				kind = handler_param_kind(string(type[:type_size])),
+			},
+		)
+	}
 	f := Find_Context {
 		ctx      = context,
 		script   = s,
 		problems = problems,
+		handlers = make([dynamic]cook_link.Behaviour_Handler, context.temp_allocator),
+		params   = make([dynamic][dynamic]cook_link.Handler_Param, context.temp_allocator),
 	}
 	cn_luau_find_requires(
 		raw_data(s.source),
@@ -340,10 +379,42 @@ find_requires :: proc(s: ^Script_Source, problems: ^Problems) -> bool {
 		&f,
 		on_require,
 		on_error,
+		on_handler,
+		on_param,
 		&s.defines_class,
 		&s.native_comment,
 	)
+	for &h, i in f.handlers {
+		h.params = f.params[i][:]
+	}
+	slice.stable_sort_by(
+		f.handlers[:],
+		proc(a, b: cook_link.Behaviour_Handler) -> bool {return a.name < b.name},
+	)
+	s.handlers = f.handlers[:]
 	return !f.failed
+}
+
+// handler_param_kind is the kind of value that an event key sends for a parameter with this annotation, or Untyped
+// for one with none or another type. An optional type is its type's kind.
+handler_param_kind :: proc(annotation: string) -> cook_link.Handler_Param_Kind {
+	switch strings.trim_suffix(strings.trim_space(annotation), "?") {
+	case "number":
+		return .Number
+	case "boolean":
+		return .Bool
+	case "string":
+		return .String
+	case "vector":
+		return .Vector
+	case "Entity":
+		return .Entity
+	case "WorldPosition":
+		return .Position
+	case "Asset":
+		return .Asset
+	}
+	return .Untyped
 }
 
 // resolve_requires resolves each require of a script to a script in the roots, as Luau's require does (see

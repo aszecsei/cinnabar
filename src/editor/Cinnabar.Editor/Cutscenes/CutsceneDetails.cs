@@ -33,7 +33,8 @@ sealed class CutsceneDetails : DetailsPanel
     {
         var block = _editor.Selected;
         // A binding's state and whether a delete can remove it depend on the scenes and the other blocks.
-        var binding = block?.Kind == CutsceneBlockKind.Binding ? BindingKey(block) : "";
+        var binding = block?.Kind == CutsceneBlockKind.Binding ? BindingKey(block)
+            : block?.Kind is CutsceneBlockKind.Trigger or CutsceneBlockKind.Range ? EventKey(block) : "";
         return block == null ? "" : $"{_editor.Selection}#{string.Join("\n", block.LineTexts)}#{_editor.File.Rate}{binding}";
     }
 
@@ -72,9 +73,14 @@ sealed class CutsceneDetails : DetailsPanel
             case CutsceneBlockKind.Section or CutsceneBlockKind.Range:
                 Rows.Add(TicksRow("Start", "Move Start", b => b.Start, (b, t) => b.SetSpan(t, b.End ?? t + 1), rate));
                 Rows.Add(TicksRow("End", "Move End", b => b.End, (b, t) => b.SetSpan(b.Start ?? 0, t), rate));
+                if (block.Kind == CutsceneBlockKind.Range)
+                {
+                    AddEventRows(block);
+                }
                 break;
             case CutsceneBlockKind.Trigger:
                 Rows.Add(TicksRow("Time", "Move Trigger", b => b.Start, (b, t) => b.SetTime(t), rate));
+                AddEventRows(block);
                 break;
             case CutsceneBlockKind.Key:
                 Rows.Add(TicksRow("Time", "Move Key", b => b.Start, (b, t) => b.SetTime(t), rate));
@@ -104,7 +110,8 @@ sealed class CutsceneDetails : DetailsPanel
         }
         foreach (var (key, value) in block.Fields)
         {
-            if ((block.Kind == CutsceneBlockKind.Cutscene && key == "length") || (block.Kind == CutsceneBlockKind.Marker && key == "color"))
+            if ((block.Kind == CutsceneBlockKind.Cutscene && key == "length") || (block.Kind == CutsceneBlockKind.Marker && key == "color")
+                || (block.Kind is CutsceneBlockKind.Trigger or CutsceneBlockKind.Range && EventSettings.Contains(key)))
             {
                 continue;
             }
@@ -131,6 +138,134 @@ sealed class CutsceneDetails : DetailsPanel
         var refusals = string.Join("|", Kinds.Select(_editor.ConvertRefusal));
         return $"#{_editor.InfoOf(block)}#{_editor.DeleteBindingRefusal()}#{_editor.StandInOf(id)}#{_editor.Picking}#{_editor.PickRefusal()}"
             + $"#{candidates}#{refusals}#{_editor.StandInRefusal()}";
+    }
+
+    // The settings of an event that its own rows edit.
+    static readonly HashSet<string> EventSettings = ["value", "fire_when_skipped", "fire_on_seek"];
+
+    // What an event's rows depend on besides its lines: the handlers that its track's behaviours define, with their
+    // classes and parameters, its warning, and the bindings that an entity value lists.
+    string EventKey(CutsceneBlock block)
+    {
+        var handlers = _editor.HandlerChoices(block) is { } choices
+            ? string.Join(",", choices.Select(c => $"{c.Script}.{c.Class}.{c.Name}:{c.Line}({string.Join(",", c.Params.Select(p => $"{p.Name}:{p.Kind}"))})"))
+            : "unknown";
+        var bindings = string.Join(",", _editor.File.Bindings.Select(b => $"{b.Id} {b.Name}"));
+        return $"#{handlers}#{_editor.HandlerWarning(block)}#{bindings}";
+    }
+
+    // A trigger's or a range's rows (see docs/editor/cutscene-editor.md#events): its name, with the list of the events
+    // that its track's behaviours handle and a warning when none handles it, Jump to Handler, its payload and its flags.
+    void AddEventRows(CutsceneBlock block)
+    {
+        var choices = _editor.HandlerChoices(block) ?? [];
+        // On a track without a binding, every script's events, each with its class.
+        var master = CutsceneEdits.BindingOf(block.Parent) == null;
+        var options = choices.Select(c => master ? $"{c.Name} ({c.Class})" : c.Name).Distinct().ToList();
+        var name = block.Name ?? "";
+        var selected = choices.FirstOrDefault(c => c.Name == name) is { } current ? (master ? $"{current.Name} ({current.Class})" : current.Name) : null;
+        var box = ValueBox(name, ValueFormats.Text.Where(t => CutsceneBlock.IsEventName(t.Trim()), "letters, digits and _"), "event name", text => _editor.RenameEvent(text));
+        var after = new List<Control>();
+        if (options.Count > 0)
+        {
+            var list = Choice(options, selected, picked => _editor.RenameEvent(picked.Split(' ')[0]));
+            ToolTip.SetTip(list, "The events that the behaviours handle");
+            after.Add(list);
+        }
+        Rows.Add(Row("Name", box, [.. after]));
+        if (_editor.HandlerWarning(block) is { } warning)
+        {
+            Rows.Add(ProblemText(warning, error: false));
+        }
+        if (_editor.HandlerOf(block) is { } handler)
+        {
+            var jump = SmallButton("Jump to Handler", "Open the handler's script at its line, in the script editor", _editor.JumpToHandler);
+            Rows.Add(Row("Handler", new TextBlock { Text = $"{handler.Class} · line {handler.Line}", FontSize = 12 }, jump));
+        }
+        AddValueRows(block);
+        Rows.Add(Row("Flags", Flag(block, "fire_when_skipped", "Fire when skipped", "A skip that crosses it sends it"),
+            Flag(block, "fire_on_seek", "Fire on seek", "A forward seek that crosses it sends it")));
+    }
+
+    CheckBox Flag(CutsceneBlock block, string key, string label, string tip)
+    {
+        var check = new CheckBox { Content = label, IsChecked = block.Get(key)?.Trim() == "true", FontSize = 12 };
+        ToolTip.SetTip(check, tip);
+        check.IsCheckedChanged += (_, _) => _editor.SetEventFlag(key, check.IsChecked == true);
+        return check;
+    }
+
+    // The payload (see docs/editor/cutscene-editor.md#payloads): a row for each of the handler's parameters, typed when
+    // the handler is, and a row for each value past them, with its kind, then Add Value while there is room.
+    void AddValueRows(CutsceneBlock block)
+    {
+        var rows = _editor.ValueRows(block);
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var (row, index) = (rows[i], i);
+            var kind = row.Takes ?? row.Value?.Kind ?? CutsceneValueKind.Number;
+            var editors = new List<Control>();
+            if (row.Takes == null)
+            {
+                editors.Add(Choice(CutsceneEventValue.Kinds.Select(CutsceneEventValue.Word), CutsceneEventValue.Word(kind),
+                    word => _editor.SetEventValue(index, CutsceneEventValue.Default(CutsceneEventValue.Kinds.First(k => CutsceneEventValue.Word(k) == word), FirstBinding()))));
+            }
+            if (row.Set)
+            {
+                editors.Add(SmallButton("×", "Remove the value; the later values move up", () => _editor.RemoveEventValue(index)));
+            }
+            var value = row.Value is { } v && v.Kind == kind ? v : CutsceneEventValue.Default(kind, FirstBinding());
+            Rows.Add(Row(row.Name ?? $"Value {i + 1}", ValueEditor(index, value, row.Set), [.. editors]));
+            if (row.Mismatch is { } mismatch)
+            {
+                Rows.Add(ProblemText(mismatch, error: false));
+            }
+        }
+        if (rows.Count < CutsceneEventValue.Max)
+        {
+            Rows.Add(Row("", SmallButton("Add Value", "Add a value that the event sends to its handler", () =>
+                _editor.SetEventValue(rows.Count, CutsceneEventValue.Default(CutsceneValueKind.Number, FirstBinding())))));
+        }
+    }
+
+    int? FirstBinding() => _editor.File.Bindings.Select(b => b.Id).OfType<int>().Cast<int?>().FirstOrDefault();
+
+    // A value's editor for its kind: a check box, a list of the bindings, or a box that takes the kind's text.
+    Control ValueEditor(int index, CutsceneEventValue value, bool set)
+    {
+        switch (value.Kind)
+        {
+            case CutsceneValueKind.Bool:
+            {
+                var check = new CheckBox { IsChecked = set && value.Text == "true" };
+                check.IsCheckedChanged += (_, _) => _editor.SetEventValue(index, value with { Text = check.IsChecked == true ? "true" : "false" });
+                return check;
+            }
+            case CutsceneValueKind.Entity:
+            {
+                var bindings = _editor.File.Bindings.Where(b => b.Id != null).ToList();
+                string Label(CutsceneBlock b) => $"{b.Id} {b.Name}";
+                var current = set ? bindings.FirstOrDefault(b => b.Id?.ToString(System.Globalization.CultureInfo.InvariantCulture) == value.Text) : null;
+                return Choice(bindings.Select(Label), current == null ? null : Label(current),
+                    picked => _editor.SetEventValue(index, value with { Text = picked.Split(' ')[0] }));
+            }
+            default:
+                var problem = CutsceneEventValue.Word(value.Kind) switch
+                {
+                    "string" => "text",
+                    _ => CutsceneEventValue.Problem(value.Kind, "") ?? "a value",
+                };
+                // An asset's GUID may come with its $, as the file and the content browser write it.
+                string Plain(string t) => value.Kind == CutsceneValueKind.Asset ? t.Trim().TrimStart('$') : t.Trim();
+                var format = ValueFormats.Text.Where(t => CutsceneEventValue.Problem(value.Kind, Plain(t)) == null, problem);
+                var watermark = value.Kind switch
+                {
+                    CutsceneValueKind.Asset => "an asset's GUID",
+                    CutsceneValueKind.Vector or CutsceneValueKind.Position => "[x, y, z]",
+                    _ => CutsceneEventValue.Word(value.Kind),
+                };
+                return ValueBox(set ? value.Text : "", format, watermark, text => _editor.SetEventValue(index, value with { Text = Plain(text) }));
+        }
     }
 
     static readonly CutsceneBindingKind[] Kinds = [CutsceneBindingKind.Possessed, CutsceneBindingKind.Spawned, CutsceneBindingKind.Provided];

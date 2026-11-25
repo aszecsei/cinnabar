@@ -38,6 +38,10 @@ every_message_round_trips :: proc(t: ^testing.T) {
 					status = .Failed,
 					errors = 2,
 					behaviour = "Door",
+					handlers = {
+						{"open", 12, {{"by", .Entity}, {"note", .Untyped}}},
+						{"close", 20, {}},
+					},
 					settings = {{"native", "true"}},
 					dependencies = {"ffeeddccbbaa99887766554433221100"},
 					length = 90000,

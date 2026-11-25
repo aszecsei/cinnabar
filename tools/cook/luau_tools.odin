@@ -19,13 +19,27 @@ Luau_Require_Report :: #type proc "c" (
 	start, end: c.size_t,
 )
 
+// Luau_Handler_Report receives an event handler of a behaviour class: its name without on_ and its 1-based line. Its
+// parameters after self follow through Luau_Param_Report.
+Luau_Handler_Report :: #type proc "c" (ud: rawptr, name: [^]u8, size: c.size_t, line: c.int)
+
+// Luau_Param_Report receives a parameter of the last handler and its annotation's text, which is empty without one.
+Luau_Param_Report :: #type proc "c" (
+	ud: rawptr,
+	name: [^]u8,
+	size: c.size_t,
+	type: [^]u8,
+	type_size: c.size_t,
+)
+
 @(default_calling_convention = "c")
 foreign luau_tools {
 	// cn_luau_find_requires parses source and reports each call of the global require with a string literal. A parse
 	// error, or a require whose argument is not a string literal, goes to on_error. It returns false if the source
 	// does not parse. defines_class is set if the source calls Behaviour.define or Action.define, and native if it starts
-	// with a --!native comment.
-	cn_luau_find_requires :: proc(source: [^]u8, size: c.size_t, ud: rawptr, on_require: Luau_Require_Report, on_error: Luau_Report, defines_class, native: ^bool) -> bool ---
+	// with a --!native comment. It also reports the on_ methods of each local that holds a class from Behaviour.define,
+	// except the lifecycle methods, through on_handler and on_param.
+	cn_luau_find_requires :: proc(source: [^]u8, size: c.size_t, ud: rawptr, on_require: Luau_Require_Report, on_error: Luau_Report, on_handler: Luau_Handler_Report, on_param: Luau_Param_Report, defines_class, native: ^bool) -> bool ---
 
 	cn_luau_checker_create :: proc() -> ^Luau_Checker ---
 	cn_luau_checker_destroy :: proc(checker: ^Luau_Checker) ---

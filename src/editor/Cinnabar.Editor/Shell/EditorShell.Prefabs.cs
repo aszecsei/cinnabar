@@ -310,19 +310,26 @@ public sealed partial class EditorShell
         return tree;
     }
 
-    // The components of each prefab's root, as its file has them, by the prefab's GUID: read once, until the next cook.
-    readonly Dictionary<string, List<SceneComponent>> _prefabRoots = [];
+    // Each prefab's root entity, as its file has it, by the prefab's GUID, or null for a prefab that is not there: read
+    // once, until the next cook.
+    readonly Dictionary<string, SceneEntity?> _prefabRoots = [];
 
-    List<SceneComponent> PrefabRoot(string guid)
+    SceneEntity? PrefabRootEntity(string guid)
     {
-        if (!_prefabRoots.TryGetValue(guid, out var components))
+        if (!_prefabRoots.TryGetValue(guid, out var root))
         {
-            var root = SceneOfPrefab(guid)?.Entities.FirstOrDefault(e => e.Parent == 0 && e.ParentPath == null);
-            components = root == null ? [] : [.. root.Components];
-            _prefabRoots[guid] = components;
+            root = SceneOfPrefab(guid)?.Entities.FirstOrDefault(e => e.Parent == 0 && e.ParentPath == null);
+            _prefabRoots[guid] = root;
         }
-        return components;
+        return root;
     }
+
+    List<SceneComponent> PrefabRoot(string guid) => PrefabRootEntity(guid)?.Components ?? [];
+
+    /// <summary>
+    /// The scripts of a prefab's root's behaviours, by GUID, as its file has them, or null for a prefab that is not there.
+    /// </summary>
+    public IReadOnlyList<string>? PrefabRootBehaviours(string guid) => PrefabRootEntity(guid) is { } root ? [.. root.Behaviours.Select(b => b.Script)] : null;
 
     /// <summary>Whether a prefab's root entity has a component, as its file has it. False for a prefab that is not there.</summary>
     public bool PrefabRootHas(string guid, ulong component) => PrefabRoot(guid).Any(c => c.Id == component);

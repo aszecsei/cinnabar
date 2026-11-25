@@ -507,6 +507,96 @@ a_behaviour_option_of_the_wrong_type_is_a_cook_error :: proc(t: ^testing.T) {
 	expect_error(t, &errors, "the option edit_mode of Bad takes a boolean")
 }
 
+@(private = "file")
+Expected_Handler :: struct {
+	name:   string,
+	line:   u32,
+	params: []cook_link.Handler_Param,
+}
+
+@(private = "file")
+expect_handlers :: proc(
+	t: ^testing.T,
+	handlers: []cook_link.Behaviour_Handler,
+	expected: []Expected_Handler,
+	loc := #caller_location,
+) {
+	testing.expect_value(t, len(handlers), len(expected), loc)
+	for e, i in expected {
+		if i >= len(handlers) {
+			return
+		}
+		testing.expect_value(t, handlers[i].name, e.name, loc)
+		testing.expect_value(t, handlers[i].line, e.line, loc)
+		testing.expect(t, slice.equal(handlers[i].params, e.params), loc = loc)
+	}
+}
+
+@(test)
+a_behaviours_handlers_are_in_the_index_with_their_parameters :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{
+				"content/guard.luau",
+				`
+local Guard = Behaviour.define("Guard", {})
+local Helper = {}
+function Guard:on_alarm(level: number, loud: boolean?, at: WorldPosition, by: Entity, why)
+end
+function Guard.on_wave(self, toward: vector, line: string)
+end
+function Guard:on_look_begin(target: Entity) end
+function Guard:on_look_end() end
+function Guard:on_scene_ready(scene: Asset, n: { number }) end
+function Guard:on_enable() end
+function Guard:on_destroy() end
+function Guard:update(dt: number) end
+function Guard.on_static(x: number) end
+function Helper:on_not_a_class() end
+return Guard`,
+			},
+		},
+	)
+	defer remove_tree(tree)
+	options := tree_options(tree)
+	// Sorted by name, without on_, the lifecycle methods, a method of another table, or a . method without self.
+	expected := []Expected_Handler {
+		{
+			"alarm",
+			4,
+			{
+				{"level", .Number},
+				{"loud", .Bool},
+				{"at", .Position},
+				{"by", .Entity},
+				{"why", .Untyped},
+			},
+		},
+		{"look_begin", 8, {{"target", .Entity}}},
+		{"look_end", 9, {}},
+		{"scene_ready", 10, {{"scene", .Asset}, {"n", .Untyped}}},
+		{"wave", 6, {{"toward", .Vector}, {"line", .String}}},
+	}
+	pass := cook(options, {.Script})
+	testing.expect(t, pass.ok)
+	for a in pass.assets {
+		expect_handlers(t, a.handlers, expected)
+	}
+	// An up to date script reads its handlers from the source again, since the blob does not hold them.
+	pass = cook(options, {.Script})
+	testing.expect_value(t, pass.current[.Script], 1)
+	for a in pass.assets {
+		expect_handlers(t, a.handlers, expected)
+	}
+	index: Index
+	index_build(&index, pass, options.roots[:])
+	defer index_destroy(&index)
+	for _, a in index.assets {
+		expect_handlers(t, a.handlers, expected)
+	}
+}
+
 @(test)
 actions_get_their_parameters_in_the_blob :: proc(t: ^testing.T) {
 	tree := make_tree(

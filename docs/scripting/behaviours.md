@@ -107,6 +107,7 @@ Script actions are classes too, which `Action.define` makes, but they are not be
 - `entity:send(name, ...)` queues a script event, like Unity's `SendMessage`. It is delivered in the same script phase: events are delivered before `update` and again after the coroutines. Events that handlers send are delivered in the next round, for up to 16 rounds.
 - The script phase calls `on_<name>` on every enabled instance on the entity that defines it, in the order that the instances were added. An inactive entity gets no events.
 - An error in a handler logs the message with a traceback. The other handlers still run.
+- The cooker records each behaviour class's handlers, the `on_<name>` methods of the local that `Behaviour.define` returns, with their lines and their parameters' annotated kinds. The cutscene editor lists them as the names of event keys and opens them with Jump to Handler ([Editor: Cutscene editor: Events](../editor/cutscene-editor.md#events)).
 
 ## Frame
 

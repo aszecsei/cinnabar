@@ -764,6 +764,34 @@ public static class CutsceneEdits
         return CutsceneFile.PathOf(section);
     }
 
+    /// <summary>
+    /// Adds a trigger at a time inside the length (see docs/editor/cutscene-editor.md#events), on the target when it is an
+    /// event track, or else on the first event track of the target's binding, or of none when the target has no binding.
+    /// With no such track, it adds one, named Events, after the binding's tracks. The trigger has the next event ID and
+    /// goes among the track's events in time order. Returns its path, or null on a locked track.
+    /// </summary>
+    public static string? AddEvent(CutsceneFile file, CutsceneBlock? target, int at, string name, IReadOnlySet<int>? locked = null)
+    {
+        var track = ClipTrack(file, "event", target, out var binding);
+        if (track != null && IsLocked(track, locked))
+        {
+            return null;
+        }
+        if (track == null)
+        {
+            var id = file.NextId(CutsceneBlockKind.Track);
+            track = CutsceneBlock.Of(CutsceneBlockKind.Track, $"track {Format(id)} event \"Events\"");
+            file.Insert(file.Root, InsertAt(file, binding), track);
+            track.Set("binding", binding is { } b ? Format(b) : null);
+        }
+        at = Math.Clamp(at, 0, LengthOf(file));
+        var eventId = file.NextId(CutsceneBlockKind.Trigger);
+        var trigger = CutsceneBlock.Of(CutsceneBlockKind.Trigger, $"{CutsceneKeying.IndentUnder(track)}trigger {Format(eventId)} {Format(at)} {name}");
+        file.Insert(track, track.Children.Count, trigger);
+        CutsceneFile.SortChildren(track);
+        return CutsceneFile.PathOf(trigger);
+    }
+
     // The end of the cutscene's range, from its range = [start, end], or null.
     static int? RangeEnd(CutsceneFile file) =>
         file.Root.Get("range")?.Trim().TrimStart('[').TrimEnd(']').Split(',') is [_, var end] && CutsceneFile.TryParseTicks(end.Trim(), out var ticks) ? ticks : null;

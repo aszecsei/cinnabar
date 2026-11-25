@@ -75,6 +75,8 @@ static partial class EditorCommands
     public const string CutsceneRevealClip = "cutscene.revealClip";
     public const string CutsceneOpenClip = "cutscene.openClip";
     public const string CutsceneMatchClipLength = "cutscene.matchClipLength";
+    public const string CutsceneAddEvent = "cutscene.addEvent";
+    public const string CutsceneJumpToHandler = "cutscene.jumpToHandler";
 
     /// <summary>The timeline's commands, which act on the active cutscene while its timeline has the keyboard.</summary>
     public static readonly string[] CutsceneTimelineCommands =
@@ -87,7 +89,7 @@ static partial class EditorCommands
         CutscenePreviousKey, CutsceneNextKey, CutsceneGoToTime, CutsceneScrubSound, CutscenePreviewEvents,
         CutsceneCurves, CutsceneCurvesNormalized, CutsceneTangentAuto, CutsceneTangentUnify, CutsceneTangentBreak, CutsceneTangentLinear,
         CutsceneTangentConstant, CutsceneTangentFlatten, CutsceneTangentWeighted, CutscenePreInfinity, CutscenePostInfinity,
-        CutsceneCurveValueSnap, CutsceneRevealClip, CutsceneOpenClip, CutsceneMatchClipLength,
+        CutsceneCurveValueSnap, CutsceneRevealClip, CutsceneOpenClip, CutsceneMatchClipLength, CutsceneAddEvent, CutsceneJumpToHandler,
     ];
 
     /// <summary>
@@ -199,6 +201,10 @@ static partial class EditorCommands
             "Show the selected section's animation clip or sound in the content browser, and open it there. Clips and sounds have no editor yet, so they are only shown.", null);
         Register(CutsceneMatchClipLength, "Match Clip Length", "cutscene",
             "Trim each selected animation or audio section that does not loop so that it ends where its clip ends.", null);
+        // Event keys (see docs/editor/cutscene-editor.md#events).
+        Register(CutsceneAddEvent, "Add Event", "cutscene",
+            "Add a trigger at the playhead on the selected event track, or on an event track of the selected binding, named for the first event that its behaviours handle.", "E");
+        Register(CutsceneJumpToHandler, "Jump to Handler", "script", "Open the script of the selected trigger's or range's handler at its line, in the script editor.", null);
         // Keys (see docs/editor/cutscene-editor.md#keying) act on the selection wherever the keyboard is, so K stays the
         // timeline's Shuttle Pause.
         commands.Register(new Command(CutsceneKeyTransform, "Key Transform", () => shell.Keying.KeyTransform())

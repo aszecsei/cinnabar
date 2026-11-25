@@ -225,6 +225,8 @@ Asset_Source :: struct {
 	// For a script that defines an action, its name and its parameters, sorted by name.
 	action:       string,
 	params:       []cook_link.Action_Param,
+	// For a script that defines a behaviour, its class's event handlers, sorted by name.
+	handlers:     []cook_link.Behaviour_Handler,
 	// The sub-assets that the cook made of it, such as a model's meshes (see docs/content/identity-and-cooking.md#identity).
 	subassets:    [dynamic]Subasset,
 	// For a material, the combinations of static switches that it and its instances use.
@@ -294,6 +296,7 @@ uncarry :: proc(a: ^Asset_Source) {
 	a.edit_mode = false
 	a.action = ""
 	a.params = nil
+	a.handlers = nil
 	a.permutations = 0
 	a.size = {}
 	a.tool_texture = {}

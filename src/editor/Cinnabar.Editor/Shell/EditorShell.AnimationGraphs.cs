@@ -23,7 +23,7 @@ public sealed partial class EditorShell
 
     /// <summary>
     /// A clip's events in an animation graph, in the clip's ticks, with their names and arguments as the graph writes
-    /// them (see docs/editor/cutscene-editor.md#events). An open graph's are what its editor has, saved or not. Empty
+    /// them (see docs/editor/cutscene-editor.md#clip-events). An open graph's are what its editor has, saved or not. Empty
     /// for a graph that is not there or does not name the clip.
     /// </summary>
     public IReadOnlyList<CutsceneClipEvent> ClipEvents(string graph, string clip)

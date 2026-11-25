@@ -96,6 +96,7 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 			edit_mode    = a.edit_mode,
 			action       = clone(a.action, allocator),
 			params       = clone_params(a.params, allocator),
+			handlers     = clone_handlers(a.handlers, allocator),
 			permutations = u32(a.permutations),
 			size         = a.size,
 			length       = a.length,
@@ -362,6 +363,38 @@ clone_params :: proc(
 	return copied
 }
 
+// clone_handlers copies a behaviour's event handlers, with their names and parameters.
+clone_handlers :: proc(
+	handlers: []cook_link.Behaviour_Handler,
+	allocator := context.allocator,
+) -> []cook_link.Behaviour_Handler {
+	if len(handlers) == 0 {
+		return nil
+	}
+	copied := make([]cook_link.Behaviour_Handler, len(handlers), allocator)
+	for h, i in handlers {
+		params := make([]cook_link.Handler_Param, len(h.params), allocator)
+		for p, j in h.params {
+			params[j] = {strings.clone(p.name, allocator), p.kind}
+		}
+		copied[i] = {strings.clone(h.name, allocator), h.line, params}
+	}
+	return copied
+}
+
+// handlers_equal compares two lists of handlers by value, which slice.equal cannot, since each holds a slice.
+handlers_equal :: proc(a, b: []cook_link.Behaviour_Handler) -> bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for h, i in a {
+		if h.name != b[i].name || h.line != b[i].line || !slice.equal(h.params, b[i].params) {
+			return false
+		}
+	}
+	return true
+}
+
 @(private = "file")
 asset_equal :: proc(a, b: cook_link.Asset) -> bool {
 	if a.thumbnail != b.thumbnail ||
@@ -391,7 +424,8 @@ asset_equal :: proc(a, b: cook_link.Asset) -> bool {
 		slice.equal(a.settings, b.settings) &&
 		slice.equal(a.dependencies, b.dependencies) &&
 		slice.equal(a.hotspots, b.hotspots) &&
-		slice.equal(a.params, b.params) \
+		slice.equal(a.params, b.params) &&
+		handlers_equal(a.handlers, b.handlers) \
 	)
 }
 

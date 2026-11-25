@@ -54,6 +54,8 @@ sealed class CutsceneTimeline : Control
     static readonly IBrush SilentFill = new SolidColorBrush(Color.Parse("#4A4A50"));
     static readonly IBrush MutedBrush = new SolidColorBrush(Color.Parse("#E69138"));
     static readonly IBrush WarnBrush = new SolidColorBrush(Color.Parse("#E5A93B"));
+    // An event whose name no behaviour handles (see docs/editor/cutscene-editor.md#events).
+    static readonly IPen WarnPen = new Pen(WarnBrush, 1.5);
     static readonly IBrush SoloBrush = new SolidColorBrush(Color.Parse("#FFD24A"));
     static readonly IPen StrikePen = new Pen(new SolidColorBrush(Color.Parse("#9A9AA2")), 1);
     static readonly IBrush MarkerDefault = new SolidColorBrush(Color.Parse("#F5A623"));
@@ -421,7 +423,7 @@ sealed class CutsceneTimeline : Control
                     }
                 }
             }
-            // A clip's events, from its binding's graph, as ticks along the bar's bottom (see docs/editor/cutscene-editor.md#events).
+            // A clip's events, from its binding's graph, as ticks along the bar's bottom (see docs/editor/cutscene-editor.md#clip-events).
             if (track && bar.Item is { Clip: { } eventClip, Events.Count: > 0 })
             {
                 foreach (var tick in CutsceneWaveform.EventTicks(bar.Item, eventClip, bar.Item.Events, view, area))
@@ -437,6 +439,10 @@ sealed class CutsceneTimeline : Control
             if (problems.Contains(bar.Item.Path))
             {
                 context.DrawRectangle(ErrorPen, rect.Deflate(0.75), 2);
+            }
+            else if (bar.Item.Warning != null)
+            {
+                context.DrawRectangle(WarnPen, rect.Deflate(0.75), 2);
             }
             if (selected.Contains(bar.Item.Path))
             {
@@ -488,7 +494,8 @@ sealed class CutsceneTimeline : Control
         var middle = y + Layout.RowHeight / 2;
         foreach (var glyph in row.Points)
         {
-            Diamond(context, Layout.Gutter + glyph.X, middle, 6, glyph.Paths.Any(selected.Contains) ? SelectedKey : Fill("event", locked), glyph.Paths.Any(problems.Contains));
+            Diamond(context, Layout.Gutter + glyph.X, middle, 6, glyph.Paths.Any(selected.Contains) ? SelectedKey : Fill("event", locked), glyph.Paths.Any(problems.Contains),
+                glyph.Items.Any(i => i.Warning != null));
         }
         foreach (var glyph in row.Keys)
         {
@@ -571,7 +578,7 @@ sealed class CutsceneTimeline : Control
     // A diamond of each size about the origin, made once and moved to each glyph.
     static readonly Dictionary<double, StreamGeometry> Diamonds = [];
 
-    static void Diamond(DrawingContext context, double x, double y, double r, IBrush fill, bool problem)
+    static void Diamond(DrawingContext context, double x, double y, double r, IBrush fill, bool problem, bool warning = false)
     {
         if (!Diamonds.TryGetValue(r, out var g))
         {
@@ -588,7 +595,7 @@ sealed class CutsceneTimeline : Control
         }
         using (context.PushTransform(Matrix.CreateTranslation(x, y)))
         {
-            context.DrawGeometry(fill, problem ? ErrorPen : null, g);
+            context.DrawGeometry(fill, problem ? ErrorPen : warning ? WarnPen : null, g);
         }
     }
 

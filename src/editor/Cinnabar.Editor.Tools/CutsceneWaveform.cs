@@ -250,7 +250,7 @@ public static class CutsceneWaveform
     }
 
     /// <summary>
-    /// An animation section's clip events in view (see docs/editor/cutscene-editor.md#events): each event at
+    /// An animation section's clip events in view (see docs/editor/cutscene-editor.md#clip-events): each event at
     /// <c>start + (time - offset) / speed</c>, in each pass of a clip that loops, up to <see cref="MaxEventLoops"/> of
     /// them in view. A clip that does not loop shows the events of its one pass that are inside the section.
     /// </summary>
