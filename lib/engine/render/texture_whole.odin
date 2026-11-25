@@ -35,7 +35,7 @@ Whole_Streaming :: struct {
 	transfer: gpu.Transfer,
 }
 
-// Whole_Ready is the texture in place, as Resident_Resources.whole.
+// Whole_Ready is the texture in place, as Texture_Resources.whole.
 Whole_Ready :: struct {}
 
 @(private = "file")
@@ -70,7 +70,7 @@ Whole_Dropped :: struct {}
 // docs/overview/conventions.md#state-with-a-lifecycle): it frees what the state that it leaves held, and gives the
 // resources the texture when it is in.
 @(private = "file")
-change_whole :: proc(r: ^Residency, res: ^Resident_Resources, event: Whole_Event) -> bool {
+change_whole :: proc(r: ^Residency, res: ^Texture_Resources, event: Whole_Event) -> bool {
 	free_mips :: proc(r: ^Residency, a: Whole_Assembling) {
 		delete(a.mips, r.platform.heap_allocator)
 		if a.read != 0 {
@@ -126,12 +126,11 @@ change_whole :: proc(r: ^Residency, res: ^Resident_Resources, event: Whole_Event
 @(private)
 resident_whole :: proc(
 	r: ^Residency,
-	e: ^Resident_Entry,
+	res: ^Texture_Resources,
 ) -> (
 	texture: ^Resident_Texture,
 	ready: bool,
 ) {
-	res := &e.current
 	if _, whole := res.whole_state.(Whole_Ready); whole {
 		return &res.whole, true
 	}
@@ -150,7 +149,7 @@ resident_whole :: proc(
 
 // drop_whole frees a virtual texture's whole texture, or what is on its way. Call it when the texture goes.
 @(private)
-drop_whole :: proc(r: ^Residency, res: ^Resident_Resources) {
+drop_whole :: proc(r: ^Residency, res: ^Texture_Resources) {
 	change_whole(r, res, Whole_Dropped{})
 }
 
@@ -158,11 +157,10 @@ drop_whole :: proc(r: ^Residency, res: ^Resident_Resources) {
 // blocks are at hand, in order, at most the pool's budget of them, starts the read of the next ones, and streams the
 // texture when every page is in. Call it once a frame for each ready virtual texture.
 @(private)
-advance_whole :: proc(r: ^Residency, e: ^Resident_Entry) {
-	res := &e.current
+advance_whole :: proc(r: ^Residency, e: ^Resident_Entry, res: ^Texture_Resources) {
 	switch &s in res.whole_state {
 	case Whole_Assembling:
-		assemble_whole(r, e, &s)
+		assemble_whole(r, e, res, &s)
 	case Whole_Streaming:
 		if r.platform.gpu_transfer_done(s.transfer) {
 			change_whole(r, res, Whole_Landed{})
@@ -172,8 +170,8 @@ advance_whole :: proc(r: ^Residency, e: ^Resident_Entry) {
 }
 
 @(private = "file")
-fail_whole :: proc(r: ^Residency, e: ^Resident_Entry, reason: string) {
-	if e.current.whole_failed_at == 0 {
+fail_whole :: proc(r: ^Residency, e: ^Resident_Entry, res: ^Texture_Resources, reason: string) {
+	if res.whole_failed_at == 0 {
 		buffer: [32]u8
 		log.errorf(
 			"render: the whole texture of the virtual texture %s %s",
@@ -181,8 +179,8 @@ fail_whole :: proc(r: ^Residency, e: ^Resident_Entry, reason: string) {
 			reason,
 		)
 	}
-	e.current.whole_failed_at = max(r.frame, 1)
-	change_whole(r, &e.current, Whole_Dropped{})
+	res.whole_failed_at = max(r.frame, 1)
+	change_whole(r, res, Whole_Dropped{})
 }
 
 // whole_mip_offset is where a mip starts in a whole texture's chain.
@@ -195,17 +193,22 @@ whole_mip_offset :: proc(f: format.Texture_Format, size: [2]u32, mip: u32) -> (o
 }
 
 @(private = "file")
-assemble_whole :: proc(r: ^Residency, e: ^Resident_Entry, s: ^Whole_Assembling) {
+assemble_whole :: proc(
+	r: ^Residency,
+	e: ^Resident_Entry,
+	res: ^Texture_Resources,
+	s: ^Whole_Assembling,
+) {
 	pool := &r.texture_pool
 	platform := r.platform
-	id := e.current.texture.virtual
+	id := res.texture.virtual
 	if id == 0 || int(id) > len(pool.textures) || !pool.textures[id - 1].live {
 		return
 	}
 	tex := &pool.textures[id - 1]
 	for pool.whole_budget > 0 {
 		if int(s.next_page) == len(tex.pages) {
-			finish_whole(r, e, tex, s)
+			finish_whole(r, e, res, tex, s)
 			return
 		}
 		record := tex.pages[s.next_page]
@@ -222,12 +225,12 @@ assemble_whole :: proc(r: ^Residency, e: ^Resident_Entry, s: ^Whole_Assembling) 
 		} else {
 			if s.read == 0 {
 				if platform.file_read_begin == nil {
-					fail_whole(r, e, "cannot be read on this platform")
+					fail_whole(r, e, res, "cannot be read on this platform")
 					return
 				}
 				location, found := asset.blob_location(r.assets, tex.guid)
 				if !found || !location.raw {
-					fail_whole(r, e, "is not stored as it is, so its pages cannot be read")
+					fail_whole(r, e, res, "is not stored as it is, so its pages cannot be read")
 					return
 				}
 				if platform.file_modified(location.path) != tex.modified {
@@ -263,7 +266,7 @@ assemble_whole :: proc(r: ^Residency, e: ^Resident_Entry, s: ^Whole_Assembling) 
 			case .Pending:
 				return
 			case .Failed:
-				fail_whole(r, e, "could not be read")
+				fail_whole(r, e, res, "could not be read")
 				return
 			case .Done:
 			}
@@ -283,10 +286,10 @@ assemble_whole :: proc(r: ^Residency, e: ^Resident_Entry, s: ^Whole_Assembling) 
 		) {
 		case .None:
 		case .Checksum:
-			fail_whole(r, e, "has a page that is not the one that its table names")
+			fail_whole(r, e, res, "has a page that is not the one that its table names")
 			return
 		case .Decompress:
-			fail_whole(r, e, "has a page that does not decompress")
+			fail_whole(r, e, res, "has a page that does not decompress")
 			return
 		}
 		s.next_page += 1
@@ -300,7 +303,13 @@ assemble_whole :: proc(r: ^Residency, e: ^Resident_Entry, s: ^Whole_Assembling) 
 
 // finish_whole adds the tail's mips from the blob's head, and streams the chain into a texture of its own.
 @(private = "file")
-finish_whole :: proc(r: ^Residency, e: ^Resident_Entry, tex: ^Pool_Texture, s: ^Whole_Assembling) {
+finish_whole :: proc(
+	r: ^Residency,
+	e: ^Resident_Entry,
+	res: ^Texture_Resources,
+	tex: ^Pool_Texture,
+	s: ^Whole_Assembling,
+) {
 	head, loaded := asset.data(r.assets, tex.handle)
 	if !loaded || asset.version(r.assets, tex.handle) != tex.version {
 		// The blob changed, and the texture's next version streams.
@@ -308,17 +317,17 @@ finish_whole :: proc(r: ^Residency, e: ^Resident_Entry, tex: ^Pool_Texture, s: ^
 	}
 	blob, viewed := format.texture_view(head)
 	if !viewed {
-		fail_whole(r, e, "has a head that is not a texture's")
+		fail_whole(r, e, res, "has a head that is not a texture's")
 		return
 	}
 	tail := format.texture_tail(head, blob)
 	offset := whole_mip_offset(tex.blob_format, tex.size, blob.tail_mip)
 	if len(tail) != len(s.mips) - offset {
-		fail_whole(r, e, "has a tail that is not its last mips")
+		fail_whole(r, e, res, "has a tail that is not its last mips")
 		return
 	}
 	copy(s.mips[offset:], tail)
-	t := &e.current.texture
+	t := &res.texture
 	texture := r.platform.gpu_create_texture(
 		{
 			size = t.size,
@@ -335,8 +344,8 @@ finish_whole :: proc(r: ^Residency, e: ^Resident_Entry, tex: ^Pool_Texture, s: ^
 	}
 	if transfer == 0 {
 		r.platform.gpu_destroy_texture(texture)
-		fail_whole(r, e, "cannot stream")
+		fail_whole(r, e, res, "cannot stream")
 		return
 	}
-	change_whole(r, &e.current, Whole_Assembled{{texture, transfer}})
+	change_whole(r, res, Whole_Assembled{{texture, transfer}})
 }

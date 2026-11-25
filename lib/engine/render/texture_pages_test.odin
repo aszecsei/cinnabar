@@ -862,7 +862,7 @@ a_whole_texture_is_assembled_from_the_pages :: proc(t: ^testing.T) {
 	// A reader that needs a whole texture asks, and gets nothing until it is in: never the virtual texture's own tail.
 	whole, whole_ready := resident_texture(f.r, guid)
 	testing.expect(t, !whole_ready)
-	_, assembling := f.r.entries[0].current.whole_state.(Whole_Assembling)
+	_, assembling := f.r.entries[0].current.(Texture_Resources).whole_state.(Whole_Assembling)
 	testing.expect(t, assembling)
 	for _ in 0 ..< 3 {
 		step(t, f)
@@ -884,7 +884,7 @@ a_whole_texture_is_assembled_from_the_pages :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, f.fake.reads_begun, 1)
 	testing.expect_value(t, f.fake.reads_open, 0)
-	_, streaming := f.r.entries[0].current.whole_state.(Whole_Streaming)
+	_, streaming := f.r.entries[0].current.(Texture_Resources).whole_state.(Whole_Streaming)
 	testing.expect(t, streaming)
 
 	f.fake.done_through = f.fake.next_transfer

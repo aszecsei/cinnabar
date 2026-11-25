@@ -285,16 +285,39 @@ Mip_Sized :: struct {
 	frame:  u64,
 }
 
+// Resident_Resources is an asset's GPU resources, as the variant of its kind. An entry's current resources are that
+// variant from when the entry is made, empty until they are ready, so a reader's pointer to them is always valid; what
+// streams in has it from when its stream starts.
 @(private)
-Resident_Resources :: struct {
-	mesh:            Resident_Mesh,
+Resident_Resources :: union {
+	Resident_Mesh,
+	Texture_Resources,
+	Resident_Instance_Set,
+}
+
+// Texture_Resources is a texture asset's resources: the texture that draws, and a virtual texture's whole texture, for
+// the readers that cannot sample pages, once one asked for it (see texture_whole.odin), with the frame of the last
+// failure to assemble it, which was logged, or 0.
+@(private)
+Texture_Resources :: struct {
 	texture:         Resident_Texture,
-	set:             Resident_Instance_Set,
-	// A virtual texture's whole texture, for the readers that cannot sample pages, once one asked for it (see
-	// texture_whole.odin), and the frame of the last failure to assemble it, which was logged, or 0.
 	whole:           Resident_Texture,
 	whole_state:     Texture_Whole,
 	whole_failed_at: u64,
+}
+
+// empty_resources is the empty variant of a kind's resources, nil for a kind that is not resident.
+@(private = "file")
+empty_resources :: proc(kind: format.Asset_Kind) -> Resident_Resources {
+	#partial switch kind {
+	case .Mesh:
+		return Resident_Mesh{}
+	case .Texture:
+		return Texture_Resources{}
+	case .Instance_Set:
+		return Resident_Instance_Set{}
+	}
+	return nil
 }
 
 // Resident_Source is what an entry's resources come from.
@@ -427,9 +450,9 @@ residency_reload :: proc(r: ^Residency, platform: ^core.Platform_API) {
 // residency_destroy destroys every resident resource. Call it from the game's shutdown.
 residency_destroy :: proc(r: ^Residency) {
 	for &e in r.entries[:r.count] {
-		destroy_resources(r, e.kind, &e.current)
+		destroy_resources(r, &e.current)
 		if s, streaming := &e.stream.(Resident_Stream); streaming {
-			destroy_resources(r, e.kind, &s.pending)
+			destroy_resources(r, &s.pending)
 		}
 		if live, is_live := &e.source.(Live_Source); is_live {
 			free_next(r, &live.next)
@@ -523,54 +546,58 @@ residency_update :: proc(r: ^Residency) {
 	mip_streams := 0
 	defer residency_evict(r)
 	for &e in r.entries[:r.count] {
-		// A virtual texture's whole texture comes in over some frames, for what asked for it.
-		if e.kind == .Texture && e.ready && e.current.texture.virtual != 0 {
-			advance_whole(r, &e)
-		}
-		// A paged mesh's level 0 comes in over some frames, for what asked for it, and for the ray scene.
-		if e.kind == .Mesh && e.ready && e.current.mesh.paged {
-			if r.accels {
-				resident_level0(r, &e.current.mesh)
+		switch &v in e.current {
+		case Texture_Resources:
+			// A virtual texture's whole texture comes in over some frames, for what asked for it.
+			if e.ready && v.texture.virtual != 0 {
+				advance_whole(r, &e, &v)
 			}
-			advance_level0(r, &e.current.mesh)
+		case Resident_Mesh:
+			// A paged mesh's level 0 comes in over some frames, for what asked for it, and for the ray scene.
+			if e.ready && v.paged {
+				if r.accels {
+					resident_level0(r, &v)
+				}
+				advance_level0(r, &v)
+			}
+		case Resident_Instance_Set:
 		}
 		if s, streaming := &e.stream.(Resident_Stream); streaming {
 			done := true
 			for t in s.transfers[:s.transfer_count] {
 				done &&= r.platform.gpu_transfer_done(t)
 			}
-			// A paged mesh is in when its roots are in the pool.
-			superseded := false
-			if e.kind == .Mesh && s.pending.mesh.paged {
-				if mesh_pool_failed(&r.pool, s.pending.mesh.pool_mesh) {
-					change(
-						r,
-						&e,
-						Event_Stream_Failed{"has a root page that is not what its table names"},
-					)
-					continue
+			// A paged mesh is in when its roots are in the pool, and a virtual texture when its root is.
+			pooled := false
+			failure: string
+			switch v in s.pending {
+			case Resident_Mesh:
+				if v.paged {
+					pooled = true
+					if mesh_pool_failed(&r.pool, v.pool_mesh) {
+						failure = "has a root page that is not what its table names"
+					} else {
+						done &&= mesh_pool_ready(&r.pool, v.pool_mesh)
+					}
 				}
-				done &&= mesh_pool_ready(&r.pool, s.pending.mesh.pool_mesh)
-				// Its roots come from the head of the version that it streams, which a newer blob has replaced.
-				superseded =
-					!done && e.handle != {} && asset.version(r.assets, e.handle) != s.version
-			}
-			// A virtual texture is in when its root is in the pool.
-			if e.kind == .Texture && s.pending.texture.virtual != 0 {
-				id := s.pending.texture.virtual
-				if texture_pool_failed(&r.texture_pool, id) {
-					change(
-						r,
-						&e,
-						Event_Stream_Failed{"has a page that is not what its table names"},
-					)
-					continue
+			case Texture_Resources:
+				if v.texture.virtual != 0 {
+					pooled = true
+					if texture_pool_failed(&r.texture_pool, v.texture.virtual) {
+						failure = "has a page that is not what its table names"
+					} else {
+						done &&= texture_pool_ready(&r.texture_pool, v.texture.virtual)
+					}
 				}
-				done &&= texture_pool_ready(&r.texture_pool, id)
-				// Its root comes from the head of the version that it streams, which a newer blob has replaced.
-				superseded =
-					!done && e.handle != {} && asset.version(r.assets, e.handle) != s.version
+			case Resident_Instance_Set:
 			}
+			if failure != "" {
+				change(r, &e, Event_Stream_Failed{failure})
+				continue
+			}
+			// Its roots come from the head of the version that it streams, which a newer blob has replaced.
+			superseded :=
+				pooled && !done && e.handle != {} && asset.version(r.assets, e.handle) != s.version
 			if done {
 				change(r, &e, Event_Landed{})
 			}
@@ -653,8 +680,9 @@ evict :: proc(r: ^Residency, e: ^Resident_Entry) {
 // streams its data. Until it is ready, draw nothing.
 resident_mesh :: proc(r: ^Residency, guid: format.Guid) -> (mesh: ^Resident_Mesh, ready: bool) {
 	e := entry(r, guid, .Mesh) or_return
+	mesh = (&e.current.(Resident_Mesh)) or_return
 	// A paged mesh draws nothing while the pool of pages was made again and the GPU's table is still the old pool's.
-	return &e.current.mesh, e.ready && (!e.current.mesh.paged || mesh_pool_drawable(&r.pool))
+	return mesh, e.ready && (!mesh.paged || mesh_pool_drawable(&r.pool))
 }
 
 // resident_whole_mesh gives a mesh asset's resources as resident_mesh does, for what draws its vertices by index: it is
@@ -706,7 +734,7 @@ residency_release_baked :: proc(r: ^Residency) -> (released: int) {
 		if !e.baked || e.world || e.stream != nil || live {
 			continue
 		}
-		destroy_resources(r, e.kind, &e.current)
+		destroy_resources(r, &e.current)
 		set_bytes(r, e, 0)
 		if e.handle != {} {
 			asset.unload(r.assets, e.handle)
@@ -732,7 +760,8 @@ resident_instance_set :: proc(
 	ready: bool,
 ) {
 	e := entry(r, guid, .Instance_Set) or_return
-	return &e.current.set, e.ready
+	set = (&e.current.(Resident_Instance_Set)) or_return
+	return set, e.ready
 }
 
 // resident_texture gives a texture asset's resources, and whether they are ready. Until it is ready, use a default
@@ -746,16 +775,7 @@ resident_texture :: proc(
 	texture: ^Resident_Texture,
 	ready: bool,
 ) {
-	e := entry(r, guid, .Texture) or_return
-	if e.ready && e.current.texture.dimension != dimension {
-		log_wrong_dimension(e, dimension)
-		return &e.current.texture, false
-	}
-	if e.current.texture.virtual != 0 {
-		return resident_whole(r, e)
-	}
-	// A reader that is not a material reads every mip, so it waits for the full chain, which its request asked for.
-	return &e.current.texture, e.ready && e.current.texture.top_mip == 0
+	return resident_texture_of(r, guid, dimension, dimension)
 }
 
 // resident_texture_want says that a material draws a texture at most this many pixels across on the screen this frame,
@@ -810,12 +830,14 @@ resident_virtual_texture :: proc(
 	ready: bool,
 ) {
 	e := entry(r, guid, .Texture, material = true) or_return
-	if e.ready && e.current.texture.dimension != .D2 {
-		log_wrong_dimension(e, .D2)
-		return &e.current.texture, false
+	res := (&e.current.(Texture_Resources)) or_return
+	texture = &res.texture
+	if e.ready && texture.dimension != .D2 {
+		log_wrong_dimension(e, texture, .D2)
+		return texture, false
 	}
-	virtual := e.current.texture.virtual != 0
-	return &e.current.texture, e.ready && (!virtual || texture_pool_drawable(&r.texture_pool))
+	virtual := texture.virtual != 0
+	return texture, e.ready && (!virtual || texture_pool_drawable(&r.texture_pool))
 }
 
 // resident_texture_of gives a texture asset's resources as resident_texture does, for a reader that takes either of two
@@ -829,26 +851,32 @@ resident_texture_of :: proc(
 	ready: bool,
 ) {
 	e := entry(r, guid, .Texture) or_return
-	if e.ready && e.current.texture.dimension != first && e.current.texture.dimension != second {
-		log_wrong_dimension(e, first)
-		return &e.current.texture, false
+	res := (&e.current.(Texture_Resources)) or_return
+	texture = &res.texture
+	if e.ready && texture.dimension != first && texture.dimension != second {
+		log_wrong_dimension(e, texture, first)
+		return texture, false
 	}
-	if e.current.texture.virtual != 0 {
-		return resident_whole(r, e)
+	if texture.virtual != 0 {
+		return resident_whole(r, res)
 	}
 	// A reader that is not a material reads every mip, so it waits for the full chain, which its request asked for.
-	return &e.current.texture, e.ready && e.current.texture.top_mip == 0
+	return texture, e.ready && texture.top_mip == 0
 }
 
 @(private = "file")
-log_wrong_dimension :: proc(e: ^Resident_Entry, wanted: format.Texture_Dimension) {
+log_wrong_dimension :: proc(
+	e: ^Resident_Entry,
+	texture: ^Resident_Texture,
+	wanted: format.Texture_Dimension,
+) {
 	if !e.wrong_dimension_logged {
 		e.wrong_dimension_logged = true
 		buffer: [32]u8
 		log.errorf(
 			"render: texture %s is a %v, and is read as a %v",
 			format.guid_format(e.guid, &buffer),
-			e.current.texture.dimension,
+			texture.dimension,
 			wanted,
 		)
 	}
@@ -928,8 +956,9 @@ find_entry :: proc(
 	e = &r.entries[slot]
 	r.index[{guid, kind}] = slot
 	e^ = {
-		guid = guid,
-		kind = kind,
+		guid    = guid,
+		kind    = kind,
+		current = empty_resources(kind),
 	}
 	return e, true
 }
@@ -998,24 +1027,10 @@ change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok:
 		e.source = Released_Source{}
 	case Event_Landed:
 		s := e.stream.? or_return
-		// A texture that draws from a finer mip than it did, or at all: it drew its default before, as coarse as its last mip.
-		if e.kind == .Texture && s.pending.texture.virtual == 0 {
-			t := s.pending.texture
-			before := e.ready ? e.current.texture.top_mip : t.mip_count
-			if t.top_mip < before {
-				append(&r.refined, Refined_Texture{e.guid, t.size, before})
-			}
-		}
-		if e.kind == .Instance_Set && e.ready {
-			diff_set_cells(&r.changed_cells, e.guid, &e.current.set, &s.pending.set)
-		}
-		if e.kind == .Mesh {
-			r.swaps += 1
-			s.pending.mesh.generation = r.swaps
-		}
-		destroy_resources(r, e.kind, &e.current)
-		if e.kind == .Mesh && r.accels {
-			create_mesh_accel(r, &s.pending.mesh)
+		landed(r, e, &s.pending)
+		destroy_resources(r, &e.current)
+		if m, is_mesh := &s.pending.(Resident_Mesh); is_mesh && r.accels {
+			create_mesh_accel(r, m)
 		}
 		e.current, e.version, e.ready = s.pending, s.version, true
 		set_bytes(r, e, s.bytes)
@@ -1031,10 +1046,10 @@ change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok:
 		}
 	case Event_Stream_Failed:
 		s := e.stream.? or_return
-		destroy_resources(r, e.kind, &s.pending)
+		destroy_resources(r, &s.pending)
 		// Nothing may go on drawing what the editor gave up.
 		if s.released {
-			destroy_resources(r, e.kind, &e.current)
+			destroy_resources(r, &e.current)
 			e.ready = false
 			set_bytes(r, e, 0)
 		}
@@ -1046,7 +1061,7 @@ change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok:
 		fail(r, e, ev.reason)
 	case Event_Stream_Superseded:
 		s := e.stream.? or_return
-		destroy_resources(r, e.kind, &s.pending)
+		destroy_resources(r, &s.pending)
 		e.stream = nil
 		// What it was to replace is as it was, a live mesh that was let go too.
 		if s.released {
@@ -1070,7 +1085,7 @@ change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok:
 		)
 		// Nothing may go on drawing what the editor gave up.
 		if _, released := e.source.(Released_Source); released {
-			destroy_resources(r, e.kind, &e.current)
+			destroy_resources(r, &e.current)
 			e.ready = false
 			set_bytes(r, e, 0)
 		}
@@ -1084,7 +1099,7 @@ change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok:
 		if e.stream != nil || !e.ready {
 			return false
 		}
-		destroy_resources(r, e.kind, &e.current)
+		destroy_resources(r, &e.current)
 		set_bytes(r, e, 0)
 		e.ready, e.wrong_dimension_logged = false, false
 		e.want, e.coarser_since = nil, nil
@@ -1096,6 +1111,34 @@ change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok:
 		e.source = Evicted_Source{}
 	}
 	return true
+}
+
+// landed notes what resources that came in change, before they replace the entry's current ones: a texture that draws
+// from a finer mip than it did, or at all, as it drew its default before, as coarse as its last mip; the cells of an
+// instance set that a newer version changed; and the swap that a mesh's resources are, which numbers them.
+@(private = "file")
+landed :: proc(r: ^Residency, e: ^Resident_Entry, pending: ^Resident_Resources) {
+	switch &v in pending {
+	case Texture_Resources:
+		t := v.texture
+		if t.virtual != 0 {
+			return
+		}
+		before := t.mip_count
+		if current, is_texture := e.current.(Texture_Resources); is_texture && e.ready {
+			before = current.texture.top_mip
+		}
+		if t.top_mip < before {
+			append(&r.refined, Refined_Texture{e.guid, t.size, before})
+		}
+	case Resident_Instance_Set:
+		if current, is_set := &e.current.(Resident_Instance_Set); is_set && e.ready {
+			diff_set_cells(&r.changed_cells, e.guid, current, &v)
+		}
+	case Resident_Mesh:
+		r.swaps += 1
+		v.generation = r.swaps
+	}
 }
 
 // set_bytes sets the GPU memory of an entry's resources, and the sum that stats holds.
@@ -1147,13 +1190,17 @@ start_streaming :: proc(r: ^Residency, e: ^Resident_Entry) {
 	}
 	data, _ := asset.data(r.assets, e.handle)
 	version := asset.version(r.assets, e.handle)
+	top_mip: u32
+	if texture, is_texture := &e.current.(Texture_Resources); is_texture {
+		top_mip = first_mip(r, e, &texture.texture, data)
+	}
 	stream, ok := new_stream(
 		r,
 		e.kind,
 		data,
 		version,
 		{e.guid, e.handle, asset.modified(r.assets, e.handle)},
-		e.kind == .Texture ? first_mip(r, e, data) : 0,
+		top_mip,
 	)
 	if !ok {
 		// The version stays, so a broken blob is tried again when the cooker writes a new one.
@@ -1191,13 +1238,13 @@ wanted_mip :: proc(r: ^Residency, e: ^Resident_Entry, size: [2]u32, mip_count: u
 // first_mip is the mip that a texture's blob streams from: the one that the current request asks for, and without one
 // the mip that draws now, or every mip for a texture that is not resident (see Mip_Want).
 @(private = "file")
-first_mip :: proc(r: ^Residency, e: ^Resident_Entry, data: []byte) -> u32 {
+first_mip :: proc(r: ^Residency, e: ^Resident_Entry, t: ^Resident_Texture, data: []byte) -> u32 {
 	blob, ok := format.texture_view(data)
 	if !ok || .Virtual in blob.flags {
 		return 0
 	}
 	if _, current := current_want(r, e); !current {
-		return e.ready ? min(e.current.texture.top_mip, max(blob.mip_count, 1) - 1) : 0
+		return e.ready ? min(t.top_mip, max(blob.mip_count, 1) - 1) : 0
 	}
 	return wanted_mip(r, e, blob.size, blob.mip_count)
 }
@@ -1208,17 +1255,14 @@ first_mip :: proc(r: ^Residency, e: ^Resident_Entry, data: []byte) -> u32 {
 // whether it started a stream.
 @(private = "file")
 retarget_mips :: proc(r: ^Residency, e: ^Resident_Entry) -> bool {
-	if e.kind != .Texture ||
-	   !e.ready ||
-	   e.stream != nil ||
-	   e.handle == {} ||
-	   e.current.texture.virtual != 0 {
+	res, is_texture := &e.current.(Texture_Resources)
+	if !is_texture || !e.ready || e.stream != nil || e.handle == {} || res.texture.virtual != 0 {
 		return false
 	}
 	if _, from_asset := e.source.(Asset_Source); !from_asset {
 		return false
 	}
-	t := &e.current.texture
+	t := &res.texture
 	target := wanted_mip(r, e, t.size, t.mip_count)
 	if target == t.top_mip {
 		e.coarser_since = nil
@@ -1283,16 +1327,17 @@ new_stream :: proc(
 	s: Resident_Stream,
 	ok: bool,
 ) {
-	#partial switch kind {
-	case .Mesh:
-		ok = stream_mesh(r, &s, data, version, origin)
-	case .Texture:
-		ok = stream_texture(r, &s, data, version, origin, top_mip)
-	case .Instance_Set:
-		ok = stream_instance_set(r, &s, data)
+	s.pending = empty_resources(kind)
+	switch &v in s.pending {
+	case Resident_Mesh:
+		ok = stream_mesh(r, &s, &v, data, version, origin)
+	case Texture_Resources:
+		ok = stream_texture(r, &s, &v.texture, data, version, origin, top_mip)
+	case Resident_Instance_Set:
+		ok = stream_instance_set(r, &s, &v, data)
 	}
 	if !ok {
-		destroy_resources(r, kind, &s.pending)
+		destroy_resources(r, &s.pending)
 		return {}, false
 	}
 	s.version = version
@@ -1317,6 +1362,7 @@ fail :: proc(r: ^Residency, e: ^Resident_Entry, reason: string) {
 stream_mesh :: proc(
 	r: ^Residency,
 	s: ^Resident_Stream,
+	m: ^Resident_Mesh,
 	data: []byte,
 	version: u32,
 	origin: Stream_Origin,
@@ -1327,7 +1373,6 @@ stream_mesh :: proc(
 	if !ok || (paged && origin.handle == {}) {
 		return false
 	}
-	m := &s.pending.mesh
 	m.paged = paged
 	m.vertex_count = blob.vertex_count
 	m.attribute_stride = format.mesh_attribute_stride(blob.flags)
@@ -1441,12 +1486,16 @@ stream_mesh :: proc(
 }
 
 @(private = "file")
-stream_instance_set :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte) -> bool {
+stream_instance_set :: proc(
+	r: ^Residency,
+	s: ^Resident_Stream,
+	set: ^Resident_Instance_Set,
+	data: []byte,
+) -> bool {
 	blob, ok := format.instance_set_view(data)
 	if !ok || blob.count == 0 {
 		return false
 	}
-	set := &s.pending.set
 	set.count, set.cell_count = blob.count, blob.cell_count
 	set.center, set.radius, set.max_scale = blob.center, blob.radius, blob.max_scale
 	set.cells_cpu = set_cells(data, blob, r.platform.heap_allocator)
@@ -1581,8 +1630,8 @@ residency_enable_accels :: proc(r: ^Residency) {
 	}
 	r.accels = true
 	for &e in r.entries[:r.count] {
-		if e.kind == .Mesh && e.ready && e.current.mesh.accel == {} {
-			create_mesh_accel(r, &e.current.mesh)
+		if m, is_mesh := &e.current.(Resident_Mesh); is_mesh && e.ready && m.accel == {} {
+			create_mesh_accel(r, m)
 		}
 	}
 }
@@ -1619,9 +1668,12 @@ create_mesh_accel :: proc(r: ^Residency, m: ^Resident_Mesh) {
 unbuilt_accels :: proc(r: ^Residency) -> []^Resident_Mesh {
 	meshes := make([dynamic]^Resident_Mesh, r.platform.frame_allocator)
 	for &e in r.entries[:r.count] {
-		if _, unbuilt := e.current.mesh.accel_state.(Accel_Unbuilt);
-		   e.kind == .Mesh && e.ready && unbuilt {
-			append(&meshes, &e.current.mesh)
+		m, is_mesh := &e.current.(Resident_Mesh)
+		if !is_mesh || !e.ready {
+			continue
+		}
+		if _, unbuilt := m.accel_state.(Accel_Unbuilt); unbuilt {
+			append(&meshes, m)
 		}
 	}
 	return meshes[:]
@@ -1668,6 +1720,7 @@ stream_buffer :: proc(
 stream_texture :: proc(
 	r: ^Residency,
 	s: ^Resident_Stream,
+	t: ^Resident_Texture,
 	data: []byte,
 	version: u32,
 	origin: Stream_Origin,
@@ -1679,7 +1732,6 @@ stream_texture :: proc(
 	if !ok || (virtual && origin.handle == {}) {
 		return false
 	}
-	t := &s.pending.texture
 	t^ = {
 		pixel_format = gpu_format(blob.format),
 		size         = blob.size,
@@ -1767,37 +1819,39 @@ gpu_format :: proc(f: format.Texture_Format) -> gpu.Format {
 	return .Unknown
 }
 
+// destroy_resources frees an asset's resources, each exactly once, and leaves the empty variant of its kind.
 @(private = "file")
-destroy_resources :: proc(r: ^Residency, kind: format.Asset_Kind, resources: ^Resident_Resources) {
-	#partial switch kind {
-	case .Mesh:
-		m := &resources.mesh
-		drop_level0(r, m)
-		mesh_pool_remove(&r.pool, r.platform, m.pool_mesh)
-		r.platform.gpu_destroy_buffer(m.positions)
-		r.platform.gpu_destroy_buffer(m.attributes)
-		r.platform.gpu_destroy_buffer(m.indices)
-		r.platform.gpu_destroy_buffer(m.meshlets)
-		r.platform.gpu_destroy_buffer(m.meshlet_vertices)
-		r.platform.gpu_destroy_buffer(m.meshlet_triangles)
-		if m.meshlet_nodes != {} {
-			r.platform.gpu_destroy_buffer(m.meshlet_nodes)
+destroy_resources :: proc(r: ^Residency, resources: ^Resident_Resources) {
+	switch &v in resources {
+	case Resident_Mesh:
+		drop_level0(r, &v)
+		mesh_pool_remove(&r.pool, r.platform, v.pool_mesh)
+		r.platform.gpu_destroy_buffer(v.positions)
+		r.platform.gpu_destroy_buffer(v.attributes)
+		r.platform.gpu_destroy_buffer(v.indices)
+		r.platform.gpu_destroy_buffer(v.meshlets)
+		r.platform.gpu_destroy_buffer(v.meshlet_vertices)
+		r.platform.gpu_destroy_buffer(v.meshlet_triangles)
+		if v.meshlet_nodes != {} {
+			r.platform.gpu_destroy_buffer(v.meshlet_nodes)
 		}
-		if m.skin != {} {
-			r.platform.gpu_destroy_buffer(m.skin)
+		if v.skin != {} {
+			r.platform.gpu_destroy_buffer(v.skin)
 		}
-		if m.impostor != {} {
-			r.platform.gpu_destroy_buffer(m.impostor)
+		if v.impostor != {} {
+			r.platform.gpu_destroy_buffer(v.impostor)
 		}
-		change_mesh_accel(r, m, Accel_Destroyed{})
-	case .Texture:
-		drop_whole(r, resources)
-		texture_pool_remove(&r.texture_pool, r.platform, resources.texture.virtual)
-		r.platform.gpu_destroy_texture(resources.texture.texture)
-	case .Instance_Set:
-		r.platform.gpu_destroy_buffer(resources.set.instances)
-		r.platform.gpu_destroy_buffer(resources.set.cells)
-		delete(resources.set.cells_cpu, r.platform.heap_allocator)
+		change_mesh_accel(r, &v, Accel_Destroyed{})
+		v = {}
+	case Texture_Resources:
+		drop_whole(r, &v)
+		texture_pool_remove(&r.texture_pool, r.platform, v.texture.virtual)
+		r.platform.gpu_destroy_texture(v.texture.texture)
+		v = {}
+	case Resident_Instance_Set:
+		r.platform.gpu_destroy_buffer(v.instances)
+		r.platform.gpu_destroy_buffer(v.cells)
+		delete(v.cells_cpu, r.platform.heap_allocator)
+		v = {}
 	}
-	resources^ = {}
 }

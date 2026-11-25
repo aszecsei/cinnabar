@@ -16,9 +16,14 @@ import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 // A fake GPU that counts buffers, and whose transfers are done only when the test says so. Each test has its own,
-// in its context's user pointer, so the tests can run at the same time.
+// in its context's user pointer, so the tests can run at the same time. It counts a destroy of what was destroyed
+// already, for the first handles of each sort.
 @(private = "file")
 Fake_GPU :: struct {
+	buffers_freed:  [1024]bool,
+	textures_freed: [256]bool,
+	accels_freed:   [256]bool,
+	freed_twice:    int,
 	next_buffer:    u32,
 	live_buffers:   int,
 	next_transfer:  u64,
@@ -37,6 +42,17 @@ fake_gpu :: proc() -> ^Fake_GPU {
 	return (^Fake_GPU)(context.user_ptr)
 }
 
+// note_freed marks a handle's id as destroyed, and counts it if it was already.
+@(private = "file")
+note_freed :: proc(freed: []bool, id: u32) {
+	if int(id) < len(freed) {
+		if freed[id] {
+			fake_gpu().freed_twice += 1
+		}
+		freed[id] = true
+	}
+}
+
 @(private = "file")
 fake_platform :: proc(frame: ^virtual.Arena) -> core.Platform_API {
 	return {
@@ -53,7 +69,9 @@ fake_platform :: proc(frame: ^virtual.Arena) -> core.Platform_API {
 		},
 		gpu_destroy_buffer = proc(buffer: gpu.Buffer) {
 			if buffer != {} {
-				fake_gpu().live_buffers -= 1
+				fake := fake_gpu()
+				fake.live_buffers -= 1
+				note_freed(fake.buffers_freed[:], (transmute([2]u32)buffer)[0])
 			}
 		},
 		gpu_stream_buffer = proc(buffer: gpu.Buffer, offset: u32, data: []byte) -> gpu.Transfer {
@@ -74,7 +92,9 @@ fake_platform :: proc(frame: ^virtual.Arena) -> core.Platform_API {
 		},
 		gpu_destroy_texture = proc(texture: gpu.Texture) {
 			if texture != {} {
-				fake_gpu().live_textures -= 1
+				fake := fake_gpu()
+				fake.live_textures -= 1
+				note_freed(fake.textures_freed[:], (transmute([2]u32)texture)[0])
 			}
 		},
 		gpu_stream_texture = proc(texture: gpu.Texture, data: []byte) -> gpu.Transfer {
@@ -91,7 +111,9 @@ fake_platform :: proc(frame: ^virtual.Arena) -> core.Platform_API {
 		},
 		gpu_destroy_accel = proc(accel: gpu.Accel_Struct) {
 			if accel != {} {
-				fake_gpu().live_accels -= 1
+				fake := fake_gpu()
+				fake.live_accels -= 1
+				note_freed(fake.accels_freed[:], (transmute([2]u32)accel)[0])
 			}
 		},
 	}
@@ -828,7 +850,7 @@ test_guid :: proc(n: u8) -> format.Guid {
 // texture_handle is the GPU texture that an entry draws.
 @(private = "file")
 texture_handle :: proc(r: ^Residency, guid: format.Guid) -> gpu.Texture {
-	return r.entries[r.index[{guid, .Texture}]].current.texture.texture
+	return r.entries[r.index[{guid, .Texture}]].current.(Texture_Resources).texture.texture
 }
 
 // want_virtual asks for a texture as a material that shows pixels across does.
@@ -1322,4 +1344,118 @@ a_broken_newer_blob_leaves_the_older_one_drawing :: proc(t: ^testing.T) {
 	land(rig)
 	_, plain := r.entries[r.index[{guid, .Texture}]].source.(Asset_Source)
 	testing.expect(t, plain)
+}
+
+// write_instance_set writes an instance set blob of two cells, with one instance moved when nudged, and a generation file
+// at modified, as a cook does.
+@(private = "file")
+write_instance_set :: proc(
+	t: ^testing.T,
+	dir: string,
+	guid: format.Guid,
+	nudge: bool,
+	modified: time.Time,
+) {
+	instances := make([]format.Instance, format.INSTANCE_CELL_SIZE * 2, context.temp_allocator)
+	for &i, k in instances {
+		i = format.instance_pack(
+			{position = {f32(k), 0, 0}, rotation = 1, scale = {1, 1, 1}},
+			u32(k),
+		)
+	}
+	if nudge {
+		instances[format.INSTANCE_CELL_SIZE + 3].position.y = 4
+	}
+	contents := format.instance_cells(instances, context.temp_allocator)
+	contents.guid = guid
+	buffer: [32]u8
+	path := fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer))
+	testing.expect(
+		t,
+		os.write_entire_file(path, format.instance_set_write(contents, context.temp_allocator)) ==
+		nil,
+	)
+	testing.expect(t, os.change_times(path, modified, modified) == nil)
+	generation := fmt.tprintf("%s/%s", dir, format.GENERATION_FILE)
+	testing.expect(t, os.write_entire_file(generation, transmute([]byte)string("1")) == nil)
+	testing.expect(t, os.change_times(generation, modified, modified) == nil)
+}
+
+// A mesh, a texture and an instance set each free their resources exactly once: when a newer blob swaps in, when they
+// are unloaded, and when the residency goes. A code reload frees nothing.
+@(test)
+each_kind_frees_its_resources_once_through_land_evict_and_reload :: proc(t: ^testing.T) {
+	rig := new(Rig)
+	defer free(rig)
+	context.user_ptr = &rig.fake
+	rig_start(t, rig)
+	r, fake := &rig.r, &rig.fake
+	start := time.now()
+	mesh, texture, set := test_guid(1), test_guid(2), test_guid(3)
+	write_mesh(t, rig.dir, mesh, 3, start)
+	write_texture_blob(t, rig.dir, texture, {16, 16}, 5, start)
+	write_instance_set(t, rig.dir, set, false, start)
+	residency_enable_accels(r)
+	residency_set_policy(r, {idle_frames = 100})
+
+	ask :: proc(r: ^Residency, mesh, texture, set: format.Guid) -> (ready: int) {
+		_, mesh_ready := resident_mesh(r, mesh)
+		_, texture_ready := resident_texture(r, texture)
+		_, set_ready := resident_instance_set(r, set)
+		return int(mesh_ready) + int(texture_ready) + int(set_ready)
+	}
+	// What one version of each holds: the mesh's six buffers and its structure, the texture, and the set's two buffers.
+	expect_one_version :: proc(t: ^testing.T, fake: ^Fake_GPU, loc := #caller_location) {
+		testing.expect_value(t, fake.live_buffers, 8, loc)
+		testing.expect_value(t, fake.live_textures, 1, loc)
+		testing.expect_value(t, fake.live_accels, 1, loc)
+		testing.expect_value(t, fake.freed_twice, 0, loc)
+	}
+
+	ask(r, mesh, texture, set)
+	land(rig)
+	testing.expect_value(t, ask(r, mesh, texture, set), 3)
+	expect_one_version(t, fake)
+
+	// A code reload keeps every resource.
+	residency_reload(r, &rig.platform)
+	testing.expect_value(t, ask(r, mesh, texture, set), 3)
+	expect_one_version(t, fake)
+
+	// Newer blobs stream beside the old ones, which go when the new ones are in.
+	later := time.time_add(start, time.Second)
+	write_mesh(t, rig.dir, mesh, 4, later)
+	write_texture_blob(t, rig.dir, texture, {16, 16}, 5, later)
+	write_instance_set(t, rig.dir, set, true, later)
+	testing.expect_value(t, len(asset.poll(&rig.assets)), 3)
+	land(rig)
+	testing.expect_value(t, resident_streaming(r), 3)
+	testing.expect_value(t, ask(r, mesh, texture, set), 3)
+	land(rig)
+	testing.expect_value(t, resident_streaming(r), 0)
+	testing.expect(t, len(residency_changed_cells(r)) > 0)
+	m, _ := resident_mesh(r, mesh)
+	testing.expect_value(t, m.vertex_count, 4)
+	testing.expect_value(t, ask(r, mesh, texture, set), 3)
+	expect_one_version(t, fake)
+
+	// Unloaded, all of it goes.
+	idle(rig, 102)
+	testing.expect_value(t, residency_stats(r).evicted, 3)
+	testing.expect_value(t, fake.live_buffers, 0)
+	testing.expect_value(t, fake.live_textures, 0)
+	testing.expect_value(t, fake.live_accels, 0)
+	testing.expect_value(t, fake.freed_twice, 0)
+
+	// Asked for again, each streams again.
+	testing.expect_value(t, ask(r, mesh, texture, set), 0)
+	land(rig)
+	testing.expect_value(t, ask(r, mesh, texture, set), 3)
+	expect_one_version(t, fake)
+
+	rig_stop(rig)
+	testing.expect_value(t, fake.live_buffers, 0)
+	testing.expect_value(t, fake.live_textures, 0)
+	testing.expect_value(t, fake.live_accels, 0)
+	testing.expect_value(t, fake.freed_twice, 0)
 }
