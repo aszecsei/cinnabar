@@ -213,6 +213,12 @@ public sealed class ContentBrowser
             null => "",
             _ => assets.ExtensionOf(AssetKind.Script),
         };
+        return FreeName(dir, stem, extension);
+    }
+
+    /// <summary>A name in a directory that no file or folder has with an extension: the stem, or the stem with _2, _3 and on.</summary>
+    public static string FreeName(string dir, string stem, string extension)
+    {
         for (var n = 1; ; n++)
         {
             var name = n == 1 ? stem : $"{stem}_{n}";
@@ -249,6 +255,13 @@ public sealed class ContentBrowser
         Reveal(ContentItem.Of(created));
         return true;
     }
+
+    /// <summary>
+    /// Makes an asset from a template in a folder, as an editor asks for one that it fills: the content browser neither
+    /// shows nor opens it. Returns its GUID, or null when the daemon refuses, with the reason in <see cref="OperationFailed"/>.
+    /// </summary>
+    public async Task<string?> CreateIn(AssetTemplate template, ContentFolder folder, string name) =>
+        await Operate(new CreateAsset(template, folder.Root, folder.Path, name)) is { Guids: [var guid, ..] } ? guid : null;
 
     public async Task<bool> Rename(ContentItem item, string name)
     {

@@ -177,6 +177,7 @@ A sub-sequence section plays the cutscene that its `asset` names, and has settin
 | `scale` | The child's time per this cutscene's time: a number above 0 | 1 |
 | `loop` | `true`: past the trim's end, the child's time starts the trim again. `false`: it holds at the trim's end. | `false` |
 | `bind <child id> = <id>` | A line that gives the child's binding with the first ID to this cutscene's binding with the second, so the child's tracks act on it. Each of the child's bindings at most once. A binding that no line names resolves on its own. | None |
+| `name` | Quoted text: the shot's name, which the editor's bar, breadcrumbs and shot list show. The blob does not keep it. | The child's file name |
 
 ```
 track 4 sub_sequence "Opening shot"
@@ -187,7 +188,7 @@ track 4 sub_sequence "Opening shot"
 		bind 1 = 1
 ```
 
-A sub-sequence section has no `offset`, `speed`, `root_motion` or channels, and starts at or after the end of the section before it on its track. Its `ease_in`, `ease_out` and `weight` scale the weights of the child's sections. `trim`, `scale` and `bind` on a section of another kind are problems. A `bind` comes before the section's channels.
+A sub-sequence section has no `offset`, `speed`, `root_motion` or channels, and starts at or after the end of the section before it on its track. Its `ease_in`, `ease_out` and `weight` scale the weights of the child's sections. `trim`, `scale`, `bind` and `name` on a section of another kind are problems, and so is a `name` that is not quoted text. A `bind` comes before the section's channels.
 
 A presentation section has a `kind` and settings of its own ([Cinematics: Presentation tracks](../../cinematics/tracks.md#presentation-tracks)). A section without a `kind` is a problem:
 
@@ -375,7 +376,7 @@ Each track's sections follow those of the track before it. The same is true of e
 - **Sub-sequences.** The cooker reads each sub-sequence's source, not its blob, so the order of the passes does not matter. A pass that cooks one cutscene checks every cutscene, because a cycle, a depth, a trim and a bind depend on the cutscenes that it reaches. A child's blob is a reference, not a copy: a cutscene that plays it loads it, and a cook of the child alone reaches every cutscene that plays it.
 - **The cooker does not check** that a possessed entity is in its scene, because that needs the scene's prefabs expanded. The binding's policy says what to do when the entity is missing at run time ([Cinematics: A missing binding](../../cinematics/bindings.md#a-missing-binding)).
 - **Dependencies.** The cooker adds each GUID that the cutscene names to its dependencies, the possessed scenes included. So a fix to one of these assets cooks the cutscene again.
-- **The cache key** covers the cooker version (`cutscenes 12`), the layout, the source path, the source and the GUID.
+- **The cache key** covers the cooker version (`cutscenes 15`), the layout, the source path, the source and the GUID.
 - **Hot reload:** a cooked cutscene reaches the game as any blob does (see [Blobs and loading: Loading](../blobs-and-loading.md#loading)). A cutscene that plays evaluates the new blob at its current time, and the fields of the tracks that the new blob removed go back ([Cinematics: Hot reload](../../cinematics/evaluation.md#hot-reload)). So does a cutscene that plays a reloaded sub-sequence.
 
 - **The editor** shows cutscenes among the animation in the content browser, with a clapperboard icon, and opens them in the [cutscene editor](../../editor/cutscene-editor.md). **New Cutscene**, in the content browser's menu and in the Gameplay tab's New Asset group, makes a cutscene of 10 s at 30 frames a second with an empty camera cut track, `CUTSCENE_TEMPLATE`, and opens it.

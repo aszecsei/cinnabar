@@ -1165,6 +1165,17 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 		{SUB + "\t\ttrim = 5 4\n", 8, "trim is the sub-sequence's start"},
 		{SUB + "\t\ttrim = -1\n", 8, "trim is the sub-sequence's start"},
 		{SUB + "\t\ttrim = 1.5\n", 8, "trim is the sub-sequence's start"},
+		{SUB + "\t\tname = Shot\n", 8, "name is quoted text"},
+		{
+			SUB + "\t\tchannel x\n\t\t\tkey 0 0 linear\n\t\tname = \"A\"\n",
+			10,
+			"comes before the section's channels",
+		},
+		{
+			"cutscene 1\nlength = 10\n" + ACTS + "\t\tname = \"Walk\"\n",
+			9,
+			"only a sub_sequence section has a name",
+		},
 		{SUB + "\t\tscale = 0\n", 8, "scale is a number above 0"},
 		{SUB + "\t\tscale = fast\n", 8, "scale is a number above 0"},
 		{SUB + "\t\tbind 7\n", 8, "a bind is"},
@@ -1265,6 +1276,17 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 			problems,
 		)
 	}
+}
+
+@(test)
+a_sub_sequence_section_takes_a_name_that_the_blob_leaves_out :: proc(t: ^testing.T) {
+	text :=
+		"cutscene 1\nlength = 10\ntrack 1 sub_sequence \"S\"\n\tsection 1 0 10\n\t\tasset = $" +
+		SHOT_GUID +
+		"\n\t\tname = \"Shot 01\"\n"
+	parsed, problems := cutscene_parse(text, context.temp_allocator)
+	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
+	testing.expect_value(t, len(parsed.contents.tracks), 1)
 }
 
 @(test)

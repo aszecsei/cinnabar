@@ -109,14 +109,25 @@ public sealed partial class CutsceneEditor
     public IEnumerable<string> UnsavedChildren() => _levelHolds.Values.Where(h => h.Checks.CookedClean).Select(h => h.Document.Guid);
 
     /// <summary>
-    /// The names of the levels, from the tab's own cutscene to the shown one, which the breadcrumb bar shows: each
-    /// cutscene's file name.
+    /// The names of the levels, from the tab's own cutscene to the shown one, which the breadcrumb bar shows: the tab's
+    /// file name, then each level's section's name, or its cutscene's file name.
     /// </summary>
-    public IReadOnlyList<string> Breadcrumbs =>
-    [
-        System.IO.Path.GetFileNameWithoutExtension(RootDocument.Path),
-        .. _levels.Path.Select(l => _levelHolds.TryGetValue(l.Guid, out var hold) ? System.IO.Path.GetFileNameWithoutExtension(hold.Document.Path) : l.Guid),
-    ];
+    public IReadOnlyList<string> Breadcrumbs
+    {
+        get
+        {
+            var crumbs = new List<string> { System.IO.Path.GetFileNameWithoutExtension(RootDocument.Path) };
+            var parent = RootFile;
+            foreach (var level in _levels.Path)
+            {
+                var hold = _levelHolds.GetValueOrDefault(level.Guid);
+                crumbs.Add(parent.Find(level.SectionPath)?.Name is { Length: > 0 } name ? name
+                    : hold != null ? System.IO.Path.GetFileNameWithoutExtension(hold.Document.Path) : level.Guid);
+                parent = hold?.Document.Graph ?? parent;
+            }
+            return crumbs;
+        }
+    }
 
     /// <summary>Whether the ruler shows the shown level's own time in context, not the tab's. The tab's, and not saved.</summary>
     public bool LocalTime

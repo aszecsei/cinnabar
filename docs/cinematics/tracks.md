@@ -494,6 +494,7 @@ track 4 sub_sequence "Shots"
 - **Loop or hold.** Past the trim's end, the child's time starts the trim again when the section loops. Otherwise it holds at the trim's end.
 - **The mapping** is `child_t = trim.start + (t − section.start) × scale`, in whole ticks, wrapped into the trim or held at its end. A time before the section maps to its start, and one after it to its end. `child_time` is the one place that maps a parent's time to a child's: every track of the child evaluates at its time.
 - **Weight.** The section's weight, eases and rolls scale the weights of the child's sections, as `sample_section` gives them to every kind. So two shots that overlap on two tracks cross-fade.
+- **The name.** A section's `name` is the shot's name in the editor. The game does not read it.
 
 **The child's tracks are the parent's.** A child has no lifecycle of its own. The parent's player loads it, and its tracks evaluate with the parent's, at the mapped time:
 - **The order.** A child's tracks evaluate in its sub-sequence track's place in the parent's order. A later track wins a field that an earlier one also writes, as in one cutscene.

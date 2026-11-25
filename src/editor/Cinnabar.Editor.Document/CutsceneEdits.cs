@@ -131,7 +131,7 @@ public static class CutsceneEdits
     }
 
     // The subtitles that belong to audio sections that move, and do not move themselves, which move with them.
-    static List<CutsceneBlock> Followers(CutsceneFile file, ICollection<CutsceneBlock> sections, IReadOnlySet<int>? locked)
+    internal static List<CutsceneBlock> Followers(CutsceneFile file, ICollection<CutsceneBlock> sections, IReadOnlySet<int>? locked)
     {
         var audio = sections.Where(s => TrackOf(s)?.TrackKind == "audio" && s.Id != null).Select(s => s.Id!.Value.ToString(CultureInfo.InvariantCulture)).ToHashSet();
         if (audio.Count == 0)
