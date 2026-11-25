@@ -79,7 +79,7 @@ set_behaviour_field :: proc(
 				}
 				luau.rawgetfield(L, -1, "default")
 			} else {
-				push_behaviour_field(d.r, L, d.field)
+				push_value(d.r, L, field_value(d.field))
 				if d.problem = field_problem(d.r, L, class, schema, d.field.name, -1);
 				   d.problem != "" {
 					return 0

@@ -25,6 +25,10 @@ What scripts see: the value types, entities and component references, the engine
   - `push_light`, `to_light` and `check_light` push and read a `Light_Value`;
   - `light_method` registers its methods;
   - a `Light_Value` is an event argument too.
+- **One value for native code.** `script.Value` is a number, a boolean, a string, a `vector`, an `Entity`, a `WorldPosition`, an asset's GUID or a `Light_Value`, or `nil`:
+  - `push_value` pushes one. The nil entity and the zero GUID push `nil`.
+  - `check_value(r, L, idx, accepts)` reads one whose kind is in `accepts`, and gives false for the rest. It raises no error, so each caller raises its own. A string it gives is a view into the VM: clone a string to keep it.
+  - Event arguments (`Event_Arg`), action arguments, behaviour fields, blackboard values and save entries go through them. Script component fields push straight from the component's bytes.
 - Userdata tags and light userdata tags are engine constants. They never depend on registration order.
 - Luau sets each metatable only once, so `init` makes them, and a code reload keeps them. Their metamethods are dispatcher closures, so they reach the new DLL's bindings.
 - `WorldPosition` and `Quaternion` values are immutable, so scripts can share them, as `Quaternion.identity` and `WorldPosition.origin` are shared.

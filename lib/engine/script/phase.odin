@@ -8,7 +8,6 @@ import "core:time"
 import "cinnabar:core"
 import "cinnabar:core/luau"
 import "cinnabar:core/profile"
-import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 // Events delivered in one phase can send more events. Delivery stops after this many rounds, so a loop of events
@@ -185,16 +184,7 @@ drain_log :: proc(r: ^Runtime) {
 }
 
 // Event_Arg is a value that native code sends with an event.
-Event_Arg :: union {
-	f64,
-	bool,
-	string,
-	[3]f32,
-	ecs.Entity,
-	ecs.World_Position,
-	format.Guid,
-	Light_Value,
-}
+Event_Arg :: Value
 
 // send queues an event for an entity's behaviours, like a script's entity:send. Call it from the frame code, not
 // from jobs. The handlers are on_<name>.
@@ -225,24 +215,7 @@ broadcast :: proc(r: ^Runtime, name: string, args: ..Event_Arg) {
 push_event :: proc(r: ^Runtime, L: ^luau.State, name: string, args: []Event_Arg) {
 	luau.pushodinstring(L, name)
 	for arg in args {
-		switch v in arg {
-		case f64:
-			luau.pushnumber(L, v)
-		case bool:
-			luau.pushboolean(L, b32(v))
-		case string:
-			luau.pushodinstring(L, v)
-		case [3]f32:
-			push_vector(L, v)
-		case ecs.Entity:
-			push_entity(L, v)
-		case ecs.World_Position:
-			push_position(L, v)
-		case format.Guid:
-			push_asset(r, L, v)
-		case Light_Value:
-			push_light(L, v)
-		}
+		push_value(r, L, arg)
 	}
 }
 

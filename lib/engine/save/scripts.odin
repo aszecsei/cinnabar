@@ -78,14 +78,16 @@ read_binding :: proc(L: ^luau.State) -> c.int {
 	luau.createtable(L, 0, c.int(len(entries)))
 	for e in entries {
 		luau.pushodinstring(L, e.key)
+		value: script.Value
 		switch v in e.value {
 		case f64:
-			luau.pushnumber(L, v)
+			value = v
 		case bool:
-			luau.pushboolean(L, b32(v))
+			value = v
 		case string:
-			luau.pushodinstring(L, v)
+			value = v
 		}
+		script.push_value(r, L, value)
 		luau.rawset(L, -3)
 	}
 	return 1
@@ -117,26 +119,8 @@ write_binding :: proc(L: ^luau.State) -> c.int {
 				),
 			)
 		}
-		value: Value
-		#partial switch luau.type(L, -1) {
-		case .NUMBER:
-			n := luau.tonumber(L, -1)
-			if n - n != 0 {
-				script.raise(
-					L,
-					fmt.aprintf(
-						"Save.write: %q is not a finite number",
-						key,
-						allocator = allocator,
-					),
-				)
-			}
-			value = n
-		case .BOOLEAN:
-			value = bool(luau.toboolean(L, -1))
-		case .STRING:
-			value = luau.toodinstring(L, -1)
-		case:
+		read, ok := script.check_value(r, L, -1, {.Number, .Boolean, .String})
+		if !ok {
 			script.raise(
 				L,
 				fmt.aprintf(
@@ -146,6 +130,26 @@ write_binding :: proc(L: ^luau.State) -> c.int {
 					allocator = allocator,
 				),
 			)
+		}
+		value: Value
+		// check_value gives no other kind.
+		#partial switch v in read {
+		case f64:
+			if v - v != 0 {
+				script.raise(
+					L,
+					fmt.aprintf(
+						"Save.write: %q is not a finite number",
+						key,
+						allocator = allocator,
+					),
+				)
+			}
+			value = v
+		case bool:
+			value = v
+		case string:
+			value = v
 		}
 		append(&entries, Entry{key, value})
 		luau.pop(L, 1)
