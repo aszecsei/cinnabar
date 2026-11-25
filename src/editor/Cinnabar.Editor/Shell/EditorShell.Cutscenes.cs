@@ -185,7 +185,14 @@ public sealed partial class EditorShell
             _cutsceneViews![guid] = view;
         }
         WriteSetting("cutscene", EditorSettings.CutsceneTimelineFileName, JsonSerializer.Serialize(_cutsceneViews));
+        CutsceneTimelineSettingsSaved?.Invoke(guid);
     }
+
+    /// <summary>
+    /// A cutscene's timeline view was saved, by its GUID. The tabs that hold it, as their own or in context, read its
+    /// locks and stand-ins again, since the settings hold the one copy.
+    /// </summary>
+    internal event Action<string>? CutsceneTimelineSettingsSaved;
 }
 
 /// <summary>

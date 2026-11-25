@@ -26,16 +26,28 @@ public sealed record CutsceneLevels(ImmutableList<CutsceneLevel> Path)
 public sealed partial class CutsceneEditor
 {
     // A child that the tab holds: the levels on the way down, and each one shown before with changes, until it saves.
-    sealed class LevelHold(CutsceneDocuments.Lease lease, CookChecks<GraphProblem> checks) : IDisposable
+    // It hears its document's changes from its start to its dispose, so what the tab observes is what it holds.
+    sealed class LevelHold : IDisposable
     {
-        public CutsceneDocuments.Lease Lease { get; } = lease;
+        readonly Action _changed;
 
-        public CookChecks<GraphProblem> Checks { get; } = checks;
+        public LevelHold(CutsceneDocuments.Lease lease, CookChecks<GraphProblem> checks, Action<CutsceneDocument> changed)
+        {
+            Lease = lease;
+            Checks = checks;
+            _changed = () => changed(lease.Document);
+            lease.Document.Changed += _changed;
+        }
+
+        public CutsceneDocuments.Lease Lease { get; }
+
+        public CookChecks<GraphProblem> Checks { get; }
 
         public CutsceneDocument Document => Lease.Document;
 
         public void Dispose()
         {
+            Document.Changed -= _changed;
             Checks.Dispose();
             Lease.Dispose();
         }
@@ -250,7 +262,7 @@ public sealed partial class CutsceneEditor
                 }
             };
             checks.CookedCleanChanged += () => _shell.CutscenePreview.OnChildrenChanged(this);
-            _levelHolds[guid] = new LevelHold(lease, checks);
+            _levelHolds[guid] = new LevelHold(lease, checks, OnLevelDocumentChanged);
             _ = checks.CookNow();
         }
         return SetLevels(_levels.Down(new CutsceneLevel(sectionPath, guid)));
@@ -293,23 +305,12 @@ public sealed partial class CutsceneEditor
         }
         Document.EndMerge();
         _levelViews[ShownGuid] = new LevelView([.. _selection], [.. _folds], [.. _hiddenCurves], _shownCurves);
-        Unobserve();
         _levels = next;
         _shown = InContext ? _levelHolds[next.Path[^1].Guid].Document : RootDocument;
-        // A child let go here is no longer observed, so it is let go before the documents that stay are.
         ReleaseIdle();
-        Observe();
 
         // The view of the level, and its own locks and stand-ins, since its tracks' and bindings' IDs are its own.
-        var settings = _shell.CutsceneTimelineSettingsOf(ShownGuid);
-        _locked.Clear();
-        _locked.UnionWith(settings.Locked);
-        _standIns.Clear();
-        foreach (var (binding, standIn) in InContext ? settings.StandIns ?? [] : _shell.CutsceneTimelineSettingsOf(Guid).StandIns ?? [])
-        {
-            _standIns[binding] = standIn;
-        }
-        _standInsVersion++;
+        ReadShownSettings();
         var view = _levelViews.GetValueOrDefault(ShownGuid);
         _folds.Clear();
         _folds.UnionWith(view?.Folds ?? []);
@@ -332,23 +333,60 @@ public sealed partial class CutsceneEditor
         return true;
     }
 
-    // The shown document's changes are the timeline's; the others' can take a section on the way down away, change
-    // what the preview plays, or change the tab's dirty mark.
-    void Observe()
+    // The shown level's locks and stand-ins, from the settings, which hold one copy of each cutscene's: a tab that shows
+    // the same cutscene, in context or as its own, changes them there.
+    void ReadShownSettings()
     {
-        Document.Changed += OnDocumentChanged;
-        foreach (var document in Documents.Where(d => d != Document))
+        var settings = _shell.CutsceneTimelineSettingsOf(ShownGuid);
+        _locked.Clear();
+        _locked.UnionWith(settings.Locked);
+        _standIns.Clear();
+        foreach (var (binding, standIn) in settings.StandIns ?? [])
         {
-            document.Changed += OnOtherLevelChanged;
+            _standIns[binding] = standIn;
+        }
+        _standInsVersion++;
+    }
+
+    // Another holder of a cutscene that the tab holds saved its view: the shown level's locks and stand-ins follow it,
+    // and a cutscene whose stand-ins changed cooks again.
+    void OnTimelineSettingsSaved(string guid)
+    {
+        var settings = _shell.CutsceneTimelineSettingsOf(guid);
+        if (string.Equals(guid, ShownGuid, StringComparison.OrdinalIgnoreCase)
+            && (!_locked.SetEquals(settings.Locked) || !StandInsEqual(_standIns, settings.StandIns)))
+        {
+            ReadShownSettings();
+            ShownChecks.Schedule();
+            Changed?.Invoke();
+            return;
+        }
+        // At the top level the tab's own cutscene is the shown one, above.
+        if (InContext && string.Equals(guid, Guid, StringComparison.OrdinalIgnoreCase))
+        {
+            _standInsVersion++;
+            Checks.Schedule();
+        }
+        else if (_levelHolds.TryGetValue(guid, out var hold))
+        {
+            hold.Checks.Schedule();
         }
     }
 
-    void Unobserve()
+    static bool StandInsEqual(IReadOnlyDictionary<int, string> a, IReadOnlyDictionary<int, string>? b) =>
+        a.Count == (b?.Count ?? 0) && (b == null || a.All(p => b.TryGetValue(p.Key, out var v) && v == p.Value));
+
+    // The one handler of each held document's changes: the shown one's are the timeline's; the others' can take a
+    // section on the way down away, change what the preview plays, or change the tab's dirty mark.
+    void OnLevelDocumentChanged(CutsceneDocument document)
     {
-        Document.Changed -= OnDocumentChanged;
-        foreach (var document in Documents.Where(d => d != Document))
+        if (document == _shown)
         {
-            document.Changed -= OnOtherLevelChanged;
+            OnDocumentChanged();
+        }
+        else
+        {
+            OnOtherLevelChanged();
         }
     }
 
@@ -370,9 +408,7 @@ public sealed partial class CutsceneEditor
             SetLevels(_levels.Up(depth));
             return;
         }
-        Unobserve();
         ReleaseIdle();
-        Observe();
         Changed?.Invoke();
         PlayheadChanged?.Invoke();
     }
@@ -419,10 +455,6 @@ public sealed partial class CutsceneEditor
 
     void DisposeLevels()
     {
-        foreach (var document in Documents.Where(d => d != Document))
-        {
-            document.Changed -= OnOtherLevelChanged;
-        }
         foreach (var hold in _levelHolds.Values)
         {
             hold.Dispose();

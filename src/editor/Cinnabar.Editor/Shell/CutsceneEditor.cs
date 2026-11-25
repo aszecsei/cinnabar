@@ -30,6 +30,8 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     readonly List<string> _selection = [];
     readonly HashSet<string> _folds = [];
     readonly CutsceneDocuments.Lease _rootLease;
+    // The root's changes go to the one handler of every level's, as each child's do.
+    readonly Action _rootChanged;
     readonly HashSet<int> _locked;
     readonly HashSet<int> _muted;
     readonly HashSet<int> _soloed;
@@ -61,7 +63,9 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
             l => new GraphProblem(null, l.Text, l.Error, l.Line));
         Checks.Changed += OnChecked;
         Checks.CookedCleanChanged += () => _shell.CutscenePreview.OnCookedCleanChanged(this);
-        Document.Changed += OnDocumentChanged;
+        _rootChanged = () => OnLevelDocumentChanged(RootDocument);
+        RootDocument.Changed += _rootChanged;
+        _shell.CutsceneTimelineSettingsSaved += OnTimelineSettingsSaved;
         var view = shell.CutsceneTimelineSettingsOf(Guid);
         _showFrames = view.ShowFrames;
         _locked = [.. view.Locked];
@@ -1441,7 +1445,8 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
 
     public void Dispose()
     {
-        Document.Changed -= OnDocumentChanged;
+        RootDocument.Changed -= _rootChanged;
+        _shell.CutsceneTimelineSettingsSaved -= OnTimelineSettingsSaved;
         DisposeLevels();
         Checks.Dispose();
         _rootLease.Dispose();

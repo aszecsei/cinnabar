@@ -241,6 +241,13 @@ public sealed class CutsceneSubSequenceTests : IDisposable
         Assert.False(editor.LosesChangesOnClose);
         Assert.False(own.LosesChangesOnClose);
 
+        // A lock is the cutscene's, in the settings' one copy, so a lock in one tab shows in the other and a lock in the
+        // other keeps it.
+        own.SetLocked(1, true);
+        Assert.Contains(1, editor.Locked);
+        editor.SetLocked(1, false);
+        Assert.DoesNotContain(1, own.Locked);
+
         // Closing the child's tab keeps the document that the parent's tab shows.
         shell.CloseGraph(own, discard: true);
         Assert.DoesNotContain(own, shell.Cutscenes);
