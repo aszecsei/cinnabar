@@ -365,6 +365,7 @@ clone_params :: proc(
 @(private = "file")
 asset_equal :: proc(a, b: cook_link.Asset) -> bool {
 	if a.thumbnail != b.thumbnail ||
+	   a.peaks != b.peaks ||
 	   a.thumbnail_ready != b.thumbnail_ready ||
 	   a.generated != b.generated ||
 	   a.guid != b.guid ||

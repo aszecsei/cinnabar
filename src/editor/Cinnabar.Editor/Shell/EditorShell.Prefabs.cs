@@ -332,6 +332,11 @@ public sealed partial class EditorShell
         PrefabRoot(guid).FirstOrDefault(c => c.Id == component)?.Fields.FirstOrDefault(f => f.Name == field)?.Value is { Kind: SceneValueKind.Number, Numbers: [var n] }
             ? n.Float : null;
 
+    /// <summary>An asset field of a component of a prefab's root, as its file has it, by GUID, or null when the file does not set it.</summary>
+    public string? PrefabRootAsset(string guid, ulong component, string field) =>
+        PrefabRoot(guid).FirstOrDefault(c => c.Id == component)?.Fields.FirstOrDefault(f => f.Name == field)?.Value is { Kind: SceneValueKind.Asset, Asset.Length: > 0 } v
+            ? v.Asset : null;
+
     // A prefab's scene as its file has it, or null. A USD stage's prefab is text that the cooker generates.
     Scene? SceneOfPrefab(string guid)
     {

@@ -2,6 +2,7 @@ using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Model;
+using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Tests;
 
@@ -158,6 +159,28 @@ public sealed class CookLinkTests : IDisposable
         Assert.StartsWith(Path.Combine(_dir, "cache", "thumbnails").Replace('\\', '/'), dot.Thumbnail.Replace('\\', '/'));
         // A script has no thumbnail.
         Assert.Equal("", index.Assets.Values.First(a => a.Kind == AssetKind.Script).Thumbnail);
+    }
+
+    [Fact]
+    public async Task TheIndexCarriesASoundsPeakFileThatTheEditorReads()
+    {
+        // tools/cook's test sound: silence, a step, and a ramp whose last peak is short.
+        Directory.CreateDirectory(Path.Combine(_content, "audio"));
+        File.Copy(Path.Combine(EditorOptions.RepositoryRoot(), "tools", "cook", "testdata", "audio", "peaks.wav"), Path.Combine(_content, "audio", "peaks.wav"));
+        var index = new AssetIndex();
+        using var session = Start(index);
+        var output = new List<string>();
+        session.Output += line => { lock (output) { output.Add(line); } };
+        await Until(() => session.Linked && index.Assets.Values.Any(a => a.Path == "audio/peaks.wav" && a.Peaks != ""), session, output);
+
+        var sound = index.Assets.Values.Single(a => a.Path == "audio/peaks.wav");
+        Assert.StartsWith(Path.Combine(_dir, "cache", "peaks").Replace('\\', '/'), AssetIndex.PeaksOf(sound)!.Replace('\\', '/'));
+        var peaks = PeakFile.Parse(File.ReadAllBytes(sound.Peaks))!;
+        Assert.Equal((256, 812L, 4), (peaks.FramesPerPeak, peaks.Frames, peaks.Count));
+        Assert.Equal((-8000 / 32768.0, 12000 / 32768.0), peaks.Range(256, 512));
+        Assert.Equal((-14950 / 32768.0, 29900 / 32768.0), peaks.Range(768, 812));
+        // A script has none.
+        Assert.Null(AssetIndex.PeaksOf(index.Assets.Values.First(a => a.Kind == AssetKind.Script)));
     }
 
     [Fact]

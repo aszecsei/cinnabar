@@ -38,14 +38,26 @@ public sealed record CutsceneTimelineItem(CutsceneItemKind Kind, int Start, int 
     /// <summary>An animation's or a sound's clip under its section, when the index knows the clip's length.</summary>
     public CutsceneClipSpan? Clip { get; init; }
 
+    /// <summary>A sound section's peak file, by its path in the cache, or null when the daemon has none.</summary>
+    public string? Peaks { get; init; }
+
+    /// <summary>A sound section's gain, which scales its waveform.</summary>
+    public CutsceneGain Gain { get; init; } = CutsceneGain.One;
+
+    /// <summary>An animation section's clip events, from its binding's graph, in the clip's ticks.</summary>
+    public IReadOnlyList<CutsceneClipEvent> Events { get; init; } = [];
+
     /// <summary>The time that the bar draws over: its span, and the faded parts of its clip before and after it.</summary>
     public (double Start, double End) Reach => Clip is { } clip && CutsceneTimelineLayout.Hints(Start, End, clip) is var hints
         ? (hints.HeadStart ?? Start, hints.TailEnd ?? End)
         : (Start, End);
 }
 
-/// <summary>What the content index knows of a section's clip or sound: its name, and its length in ticks, or null before it has cooked.</summary>
-public sealed record CutsceneClipInfo(string Name, int? Length);
+/// <summary>
+/// What the content index knows of a section's clip or sound: its name, its length in ticks, or null before it has
+/// cooked, and a sound's peak file, or null before the daemon has made it.
+/// </summary>
+public sealed record CutsceneClipInfo(string Name, int? Length, string? Peaks = null);
 
 /// <summary>
 /// An animation's or a sound's clip under its section (see docs/editor/cutscene-editor.md#loops-and-hints): the clip's
@@ -288,10 +300,13 @@ public sealed class CutsceneTimelineLayout
     /// show, and a binding with none of its tracks shown, unless the text names the binding and no span is given. A
     /// filter's bindings leave out every other binding, and the tracks that no binding has. bindingInfo tells each
     /// binding's row what it binds, and clipInfo each animation or audio section's clip, by its GUID, what it is.
+    /// clipEvents gives an animation track's clip's events, by the track and the clip's GUID, from its binding's graph.
     /// </summary>
     public static CutsceneTimelineLayout Build(CutsceneFile file, IReadOnlySet<string> toggled, CutsceneRowFilter? filter = null,
-        Func<CutsceneBlock, CutsceneBindingInfo?>? bindingInfo = null, Func<string, CutsceneClipInfo?>? clipInfo = null)
+        Func<CutsceneBlock, CutsceneBindingInfo?>? bindingInfo = null, Func<string, CutsceneClipInfo?>? clipInfo = null,
+        Func<CutsceneBlock, string, IReadOnlyList<CutsceneClipEvent>>? clipEvents = null)
     {
+        var sources = new ClipSources(clipInfo, clipEvents);
         filter ??= CutsceneRowFilter.None;
         var rows = new List<CutsceneTimelineRow>();
         var bindingIds = file.Bindings.Select(b => b.Id).OfType<int>().ToHashSet();
@@ -306,7 +321,7 @@ public sealed class CutsceneTimelineLayout
             .ToList();
         foreach (var track in master)
         {
-            AddTrack(rows, file, track, 0, toggled, clipInfo);
+            AddTrack(rows, file, track, 0, toggled, sources);
         }
         foreach (var binding in file.Bindings)
         {
@@ -337,7 +352,7 @@ public sealed class CutsceneTimelineLayout
             }
             foreach (var track in tracks)
             {
-                AddTrack(rows, file, track, 1, toggled, clipInfo);
+                AddTrack(rows, file, track, 1, toggled, sources);
             }
         }
         for (var i = 0; i < rows.Count; i++)
@@ -357,8 +372,11 @@ public sealed class CutsceneTimelineLayout
 
     static string TrackLabel(CutsceneBlock track) => string.IsNullOrEmpty(track.Name) ? track.TrackKind ?? "track" : track.Name;
 
+    // What the editor tells a build of the clips under sections.
+    sealed record ClipSources(Func<string, CutsceneClipInfo?>? Info, Func<CutsceneBlock, string, IReadOnlyList<CutsceneClipEvent>>? Events);
+
     static void AddTrack(List<CutsceneTimelineRow> rows, CutsceneFile file, CutsceneBlock track, int depth, IReadOnlySet<string> toggled,
-        Func<string, CutsceneClipInfo?>? clipInfo)
+        ClipSources sources)
     {
         var path = CutsceneFile.PathOf(track);
         var label = TrackLabel(track);
@@ -380,14 +398,19 @@ public sealed class CutsceneTimelineLayout
             {
                 case { Kind: CutsceneBlockKind.Section, Start: { } s, End: { } e }:
                 {
-                    var clip = track.TrackKind is "animation" or "audio" && child.Get("asset") is { } asset ? clipInfo?.Invoke(asset.Trim().TrimStart('$')) : null;
+                    var guid = track.TrackKind is "animation" or "audio" && child.Get("asset") is { } asset ? asset.Trim().TrimStart('$') : null;
+                    var clip = guid != null ? sources.Info?.Invoke(guid) : null;
                     var eased = track.TrackKind != "camera_cut";
+                    var audio = track.TrackKind == "audio";
                     row.Bars.Add(new CutsceneTimelineItem(CutsceneItemKind.Section, s, e, CutsceneFile.PathOf(child))
                     {
                         Label = SectionLabel(file, track, child, clip),
                         EaseIn = eased ? Ticks(child, "ease_in") : 0,
                         EaseOut = eased ? Ticks(child, "ease_out") : 0,
                         Clip = SpanOf(track, child, clip),
+                        Peaks = audio ? clip?.Peaks : null,
+                        Gain = audio ? CutsceneGain.Of(track, child) : CutsceneGain.One,
+                        Events = track.TrackKind == "animation" && guid != null ? sources.Events?.Invoke(track, guid) ?? [] : [],
                     });
                     foreach (var (key, keyPath) in Keys(child, null))
                     {
@@ -610,6 +633,51 @@ public sealed class CutsceneTimelineLayout
             return null;
         }
         return (view.X(bar.Start + bar.EaseIn), view.X(bar.End - bar.EaseOut));
+    }
+
+    /// <summary>The band at the bottom of a row where an animation section's clip events sit, and where a hover names them.</summary>
+    public const double EventBand = 6;
+
+    /// <summary>
+    /// The names of the clip events nearest a point of the control, within <see cref="Grab"/>, in the bottom
+    /// <see cref="EventBand"/> of an animation section's bar: what a hover shows. It is not a hit, so a press there is on
+    /// the section. Null where no event is near.
+    /// </summary>
+    public IReadOnlyList<string>? EventsAt(double x, double y, TimelineView view, double scrollY, double width)
+    {
+        if (x < Gutter || RowAt(y, scrollY) is not { Kind: CutsceneRowKind.Track, TrackKind: "animation" } row
+            || RulerHeight + row.Top - scrollY + RowHeight - y > EventBand)
+        {
+            return null;
+        }
+        var px = x - Gutter;
+        var nearest = double.PositiveInfinity;
+        var names = new List<string>();
+        foreach (var bar in row.Bars)
+        {
+            if (bar.Clip is not { } clip || bar.Events.Count == 0)
+            {
+                continue;
+            }
+            foreach (var tick in CutsceneWaveform.EventTicks(bar, clip, bar.Events, view, width))
+            {
+                var distance = Math.Abs(tick.X - px);
+                if (distance > Grab || distance > nearest + MergeWidth)
+                {
+                    continue;
+                }
+                if (distance < nearest - MergeWidth)
+                {
+                    names.Clear();
+                }
+                nearest = Math.Min(nearest, distance);
+                if (!names.Contains(tick.Name))
+                {
+                    names.Add(tick.Name);
+                }
+            }
+        }
+        return names.Count > 0 ? names : null;
     }
 
     /// <summary>The row at a y in the control, or null over the ruler or under the rows.</summary>

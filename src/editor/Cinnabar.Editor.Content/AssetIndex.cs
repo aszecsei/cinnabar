@@ -166,6 +166,12 @@ public sealed class AssetIndex
     /// </summary>
     public static int? LengthOf(Asset asset) => asset.Length == 0 ? null : (int)Math.Min(asset.Length, int.MaxValue);
 
+    /// <summary>
+    /// A sound's peak file, which the cutscene editor draws its waveform from (see
+    /// docs/content/daemon-and-operations.md#peaks). Null before the daemon has made it, and for another kind.
+    /// </summary>
+    public static string? PeaksOf(Asset asset) => asset.Peaks == "" ? null : asset.Peaks;
+
     /// <summary>The import settings that an asset's kind takes.</summary>
     public IReadOnlyList<SettingInfo> SettingsOf(AssetKind kind) => _importers.Find(i => i.Kind == kind)?.Settings ?? [];
 

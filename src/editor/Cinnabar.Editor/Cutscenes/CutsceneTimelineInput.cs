@@ -97,6 +97,11 @@ public sealed class CutsceneTimelineInput
         {
             return null;
         }
+        // A clip's event under the pointer names itself, over the section's bar (see docs/editor/cutscene-editor.md#events).
+        if (Layout.EventsAt(_pointer.X, _pointer.Y, View, ScrollY, TimeWidth) is { } events)
+        {
+            return string.Join(" · ", events);
+        }
         return Layout.HitTest(_pointer.X, _pointer.Y, View, ScrollY) switch
         {
             { Kind: CutsceneHitKind.Header, Row.Binding: { State: not CutsceneBindingState.Bound, Reason: { } reason } } => reason,

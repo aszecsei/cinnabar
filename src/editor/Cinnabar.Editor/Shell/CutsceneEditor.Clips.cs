@@ -11,12 +11,13 @@ public sealed partial class CutsceneEditor
 {
     /// <summary>
     /// What the index knows of an animation clip or a sound by its GUID, for its sections' bars: a clip's name in its
-    /// model, or a sound's file name, and its length. Null for another kind or an asset that is not there.
+    /// model, or a sound's file name, its length, and a sound's peak file. Null for another kind or an asset that is not
+    /// there.
     /// </summary>
     public CutsceneClipInfo? ClipOf(string guid) => _shell.Assets.Find(guid) switch
     {
         { Kind: AssetKind.Animation } a => new(a.Subasset != "" ? a.Subasset : Path.GetFileNameWithoutExtension(a.Path), AssetIndex.LengthOf(a)),
-        { Kind: AssetKind.Audio } a => new(Path.GetFileNameWithoutExtension(a.Path), AssetIndex.LengthOf(a)),
+        { Kind: AssetKind.Audio } a => new(Path.GetFileNameWithoutExtension(a.Path), AssetIndex.LengthOf(a), AssetIndex.PeaksOf(a)),
         _ => null,
     };
 

@@ -16,7 +16,7 @@ import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/wire"
 
 // Change it to drop every saved index, when what a pass learns of an asset changes.
-SAVED_INDEX_VERSION :: 3
+SAVED_INDEX_VERSION :: 4
 SAVED_INDEX_FILE :: ".index"
 
 // Saved_Source is what a pass learnt of one source, a file of the content or a stage's generated text, which the next

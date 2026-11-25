@@ -152,6 +152,7 @@ daemon_pass :: proc(
 	next: Index
 	index_build(&next, pass, d.options.roots[:])
 	thumbnails_update(&next, &pass, d.options)
+	peaks_update(&next, &pass, d.options)
 	changes := index_diff(&d.index, &next)
 	// What went away is in the old index, so it stays until the changes are sent.
 	defer {

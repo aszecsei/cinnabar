@@ -2,7 +2,7 @@
 
 The cutscene editor edits a cutscene (see [Content: Cutscenes](../content/kinds/cutscenes.md)), which the game plays as [Cinematics](../cinematics/README.md) describes. Each open one is a tab, a `GraphEditorDocument` with the ID `cutscene.{guid}`, over a `CutsceneEditor` in the shell, which holds its state. Docking can rebuild the view, and tests drive the editor without a window.
 
-The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, the bindings, the cameras with their lenses and focus, and the first part of the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)): names, loops, eases, drops and the section menu. Waveforms, a clip's events and thumbnails come next.
+The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, the bindings, the cameras with their lenses and focus, and the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)): names, loops, eases, drops, the section menu, sounds' waveforms and clips' events. Pose thumbnails wait for render out ([#559](https://github.com/aszecsei/cinnabar/issues/559)).
 
 **In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Sections](#sections) · [Preview](#preview) · [Keying](#keying) · [Bindings](#bindings) · [Curves](#curves) · [Cameras](#cameras)
 
@@ -240,11 +240,13 @@ A test with 50 tracks and 5,000 keys checks two times:
 - the draw list takes less than 4 ms;
 - a drag's step takes less than 50 ms. A step reads the text again, edits it, and builds the rows again, through a search filter that keeps every row.
 
-The test does not measure Avalonia's drawing.
+A second test draws 30 looping audio sections with gain curves, half of whose peak files have not been read. Their waveforms' columns take less than 4 ms a frame, with the whole minute in view and as the view scrolls across it.
+
+The tests do not measure Avalonia's drawing.
 
 ## Sections
 
-An animation or audio section shows what plays in it, so a designer can time to it without playing. `CutsceneTimelineLayout` finds what each bar shows when the rows are built, and its pure helpers, which tests call, place the marks: `Hints`, `ClipMarks`, `LabelRoom`, `Overlaps` and `Handles`.
+An animation or audio section shows what plays in it, so a designer can time to it without playing. `CutsceneTimelineLayout` finds what each bar shows when the rows are built, and its pure helpers, which tests call, place the marks: `Hints`, `ClipMarks`, `LabelRoom`, `Overlaps` and `Handles`, with `CutsceneWaveform.Columns` and `EventTicks` for waveforms and events.
 
 ### Labels
 
@@ -270,6 +272,22 @@ The clip's time at a time t on the cutscene is `offset + (t - start) × speed`. 
 - **A drag of a handle** sets its ease, as one undo entry that snaps and that Esc cancels. Its tooltip shows the ease. The ease is clamped to 0 and to the section's duration less its other ease, as the cooker needs, and 0 removes the setting. A locked track's handles do not move.
 - **Blends.** Where two sections on a track overlap, the overlap is darker, and the earlier section's ease out and the later one's ease in, across it, are the blend's curve. Their handles are at the two ends of the overlap when both eases are 0. Each handle sets only its own ease. To crossfade, drag the earlier section's ease out handle to the later section's start, and the later section's ease in handle to the earlier section's end: both are snap targets. The two eases then span the overlap, and their weights sum to 1.
 - **Camera cuts** have no eases: their `blend_in` and `blend_out` blend with gameplay, and the details edit them.
+
+### Waveforms
+
+An audio section draws its sound's waveform over its bar, so a designer can cut on a word or a beat.
+- **The peak file.** The editor reads no audio. The daemon writes each sound's lowest and highest sample in each run of 256 frames to a peak file, and the index names it (see [Daemon and operations](../content/daemon-and-operations.md#peaks)). `AssetIndex.PeaksOf` gives its path, or null before the daemon has made it.
+- **In the background.** `WaveformCache` reads a file off the UI thread, two at a time, and keeps up to 256. A section draws plain until its file is in. Then the timeline draws again, with no new build of the rows. A file that cannot be read stays failed and is not read again. A sound that cooks again has a new file.
+- **What a column shows.** Each pixel of the bar in view shows the lowest and highest sample of the part of the sound under it, from `offset + (t - start)`. A section that loops starts the sound again from its start. Past the end of a sound that does not loop, the bar has no waveform. `PeakFile` keeps coarser levels, each with half the peaks, so a column reads a few peaks at any zoom.
+- **The gain.** A column is scaled by the track's `gain`, the section's `weight` and its `gain` channel there, and clamped to the bar. The curve is read every 8 pixels, with straight lines between. The eases are not in it, as their ramps draw over the bar.
+- **Pitch.** A section with a `pitch` channel has no waveform, as it has no loops: its place in the sound is the integral of its pitch.
+
+### Events
+
+An animation section shows its clip's events as ticks along the bottom of its bar. A hover over one, in the bar's bottom 6 pixels, names it with its arguments, as the graph writes them. A press there is still on the section.
+- **Where they come from.** The runtime raises the markers of the graph of the binding's `Animator` (see [Cinematics: Tracks](../cinematics/tracks.md#animation-tracks)), so the events are that graph's, for the section's clip. The graph is a possessed entity's `Animator.graph` in its open scene, a spawned prefab's root's, or a slot's stand-in's. A binding with no `Animator`, a graph that is not there, and a scene that is not open show none.
+- **When they change.** The rows read the binding's graph each time they are built. An open graph's events are what its tab has, saved or not. Another graph's file is parsed again when its write time changes.
+- **Where they go.** An event at clip time `u` is at `start + (u - offset) / speed`, in each pass of a clip that loops, up to 256 passes in view. A clip that does not loop shows the events of its one pass inside the section.
 
 ### Drops
 
@@ -797,5 +815,5 @@ While a cutscene's preview is open, the helpers draw each camera's frustum in a 
 - **The wheel changes the flying speed.** It does not dolly, because a pilot's move ends with a mouse release. Alt and the right button dolly.
 - **The editing tools are off in a view that looks through a camera.** The gizmo, a box select, mesh mode, the landscape brush and drops act in the editor camera's view. A click still selects.
 - **The frustums are the same in every view.** The helpers' lines are shared by the scene views, so a camera that any view looks through has no frustum in the others either.
-- **No cut thumbnails yet.** A cut's hover shows its camera and its times, not a picture of its first frame. That waits for render out ([#559](https://github.com/aszecsei/cinnabar/issues/559)), which makes the preview's renders.
+- **No cut or pose thumbnails yet.** A cut's hover shows its camera and its times, not a picture of its first frame, and an animation section shows no pose. Both wait for render out ([#559](https://github.com/aszecsei/cinnabar/issues/559)), which makes the preview's renders.
 - **A preview value keys at the preview's time.** Past the range's end, the preview stands at the end, so Enter keys a held lens value there.

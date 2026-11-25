@@ -187,6 +187,10 @@ Asset :: struct {
 	// with the asset. Whether the file is there yet: a material's, a mesh's or a prefab's comes from the host.
 	thumbnail:       string,
 	thumbnail_ready: bool,
+	// For a sound, the absolute path of its peak file, which the cutscene editor draws its waveform from (see
+	// docs/content/daemon-and-operations.md#peaks), or "" until the daemon has made it. The name holds a key of the
+	// sound's blob, so it changes when the sound cooks again.
+	peaks:           string,
 }
 
 // A hotspot rectangle of a material's tool texture, in texels: a complete tileable piece that the Hotspot tool maps a
