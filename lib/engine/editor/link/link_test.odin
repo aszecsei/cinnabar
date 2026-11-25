@@ -57,6 +57,7 @@ every_message_round_trips :: proc(t: ^testing.T) {
 			events = true,
 			silent = {4, 1_000_001},
 		},
+		Cutscene_Preview_Children{ticket = 3, unsaved = {{1 = 7}, {15 = 9}}},
 		Cutscene_Preview_Values {
 			ticket = 3,
 			tick = 12_000,

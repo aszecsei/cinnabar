@@ -472,7 +472,7 @@ The cutscene fixed system can run in a job, so it calls no script and no handler
 
 ## Sub-sequence tracks
 
-A sub-sequence track plays other cutscenes inside this one. Long cinematics are made of shots that different people own: a master cutscene holds one sub-sequence section for each shot, and each shot is an asset of its own. A designer trims, slips and orders the shots in the master without opening them, and one shot plays again with other actors.
+A sub-sequence track plays other cutscenes inside this one. Long cinematics are made of shots that different people own: a master cutscene holds one sub-sequence section for each shot, and each shot is an asset of its own. A designer trims, slips and orders the shots in the master without opening them, and one shot plays again with other actors. The cutscene editor edits a shot in context, at the master's time ([Editor: Cutscene editor](../editor/cutscene-editor.md#sub-sequences)).
 
 ```
 track 4 sub_sequence "Shots"

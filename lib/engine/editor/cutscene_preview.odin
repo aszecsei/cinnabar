@@ -24,18 +24,32 @@ import "cinnabar:engine/script"
 // Cutscene_Preview is the open preview: its ticket, its cutscene, its live player, its clock, and what it held of the
 // world when it was last lifted, for the editor's marks.
 Cutscene_Preview :: struct {
-	ticket:   u64,
-	guid:     format.Guid,
+	ticket:      u64,
+	guid:        format.Guid,
 	// The blob is the cook daemon's from the editor's unsaved text, set live from the preview area, whose file time is
 	// modified.
-	unsaved:  bool,
-	modified: i64,
-	live:     cutscene.Player_Live,
-	clock:    Preview_Clock,
+	unsaved:     bool,
+	modified:    i64,
+	// The nested cutscenes whose blobs are the cook daemon's too, the first child_count of them (see
+	// link.Cutscene_Preview_Children).
+	children:    [MAX_PREVIEW_CHILDREN]Preview_Child,
+	child_count: int,
+	live:        cutscene.Player_Live,
+	clock:       Preview_Clock,
 	// The fields that its tracks wrote at its last lift, and the entities that they are on, in the host's heap.
-	held:     [dynamic]cutscene.Field,
+	held:        [dynamic]cutscene.Field,
 	// The editor's values over the preview, until it keys or drops them (see link.Cutscene_Preview_Values).
-	values:   Maybe(Preview_Values),
+	values:      Maybe(Preview_Values),
+}
+
+// MAX_PREVIEW_CHILDREN is the most nested cutscenes that the preview shows unsaved: the live blobs less the root's.
+MAX_PREVIEW_CHILDREN :: asset.MAX_LIVE_ASSETS - 1
+
+// Preview_Child is a nested cutscene whose blob is live from the preview area, whose file time is modified; 0 until
+// one is live.
+Preview_Child :: struct {
+	guid:     format.Guid,
+	modified: i64,
 }
 
 // Preview_Values is the editor's values over the preview: a layer of fields and poses, as an override's, that shows
@@ -130,6 +144,10 @@ handle_cutscene_preview_message :: proc(
 		if p, ok := current_preview(e, m.ticket); ok {
 			cutscene.set_mix(&p.live.evaluation, w, m.silent, m.scrub_sound, m.events)
 		}
+	case link.Cutscene_Preview_Children:
+		if p, ok := current_preview(e, m.ticket); ok {
+			set_preview_children(e, p, m.unsaved)
+		}
 	case link.Cutscene_Preview_Values:
 		if p, ok := current_preview(e, m.ticket); ok {
 			write_preview_values(e, w, p, m)
@@ -152,6 +170,66 @@ current_preview :: proc(e: ^Editor, ticket: u64) -> (^Cutscene_Preview, bool) {
 		return nil, false
 	}
 	return p, true
+}
+
+// set_preview_children replaces the nested cutscenes that the preview shows unsaved. A cutscene that dropped out gives
+// its saved blob back; one that stays keeps its live blob. The root is not a child.
+@(private)
+set_preview_children :: proc(e: ^Editor, p: ^Cutscene_Preview, unsaved: [][16]u8) {
+	before := p.children
+	before_count := p.child_count
+	p.children = {}
+	p.child_count = 0
+	for raw in unsaved {
+		guid := format.Guid(raw)
+		if guid == p.guid {
+			continue
+		}
+		if p.child_count == MAX_PREVIEW_CHILDREN {
+			log.warnf(
+				"editor: the cutscene preview shows no more than %d unsaved nested cutscenes",
+				MAX_PREVIEW_CHILDREN,
+			)
+			break
+		}
+		kept := false
+		for c in p.children[:p.child_count] {
+			kept ||= c.guid == guid
+		}
+		if kept {
+			continue
+		}
+		child := Preview_Child {
+			guid = guid,
+		}
+		for c in before[:before_count] {
+			if c.guid == guid {
+				child.modified = c.modified
+			}
+		}
+		p.children[p.child_count] = child
+		p.child_count += 1
+	}
+	for c in before[:before_count] {
+		stays := false
+		for k in p.children[:p.child_count] {
+			stays ||= k.guid == c.guid
+		}
+		if !stays && c.modified != 0 {
+			asset.clear_live(e.assets, c.guid)
+		}
+	}
+}
+
+// follow_unsaved_blob sets the cook daemon's newer blob from the preview area live, and moves modified to its file time.
+@(private)
+follow_unsaved_blob :: proc(e: ^Editor, guid: format.Guid, modified: ^i64) {
+	if data, newer, newer_blob := asset.preview_blob(e.assets, guid, modified^); newer_blob {
+		if asset.set_live(e.assets, guid, data) {
+			modified^ = newer
+		}
+		delete(data, e.platform.asset_allocator)
+	}
 }
 
 // open_cutscene_preview opens a preview, after it ends the one before it, or tells the editor why it cannot. It runs
@@ -270,6 +348,11 @@ end_cutscene_preview :: proc(
 	despawned = cutscene.close_live(e.cutscenes, w, &p.live) > 0
 	if p.modified != 0 {
 		asset.clear_live(e.assets, p.guid)
+	}
+	for c in p.children[:p.child_count] {
+		if c.modified != 0 {
+			asset.clear_live(e.assets, c.guid)
+		}
 	}
 	if r, ended := reason.?; ended {
 		send_preview_ended(e, p.ticket, r)
@@ -515,13 +598,10 @@ update_cutscene_preview :: proc(
 		return
 	}
 	if p.unsaved {
-		if data, newer, newer_blob := asset.preview_blob(e.assets, p.guid, p.modified);
-		   newer_blob {
-			if asset.set_live(e.assets, p.guid, data) {
-				p.modified = newer
-			}
-			delete(data, e.platform.asset_allocator)
-		}
+		follow_unsaved_blob(e, p.guid, &p.modified)
+	}
+	for &c in p.children[:p.child_count] {
+		follow_unsaved_blob(e, c.guid, &c.modified)
 	}
 	c := preview_context(e, w, scripts)
 	gone, failure := cutscene.follow_live_bindings(e.cutscenes, c, &p.live, true)

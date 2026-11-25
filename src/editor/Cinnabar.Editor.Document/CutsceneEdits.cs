@@ -730,14 +730,27 @@ public static class CutsceneEdits
     }
 
     /// <summary>
-    /// Adds a section of a clip or a sound by its GUID, from start for length ticks, on the track of a kind that
-    /// <see cref="ClipTrack"/> finds, or on a new one, named for its kind, after the binding's tracks. The section has the
-    /// next section ID, goes among its track's sections in start order, and grows the length when it ends past it.
-    /// Returns its path, or null for an animation without a binding, or a locked track.
+    /// Adds a section of a clip, a sound or a cutscene by its GUID, from start for length ticks, on the track of a kind
+    /// that <see cref="ClipTrack"/> finds, or on a new one, named for its kind, after the binding's tracks. A sub-sequence
+    /// takes no binding, and goes on a new track when the one found is locked or has a section in its span, since a
+    /// sub-sequence track's sections do not overlap. The section has the next section ID, goes among its track's sections
+    /// in start order, and grows the length when it ends past it. Returns its path, or null for an animation without a
+    /// binding, or a locked track.
     /// </summary>
     public static string? AddClipSection(CutsceneFile file, string kind, CutsceneBlock? target, int start, int length, string guid, IReadOnlySet<int>? locked = null)
     {
         var track = ClipTrack(file, kind, target, out var binding);
+        start = Math.Max(start, 0);
+        var end = start + Math.Max(length, 1);
+        if (kind == "sub_sequence")
+        {
+            binding = null;
+            if (track != null && (BindingOf(track) != null || IsLocked(track, locked)
+                || track.Children.Any(s => s.Kind == CutsceneBlockKind.Section && s.Start < end && start < s.End)))
+            {
+                track = null;
+            }
+        }
         if ((kind == "animation" && binding == null) || (track != null && IsLocked(track, locked)))
         {
             return null;
@@ -745,13 +758,16 @@ public static class CutsceneEdits
         if (track == null)
         {
             var id = file.NextId(CutsceneBlockKind.Track);
-            var name = kind == "animation" ? "Animation" : "Audio";
+            var name = kind switch
+            {
+                "animation" => "Animation",
+                "sub_sequence" => "Shots",
+                _ => "Audio",
+            };
             track = CutsceneBlock.Of(CutsceneBlockKind.Track, $"track {Format(id)} {kind} \"{name}\"");
             file.Insert(file.Root, InsertAt(file, binding), track);
             track.Set("binding", binding is { } b ? Format(b) : null);
         }
-        start = Math.Max(start, 0);
-        var end = start + Math.Max(length, 1);
         var sectionId = file.NextId(CutsceneBlockKind.Section);
         var section = CutsceneBlock.Of(CutsceneBlockKind.Section, $"{CutsceneKeying.IndentUnder(track)}section {Format(sectionId)} {Format(start)} {Format(end)}");
         file.Insert(track, track.Children.Count, section);

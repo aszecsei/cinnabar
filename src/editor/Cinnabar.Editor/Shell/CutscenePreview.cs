@@ -1,4 +1,5 @@
 using LogLevel = Cinnabar.Editor.Model.LogLevel;
+using CutscenePreviewChildren = Cinnabar.Editor.Link.Protocol.CutscenePreviewChildren;
 using CutscenePreviewClose = Cinnabar.Editor.Link.Protocol.CutscenePreviewClose;
 using CutscenePreviewEndReason = Cinnabar.Editor.Link.Protocol.CutscenePreviewEndReason;
 using CutscenePreviewEnded = Cinnabar.Editor.Link.Protocol.CutscenePreviewEnded;
@@ -145,14 +146,42 @@ public sealed class CutscenePreview(EditorShell shell)
         var unsaved = editor.CookedClean;
         var ticket = ++_last;
         Become(new CutscenePreviewState.Opening(ticket, editor, unsaved, resume));
-        shell.Host.Send(new CutscenePreviewOpen(ticket, Convert.FromHexString(editor.Guid), unsaved, editor.Playhead));
+        shell.Host.Send(new CutscenePreviewOpen(ticket, Convert.FromHexString(editor.Guid), unsaved, editor.RootPlayhead));
         // The game forgets the mix with the session, so each Open carries it. Messages are in order, so the game has it
         // before the session's first frame.
         SendSettings(ticket, editor);
+        SendChildren(ticket, editor);
     }
 
     void SendSettings(ulong ticket, CutsceneEditor editor) =>
         shell.Host.Send(new CutscenePreviewSettings(ticket, editor.ScrubSound, editor.PreviewEvents, [.. editor.SilentTracks().Select(id => (uint)id)]));
+
+    // The most children whose unsaved text the game plays: MAX_PREVIEW_CHILDREN in lib/engine/editor/cutscene_preview.odin.
+    internal const int MaxUnsavedChildren = 15;
+
+    // The sub-sequences that the tab holds in context, whose unsaved text cooked clean, so the game plays their blobs in
+    // the preview area in place of their saved files.
+    void SendChildren(ulong ticket, CutsceneEditor editor)
+    {
+        var children = editor.UnsavedChildren().ToList();
+        if (children.Count > MaxUnsavedChildren)
+        {
+            shell.Console.Add(LogLevel.Warning, $"cutscene: the preview plays the unsaved text of {MaxUnsavedChildren} sub-sequences at most, so {children.Count - MaxUnsavedChildren} play their saved files");
+        }
+        shell.Host.Send(new CutscenePreviewChildren(ticket, [.. children.Take(MaxUnsavedChildren).Select(Convert.FromHexString)]));
+    }
+
+    /// <summary>
+    /// The sub-sequences that a tab holds in context changed, or one of them cooked clean: its open or opening session
+    /// hears which children's unsaved text to play (see docs/editor/cutscene-editor.md#sub-sequences).
+    /// </summary>
+    internal void OnChildrenChanged(CutsceneEditor editor)
+    {
+        if (State is CutscenePreviewState.Live live && live.Editor == editor && CanSend)
+        {
+            SendChildren(live.Ticket, editor);
+        }
+    }
 
     /// <summary>The tab's scrub sound, events or audible tracks changed: its open or opening session hears it at once.</summary>
     internal void OnMixChanged(CutsceneEditor editor)
@@ -266,7 +295,7 @@ public sealed class CutscenePreview(EditorShell shell)
         {
             return;
         }
-        _pending = editor.Playhead;
+        _pending = editor.RootPlayhead;
         switch (live)
         {
             case CutscenePreviewState.Open { Playing: true } open:
@@ -346,7 +375,7 @@ public sealed class CutscenePreview(EditorShell shell)
         var editor = open.Editor;
         var loop = editor.Loop ? editor.LoopRange : null;
         var (start, end) = loop is { } l ? (l.Start, l.End) : (open.RangeStart, open.RangeEnd);
-        var tick = editor.Playhead;
+        var tick = editor.RootPlayhead;
         if (rate > 0 && tick >= end)
         {
             tick = start;
@@ -381,7 +410,7 @@ public sealed class CutscenePreview(EditorShell shell)
         {
             case CutscenePreviewState.Open { Playing: true } open:
                 _pending = null;
-                shell.Host.Send(new CutscenePreviewTime(open.Ticket, open.Editor.Playhead));
+                shell.Host.Send(new CutscenePreviewTime(open.Ticket, open.Editor.RootPlayhead));
                 Become(open with { Transport = CutsceneTransport.Paused.Instance });
                 break;
             case CutscenePreviewState.Opening { Resume: not null } opening:
@@ -450,12 +479,13 @@ public sealed class CutscenePreview(EditorShell shell)
             return;
         }
         var editor = open.Editor;
-        var at = CutsceneTime.Timecode(fired.Tick, editor.File.Rate);
-        var key = fired.Nested ? null : editor.File.Blocks.FirstOrDefault(b =>
+        var at = CutsceneTime.Timecode(fired.Tick, editor.RootFile.Rate);
+        var key = fired.Nested ? null : editor.RootFile.Blocks.FirstOrDefault(b =>
             b.Kind is CutsceneBlockKind.Trigger or CutsceneBlockKind.Range && b.Id == (int)fired.Event);
         var where = fired.Nested ? " in a sub-sequence" : key?.Parent?.Name is { } track ? $" on \"{track}\"" : "";
         shell.Console.Add(LogLevel.Info, $"cutscene: {fired.Name} at {at}{where}");
-        if (key != null)
+        // The flash is on the tab's own cutscene's track, which the timeline shows only at the top level.
+        if (key != null && !editor.InContext)
         {
             editor.FlashEvent(CutsceneFile.PathOf(key));
         }
@@ -484,9 +514,9 @@ public sealed class CutscenePreview(EditorShell shell)
             return null;
         }
         var editor = open.Editor;
-        var rate = editor.File.Rate;
-        var shot = CutsceneTimelineLayout.ShotAt(editor.File, editor.Playhead, editor.SilentTracks()) ?? "gameplay";
-        return $"{CutsceneTime.Timecode(editor.Playhead, rate)}  ·  frame {CutsceneTime.Frames(editor.Playhead, rate)}  ·  {shot}";
+        var rate = editor.RootFile.Rate;
+        var shot = CutsceneTimelineLayout.ShotAt(editor.RootFile, editor.RootPlayhead, editor.SilentTracks()) ?? "gameplay";
+        return $"{CutsceneTime.Timecode(editor.RootPlayhead, rate)}  ·  frame {CutsceneTime.Frames(editor.RootPlayhead, rate)}  ·  {shot}";
     }
 
     /// <summary>Whether the tab can take the preview from where it is, which the tab's button does.</summary>

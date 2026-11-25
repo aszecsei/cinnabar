@@ -10,6 +10,21 @@ public interface IGraphEditor : IDisposable
 
     IGraphDocument Document { get; }
 
+    /// <summary>
+    /// Every document that the tab holds, which its Save writes and its dirty mark reads: its own, and for a cutscene,
+    /// each sub-sequence it shows or showed in context with changes (see docs/editor/cutscene-editor.md#sub-sequences).
+    /// </summary>
+    IEnumerable<IGraphDocument> Documents => [Document];
+
+    /// <summary>The document whose history Undo and Redo move: the one that the tab shows.</summary>
+    IGraphDocument UndoDocument => Document;
+
+    /// <summary>Whether closing the tab would lose changes that no other tab holds, so the close asks first.</summary>
+    bool LosesChangesOnClose => Document.IsDirty;
+
+    /// <summary>Whether any of the tab's documents has changes, which its title marks.</summary>
+    bool IsDirty => Documents.Any(d => d.IsDirty);
+
     /// <summary>What the console calls it, such as <c>material</c>.</summary>
     string Noun { get; }
 

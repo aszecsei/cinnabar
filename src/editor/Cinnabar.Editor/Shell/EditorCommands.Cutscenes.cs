@@ -77,6 +77,9 @@ static partial class EditorCommands
     public const string CutsceneMatchClipLength = "cutscene.matchClipLength";
     public const string CutsceneAddEvent = "cutscene.addEvent";
     public const string CutsceneJumpToHandler = "cutscene.jumpToHandler";
+    public const string CutsceneOpenSubSequence = "cutscene.openSubSequence";
+    public const string CutsceneUpOneLevel = "cutscene.upOneLevel";
+    public const string CutsceneOpenInOwnTab = "cutscene.openInOwnTab";
 
     /// <summary>The timeline's commands, which act on the active cutscene while its timeline has the keyboard.</summary>
     public static readonly string[] CutsceneTimelineCommands =
@@ -90,6 +93,7 @@ static partial class EditorCommands
         CutsceneCurves, CutsceneCurvesNormalized, CutsceneTangentAuto, CutsceneTangentUnify, CutsceneTangentBreak, CutsceneTangentLinear,
         CutsceneTangentConstant, CutsceneTangentFlatten, CutsceneTangentWeighted, CutscenePreInfinity, CutscenePostInfinity,
         CutsceneCurveValueSnap, CutsceneRevealClip, CutsceneOpenClip, CutsceneMatchClipLength, CutsceneAddEvent, CutsceneJumpToHandler,
+        CutsceneOpenSubSequence, CutsceneUpOneLevel, CutsceneOpenInOwnTab,
     ];
 
     /// <summary>
@@ -205,6 +209,13 @@ static partial class EditorCommands
         Register(CutsceneAddEvent, "Add Event", "cutscene",
             "Add a trigger at the playhead on the selected event track, or on an event track of the selected binding, named for the first event that its behaviours handle.", "E");
         Register(CutsceneJumpToHandler, "Jump to Handler", "script", "Open the script of the selected trigger's or range's handler at its line, in the script editor.", null);
+        // Sub-sequences (see docs/editor/cutscene-editor.md#sub-sequences). Enter is Key Preview Values' everywhere, so
+        // opening one in context is Ctrl+Enter.
+        Register(CutsceneOpenSubSequence, "Open Sub-sequence", "cutscene",
+            "Show the selected sub-sequence's tracks in this tab, in context: the ruler keeps this cutscene's time, and the preview plays it around the shot.", "Ctrl+Enter");
+        Register(CutsceneUpOneLevel, "Up One Level", "cutscene", "Show the cutscene that plays the sub-sequence shown in context.", "Back");
+        Register(CutsceneOpenInOwnTab, "Open in Own Tab", "cutscene",
+            "Open the sub-sequence shown in context, or the selected one, as its own asset in its own tab, on its own time. Both tabs edit one document.", null);
         // Keys (see docs/editor/cutscene-editor.md#keying) act on the selection wherever the keyboard is, so K stays the
         // timeline's Shuttle Pause.
         commands.Register(new Command(CutsceneKeyTransform, "Key Transform", () => shell.Keying.KeyTransform())

@@ -268,8 +268,13 @@ public sealed class MainWindow : Window
     // Asks about each graph editor's unsaved changes before the editor closes, and returns whether to go on.
     async Task<bool> ConfirmDiscardGraphs()
     {
-        foreach (var editor in _shell.GraphEditors.Where(g => g.Document.IsDirty).ToList())
+        foreach (var editor in _shell.GraphEditors.Where(g => g.IsDirty).ToList())
         {
+            // Two tabs can share a document, which the first one's Save wrote.
+            if (!editor.IsDirty)
+            {
+                continue;
+            }
             var answer = await Dialogs.Ask(this, "Unsaved changes", $"{editor.Document.Title} has changes that are not saved. Save them before closing?",
                 "Save", "Don't Save", "Cancel");
             if (answer == "Cancel" || answer == null || (answer == "Save" && !_shell.SaveGraph(editor)))

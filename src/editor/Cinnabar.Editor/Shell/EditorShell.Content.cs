@@ -186,6 +186,7 @@ public sealed partial class EditorShell
                 foreach (var editor in GraphEditors)
                 {
                     _ = editor.Checks.Restart();
+                    (editor as CutsceneEditor)?.RestartLevels();
                 }
             }
         };

@@ -38,12 +38,15 @@ public sealed class CutscenePreviewTests : IDisposable
 
     static Asset Make(string guid, string name) => TestAssets.Make(guid, AssetKind.Cutscene, name + ".cutscene");
 
-    // What an Open sends: the Open, and the mix of its ticket right after it.
+    // What an Open sends: the Open, then the mix of its ticket and the sub-sequences whose unsaved text it plays, none.
     CutscenePreviewOpen OpenWithSettings()
     {
-        Assert.Equal(2, _sent.Count);
+        Assert.Equal(3, _sent.Count);
         var open = Assert.IsType<CutscenePreviewOpen>(_sent[0]);
         Assert.Equal(open.Ticket, Assert.IsType<CutscenePreviewSettings>(_sent[1]).Ticket);
+        var children = Assert.IsType<CutscenePreviewChildren>(_sent[2]);
+        Assert.Equal(open.Ticket, children.Ticket);
+        Assert.Empty(children.Unsaved);
         return open;
     }
 
@@ -98,6 +101,35 @@ public sealed class CutscenePreviewTests : IDisposable
         _sent.Clear();
         editor.Checks.Show(editor.Document.Text, new PreviewResult("", [], []));
         Assert.Empty(_sent);
+    }
+
+    // A sub-sequence shown in context plays its unsaved text in the parent's preview once it cooks clean (see
+    // docs/editor/cutscene-editor.md#sub-sequences).
+    [Fact]
+    public void AChildInContextThatCookedCleanGoesToTheGameAsUnsaved()
+    {
+        var (shell, editor) = NewShell();
+        using var _ = shell;
+        var ticket = Opened(shell);
+        // The intro's shot plays the sample's fox walk by its own GUID.
+        const string walk = "497bcb7bb533b902877cd8d56fbf97cd";
+        shell.Assets.Apply(new AssetSnapshot([Make(Intro, "intro"), Make(walk, "fox_walk")], []));
+        _sent.Clear();
+
+        Assert.True(editor.OpenSubSequence("section:4"));
+        Assert.Empty(Assert.Single(_sent.OfType<CutscenePreviewChildren>(), c => c.Ticket == ticket).Unsaved);
+        // The preview stays the parent's.
+        Assert.Empty(_sent.OfType<CutscenePreviewOpen>());
+        _sent.Clear();
+
+        editor.ShownChecks.Show(editor.Document.Text, new PreviewResult("", [], []));
+        var children = Assert.Single(_sent.OfType<CutscenePreviewChildren>());
+        Assert.Equal(ticket, children.Ticket);
+        Assert.Equal(Convert.FromHexString(walk), Assert.Single(children.Unsaved));
+        // Going up lets the child go, since it has no changes, and the game plays none.
+        _sent.Clear();
+        editor.UpOneLevel();
+        Assert.Empty(Assert.Single(_sent.OfType<CutscenePreviewChildren>()).Unsaved);
     }
 
     [Fact]

@@ -275,6 +275,7 @@ cutscene_blob :: proc(
 	key: u64 = 1,
 	hero: u64 = HERO,
 	glow := true,
+	guid := CUTSCENE_GUID,
 ) -> []byte {
 	ramp :: proc(name: string, from, to: f32) -> []format.Cutscene_Channel_Contents {
 		keys := make([]format.Cutscene_Key, 2, context.temp_allocator)
@@ -416,7 +417,7 @@ cutscene_blob :: proc(
 	}
 	return format.cutscene_write(
 		{
-			guid = CUTSCENE_GUID,
+			guid = guid,
 			key = key,
 			length = 2 * SECOND,
 			rate = 30,
@@ -899,6 +900,46 @@ a_new_unsaved_blob_replaces_the_old_at_the_same_time :: proc(t: ^testing.T) {
 	testing.expect_value(t, x_of(f, f.hero), METER)
 	step(f, open(2, SECOND / 2))
 	testing.expect_value(t, x_of(f, f.hero), 5 * METER)
+}
+
+// The nested cutscenes that the editor sends as unsaved go live from the preview area, each message replaces the set, and
+// ending the preview gives the saved blobs back. The root and a message for another ticket are not children.
+@(test)
+unsaved_children_go_live_until_a_message_drops_them_or_the_preview_ends :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	first := format.Guid {
+		0  = 0x5c,
+		15 = 20,
+	}
+	second := format.Guid {
+		0  = 0x5c,
+		15 = 21,
+	}
+	a, b, root := cast([16]u8)first, cast([16]u8)second, cast([16]u8)CUTSCENE_GUID
+	write_blob(t, f, first, cutscene_blob(f, 10, guid = first))
+	write_blob(t, f, second, cutscene_blob(f, 10, guid = second))
+	write_blob(t, f, first, cutscene_blob(f, 20, guid = first), "preview")
+	write_blob(t, f, second, cutscene_blob(f, 30, guid = second), "preview")
+	step(f, open(1, SECOND / 2))
+
+	step(f, link.Cutscene_Preview_Children{ticket = 9, unsaved = {a}})
+	frame(f, 0)
+	testing.expect(t, !asset.is_live(&f.assets, first))
+
+	step(f, link.Cutscene_Preview_Children{ticket = 1, unsaved = {a, b, root}})
+	frame(f, 0)
+	testing.expect(t, asset.is_live(&f.assets, first))
+	testing.expect(t, asset.is_live(&f.assets, second))
+	testing.expect(t, !asset.is_live(&f.assets, CUTSCENE_GUID))
+
+	step(f, link.Cutscene_Preview_Children{ticket = 1, unsaved = {b}})
+	testing.expect(t, !asset.is_live(&f.assets, first))
+	testing.expect(t, asset.is_live(&f.assets, second))
+
+	step(f, link.Cutscene_Preview_Close{ticket = 1})
+	testing.expect(t, !asset.is_live(&f.assets, second))
+	testing.expect_value(t, f.assets.live_count, 0)
 }
 
 // A newer unsaved blob whose required binding the scene does not have ends the preview, in the frame, while its writes

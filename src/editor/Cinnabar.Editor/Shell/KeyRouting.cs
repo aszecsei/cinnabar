@@ -386,6 +386,11 @@ public sealed partial class Keying
         {
             return "No values over the preview wait for a key.";
         }
+        // A binding's values are the tab's own cutscene's, and a key in context would go to the sub-sequence.
+        if (holding.Editor.InContext && (!holding.Bindings.IsEmpty || !holding.BindingFields.IsEmpty))
+        {
+            return CutsceneEditor.InContextCameraRefusal;
+        }
         foreach (var binding in holding.Bindings.Keys)
         {
             if (PilotKeys.Refusal(holding.Editor.File, binding, holding.Editor.Locked) is { } why)

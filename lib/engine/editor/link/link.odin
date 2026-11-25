@@ -134,6 +134,7 @@ Message :: union {
 	Cutscene_Preview_Time,
 	Cutscene_Preview_Play,
 	Cutscene_Preview_Settings,
+	Cutscene_Preview_Children,
 	Cutscene_Preview_Values,
 	Cutscene_Preview_Close,
 	Cutscene_Preview_Opened,
@@ -2160,6 +2161,16 @@ Cutscene_Preview_Settings :: struct {
 	scrub_sound: bool,
 	events:      bool,
 	silent:      []u32,
+}
+
+// Editor to game: the cutscenes nested in the preview whose blobs are the cook daemon's from the editor's unsaved text,
+// which the preview shows in place of their saved ones, as it does for the previewed cutscene when its Open has
+// unsaved. Each message replaces the last, so a cutscene that is not in it shows its saved blob again, and one with no
+// cutscenes clears them. The editor sends it after each Open's Settings and on each change. More than the game's limit
+// of live blobs less one are dropped.
+Cutscene_Preview_Children :: struct {
+	ticket:  u64,
+	unsaved: [][16]u8,
 }
 
 // Editor to game: values that the world shows over the preview, outside the document and the cutscene, until the

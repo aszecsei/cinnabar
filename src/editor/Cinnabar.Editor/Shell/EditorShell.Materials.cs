@@ -81,21 +81,29 @@ public sealed partial class EditorShell
             return null;
         }
         IGraphDocument document;
-        switch (kind.Open(path, asset.Guid))
+        // A cutscene that another tab shows in context is that tab's document, so an edit in one shows in the other.
+        if (asset.Kind == AssetKind.Cutscene && CutsceneDocuments.Find(asset.Guid) is { } shared)
         {
-            case OpenResult.Opened opened:
-                Report(kind.Noun, path, opened.Problems.Select(p => (p.Line, p.Message, p.IsError)));
-                document = opened.Document;
-                break;
-            case OpenResult.Refused refused:
-                Report(kind.Noun, path, refused.Problems.Select(p => (p.Line, p.Message, p.IsError)));
-                return null;
-            case OpenResult.NotOfKind { Problem: var problem }:
-                Report(kind.Noun, path, [(problem.Line, problem.Message, true)]);
-                OpenScript(path, (uint)problem.Line);
-                return null;
-            default:
-                return null;
+            document = shared;
+        }
+        else
+        {
+            switch (kind.Open(path, asset.Guid))
+            {
+                case OpenResult.Opened opened:
+                    Report(kind.Noun, path, opened.Problems.Select(p => (p.Line, p.Message, p.IsError)));
+                    document = opened.Document;
+                    break;
+                case OpenResult.Refused refused:
+                    Report(kind.Noun, path, refused.Problems.Select(p => (p.Line, p.Message, p.IsError)));
+                    return null;
+                case OpenResult.NotOfKind { Problem: var problem }:
+                    Report(kind.Noun, path, [(problem.Line, problem.Message, true)]);
+                    OpenScript(path, (uint)problem.Line);
+                    return null;
+                default:
+                    return null;
+            }
         }
         int? previewId = null;
         if (kind.WantsPreview(document))
@@ -189,7 +197,7 @@ public sealed partial class EditorShell
     /// <summary>A graph editor's document wants to close. One with unsaved changes asks first.</summary>
     bool OnDocumentClosing(Dock.Model.Core.IDockable document)
     {
-        if (document is not GraphEditorDocument { GraphEditor: var editor } || !editor.Document.IsDirty || _discarding.Contains(editor))
+        if (document is not GraphEditorDocument { GraphEditor: var editor } || !editor.LosesChangesOnClose || _discarding.Contains(editor))
         {
             return true;
         }
@@ -224,7 +232,7 @@ public sealed partial class EditorShell
     /// <summary>Closes a graph editor. With <paramref name="discard"/>, its unsaved changes are lost; without it, it saves first.</summary>
     public void CloseGraph(IGraphEditor editor, bool discard)
     {
-        if (!discard && editor.Document.IsDirty && !SaveGraph(editor))
+        if (!discard && editor.LosesChangesOnClose && !SaveGraph(editor))
         {
             return;
         }
@@ -239,33 +247,41 @@ public sealed partial class EditorShell
     /// </summary>
     public bool SaveGraph(IGraphEditor editor, bool overwrite = false)
     {
-        if (editor.Document.InTransaction)
+        if (editor.Documents.FirstOrDefault(d => d.InTransaction) is { } dragged)
         {
-            Console.Add(LogLevel.Warning, $"{editor.Noun}: cannot save {editor.Document.Path} while a drag is open. Finish or cancel it first.");
+            Console.Add(LogLevel.Warning, $"{editor.Noun}: cannot save {dragged.Path} while a drag is open. Finish or cancel it first.");
             return false;
         }
-        if (!overwrite && editor.Document is ITextGraphDocument { ChangedOnDisk: true })
+        // The tab's own document saves even when clean, as it always has; the others, such as a cutscene's levels in
+        // context, only when they have changes.
+        var documents = editor.Documents.Where(d => d == editor.Document || d.IsDirty).ToList();
+        if (!overwrite && documents.Any(d => d is ITextGraphDocument { ChangedOnDisk: true }))
         {
             GraphOverwriteRequested?.Invoke(editor);
             return false;
         }
-        try
+        foreach (var document in documents)
         {
-            editor.Document.Save();
+            try
+            {
+                document.Save();
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                Console.Add(LogLevel.Error, $"{editor.Noun}: cannot save {document.Path}: {e.Message}");
+                return false;
+            }
+            Console.Add(LogLevel.Info, $"{editor.Noun}: saved {document.Path}");
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            Console.Add(LogLevel.Error, $"{editor.Noun}: cannot save {editor.Document.Path}: {e.Message}");
-            return false;
-        }
-        Console.Add(LogLevel.Info, $"{editor.Noun}: saved {editor.Document.Path}");
         return true;
     }
 
     // An open graph's document follows its asset's file, as when the content browser moves or renames it.
     void FollowMovedGraphs()
     {
-        foreach (var editor in GraphEditors.ToList())
+        // The cutscenes' documents are the store's, which tabs and levels in context share.
+        CutsceneDocuments.FollowMoves();
+        foreach (var editor in GraphEditors.Where(e => e is not CutsceneEditor).ToList())
         {
             if (Assets.Find(editor.Guid) is { } asset && Assets.FullPath(asset) is { } path
                 && !string.Equals(path, editor.Document.Path, StringComparison.OrdinalIgnoreCase))
