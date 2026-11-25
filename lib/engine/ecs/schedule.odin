@@ -336,7 +336,11 @@ tick_start :: proc "contextless" (c: ^Clock, tick: u64) -> time.Duration {
 // docs/editor/cutscene-editor.md#render-out).
 align_clock :: proc(w: ^World) {
 	c := &w.clock
-	c.time = tick_start(c, c.tick)
+	// The ticks start again from here, as at a rate change, so the next ones fall a whole tick apart from it: on the
+	// old base, integer division can put the tick after next a nanosecond late.
+	c.base_time = tick_start(c, c.tick)
+	c.base_tick = c.tick
+	c.time = c.base_time
 	c.alpha = 0
 }
 

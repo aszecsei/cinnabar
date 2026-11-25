@@ -675,7 +675,7 @@ begin_clouds :: proc(f: ^Frame, s: Cloud_Settings, sky: Sky_Settings, ambient: A
 	// The wind carries the weather and the shapes between frames, by the platform's clock, once a frame: the first view
 	// with clouds advances it by its own wind, and the others take where it is.
 	if v.wind_frame != r.scene.frame {
-		now := platform.time_seconds != nil ? platform.time_seconds() : 0
+		now := clock_seconds(r)
 		wind := wind_vector(s.wind_speed, s.wind_direction)
 		if v.wind_time != 0 {
 			elapsed := clamp(now - v.wind_time, 0, 0.1)

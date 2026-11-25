@@ -144,6 +144,12 @@ Message :: union {
 	Viewport_Look_Shown,
 	Cutscene_Preview_Shown,
 	Cutscene_Preview_Fired,
+	Render_Out_Begin,
+	Render_Out_Cancel,
+	Render_Out_Progress,
+	Render_Out_Frame,
+	Render_Out_Ended,
+	Render_Out_Written,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -2296,4 +2302,99 @@ Cutscene_Preview_Fired :: struct {
 	kind:   Cutscene_Preview_Fired_Kind,
 	name:   string,
 	nested: bool,
+}
+
+// Render out (see docs/editor/cutscene-editor.md#render-out): the game plays a cutscene out of real time, a frame at a
+// time at a fixed rate, and the host writes each frame, and the cutscene's sound, to files.
+
+// The format of a render out's frames: 8-bit sRGB PNG, or half-float linear EXR for HDR.
+Render_Out_Format :: enum u8 {
+	Png,
+	Exr,
+}
+
+// How a render out ended: every frame written, a failure with its reason, or a cancel after the frame that it was on.
+Render_Out_Outcome :: enum u8 {
+	Done,
+	Failed,
+	Cancelled,
+}
+
+// Where a render out is: loading the cutscene and opening its files, drawing its warm-up frames, drawing its frames,
+// writing its last files, or ended.
+Render_Out_Stage :: enum u8 {
+	Preparing,
+	Warming,
+	Rendering,
+	Finishing,
+	Ended,
+}
+
+// Editor to game, in Edit: play a cutscene's saved blob out of real time and write its frames. The world runs as in
+// Play, from the editor's scene, and the editor sends its scene again once the game reports Render_Out_Ended. The
+// frames are frame_count frames at rate a second from range_start, a tick on the cutscene's time; each is width by
+// height pixels, seen through the cut track, or through the camera of the spawned or possessed binding camera_binding
+// when it is not 0, after warmup frames that are drawn and not written. The host writes each frame to folder, named by
+// pattern, in which {name} is the cutscene's name and {frame} is the frame's number at the rate from the cutscene's
+// start, six digits wide, and with audio, the cutscene's sound to <folder>/<name>.wav. The editor picks the ticket,
+// and tickets only go up.
+Render_Out_Begin :: struct {
+	ticket:         u64,
+	cutscene:       [16]u8,
+	name:           string,
+	range_start:    i32,
+	frame_count:    i32,
+	rate:           u32,
+	width:          u32,
+	height:         u32,
+	format:         Render_Out_Format,
+	camera_binding: u32,
+	warmup:         u32,
+	folder:         string,
+	pattern:        string,
+	audio:          bool,
+}
+
+// Editor to game: stop a render out after the frame that it is on. The game answers with Render_Out_Ended.
+Render_Out_Cancel :: struct {
+	ticket: u64,
+}
+
+// Game to editor: a render out's stage changed, and the frame that it is on.
+Render_Out_Progress :: struct {
+	ticket: u64,
+	stage:  Render_Out_Stage,
+	frame:  i32,
+}
+
+// Game to editor: a render out drew a frame, at tick on the cutscene's time, after settle_draws draws that waited for
+// its streaming and loads, in ms milliseconds of the game's time. The host writes it, and says so with
+// Render_Out_Written.
+Render_Out_Frame :: struct {
+	ticket:       u64,
+	frame:        i32,
+	tick:         i32,
+	settle_draws: u32,
+	ms:           f32,
+}
+
+// Game to editor: a render out ended, with the frames that it drew. The host has written every frame and the sound
+// that it will write by then: a Render_Out_Written of each comes before this.
+Render_Out_Ended :: struct {
+	ticket:  u64,
+	outcome: Render_Out_Outcome,
+	reason:  string,
+	frames:  i32,
+}
+
+// Host to editor: a render out's frame is written to path, or it could not be, with the reason. frame is -1 for the
+// sound's file.
+Render_Out_Written :: struct {
+	ticket: u64,
+	frame:  i32,
+	ok:     bool,
+	reason: string,
+	path:   string,
+	width:  u32,
+	height: u32,
 }

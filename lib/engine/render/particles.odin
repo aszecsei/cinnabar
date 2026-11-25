@@ -424,8 +424,8 @@ begin_particles :: proc(
 	r := f.renderer
 	p := &r.particles
 	platform := r.platform
-	if platform.time_seconds != nil {
-		now := platform.time_seconds()
+	if platform.time_seconds != nil || r.clock != nil {
+		now := clock_seconds(r)
 		p.wall_delta = p.last_wall > 0 ? f32(clamp(now - p.last_wall, 0, MAX_PARTICLE_DELTA)) : 0
 		p.last_wall = now
 	}

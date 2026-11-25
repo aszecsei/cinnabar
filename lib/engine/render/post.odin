@@ -1,5 +1,6 @@
 package render
 
+import "base:intrinsics"
 import "core:math"
 import "core:math/linalg"
 
@@ -463,7 +464,23 @@ handle_status :: proc(
 	platform: ^core.Platform_API,
 	pipeline: gpu.Pipeline,
 ) -> gpu.Pipeline_Status {
-	return platform.gpu_pipeline_status == nil ? .Ready : platform.gpu_pipeline_status(pipeline)
+	status := platform.gpu_pipeline_status == nil ? gpu.Pipeline_Status.Ready : platform.gpu_pipeline_status(pipeline)
+	if status == .Compiling {
+		intrinsics.atomic_add(&compiling_seen, 1)
+	}
+	return status
+}
+
+// compiling_seen counts the times that a frame found a pipeline compiling since draw_frame began, for frame_compiling.
+// The frame's jobs ask too, so it is atomic.
+@(private)
+compiling_seen: int
+
+// frame_compiling is whether the last draw_frame found a pipeline that it would have used still compiling, so that a
+// later frame, with it compiled, would draw differently: a render out waits until it is false (see
+// docs/editor/cutscene-editor.md#render-out).
+frame_compiling :: proc() -> bool {
+	return intrinsics.atomic_load(&compiling_seen) > 0
 }
 
 // halton is the index-th point of the Halton sequence of a base, in [0, 1).
@@ -530,7 +547,7 @@ begin_post :: proc(f: ^Frame, settings: Post_Settings) {
 		pixel := [2]f32{halton(n, 2) - 0.5, halton(n, 3) - 0.5}
 		f.jitter = {2 * pixel.x / f32(f.size.x), -2 * pixel.y / f32(f.size.y)}
 	}
-	now := platform.time_seconds != nil ? platform.time_seconds() : 0
+	now := clock_seconds(f.renderer)
 	pf.delta = s.last_time > 0 ? f32(clamp(now - s.last_time, 0, 0.25)) : 0
 	s.last_time = now
 	f.exposure = import_buffer(f.graph, s.exposure)

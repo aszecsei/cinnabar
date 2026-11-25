@@ -327,6 +327,10 @@ poll :: proc(
 		if end_overrides(e, w, nil) {
 			despawned = true
 		}
+		// A render out of an editor that went stops, and its files stay as they are.
+		if run := rendering(e); run != nil {
+			end_render_run(e, w, run)
+		}
 		end_session(e)
 		begin_session(e, connection)
 		// A new editor is in Edit, so its first scene replaces the world without the old behaviours' callbacks.
@@ -363,6 +367,7 @@ poll :: proc(
 		case link.Unwatch_Entity:
 			unwatch(e, ecs.Entity(v.entity))
 		case link.Load_Scene:
+			fail_render_out(e, w, "the editor replaced the world")
 			end_overrides(e, w, link.Override_End_Reason.Scene_Loaded)
 			problems := make([dynamic]link.Edit_Problem, frame)
 			load_scenes(e, w, scripts, v, &problems)
@@ -450,6 +455,14 @@ poll :: proc(
 			link.write_message(out, answer)
 		case link.Behaviour_Operations_Answer:
 			answer_behaviour_operations(e, v)
+		case link.Render_Out_Begin:
+			if begin_render_out(e, w, scripts, v, out) {
+				despawned = true
+				forget_dead(w, &e.session.view.selection)
+				forget_dead(w, &e.session.view.hidden)
+			}
+		case link.Render_Out_Cancel:
+			cancel_render_out(e, w, v.ticket)
 		case link.Step_Frame:
 			if paused, is_paused := &e.session.mode.(Mode_Paused); is_paused {
 				paused.steps += 1

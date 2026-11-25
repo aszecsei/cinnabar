@@ -254,6 +254,73 @@ Platform_API :: struct {
 	// procedures are host code, and its voices keep playing through a code reload. reset and shutdown are the host's; a
 	// soft restart stops what the game left playing.
 	audio:                           audio.Audio_API,
+
+	// The host's writer of a render out's files (see docs/editor/cutscene-editor.md#render-out). Its procedures are
+	// nil in a host that cannot write them.
+	render_out:                      Render_Out_Procs,
+}
+
+// The format of a render out's frames: 8-bit sRGB PNG, or half-float linear EXR.
+Render_Out_Format :: enum u8 {
+	Png,
+	Exr,
+}
+
+// Render_Out_Desc is what a render out writes: its frames to folder, each named by pattern, in which {name} is name
+// and {frame} the frame's number, from first_frame, six digits wide; each frame size pixels; and with audio, its
+// sound to <folder>/<name>.wav. run names the render out in the calls that follow.
+Render_Out_Desc :: struct {
+	run:         u64,
+	folder:      string,
+	name:        string,
+	pattern:     string,
+	format:      Render_Out_Format,
+	size:        [2]u32,
+	first_frame: i32,
+	audio:       bool,
+}
+
+// Render_Out_Answer is what the host did with a frame or with sound: took it, has no room for it yet, so ask again
+// next frame, or has no render out of that run open.
+Render_Out_Answer :: enum u8 {
+	Accepted,
+	No_Room,
+	Not_Open,
+}
+
+// Render_Out_Status is where a run's files are: nil for a run that the host does not have, Writing with the frames
+// that it took and those that it wrote, or Closed once it has written every one, or could not.
+Render_Out_Status :: union {
+	Render_Out_Writing,
+	Render_Out_Closed,
+}
+
+Render_Out_Writing :: struct {
+	accepted: i32,
+	written:  i32,
+}
+
+// reason is in the host's memory, valid until the next call.
+Render_Out_Closed :: struct {
+	ok:     bool,
+	reason: string,
+}
+
+// Render_Out_Procs is the host's writer of render outs, one at a time:
+// - open starts writing a run's files, or gives the reason why it cannot.
+// - room is whether a frame given this frame would be taken.
+// - audio mixes frames frames of the game's sound, 48000 a second, into the run's sound file.
+// - frame writes texture, the run's frame with that number, from its copy at this frame's end. texture must end the
+//   frame in the render target layout.
+// - close stops taking frames, writes those that it took, and keeps or deletes the sound file.
+// - status says where the run's files are.
+Render_Out_Procs :: struct {
+	open:   proc(desc: Render_Out_Desc) -> (ok: bool, reason: string),
+	room:   proc(run: u64) -> Render_Out_Answer,
+	audio:  proc(run: u64, frames: int) -> Render_Out_Answer,
+	frame:  proc(run: u64, frame: i32, texture: gpu.Texture) -> Render_Out_Answer,
+	close:  proc(run: u64, keep: bool),
+	status: proc(run: u64) -> Render_Out_Status,
 }
 
 // Game_API is what the game side provides to the host (game -> host).

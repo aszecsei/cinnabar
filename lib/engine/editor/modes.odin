@@ -18,6 +18,7 @@ Session_Mode :: union #no_nil {
 	Mode_Edit,
 	Mode_Play,
 	Mode_Paused,
+	Mode_Render,
 }
 
 Mode_Edit :: struct {}
@@ -29,7 +30,13 @@ Mode_Paused :: struct {
 	steps: int,
 }
 
-// mode_of is the link's name of a session's mode.
+// Mode_Render is a render out, in which the world runs as in Play, a frame of the run at a time (see render_out.odin).
+Mode_Render :: struct {
+	run: Render_Run,
+}
+
+// mode_of is the link's name of a session's mode. A render out runs the world as Play does, and the editor knows it as
+// Play too.
 mode_of :: proc(m: Session_Mode) -> link.Editor_Mode {
 	switch _ in m {
 	case Mode_Edit:
@@ -38,6 +45,8 @@ mode_of :: proc(m: Session_Mode) -> link.Editor_Mode {
 		return .Play
 	case Mode_Paused:
 		return .Paused
+	case Mode_Render:
+		return .Play
 	}
 	return .Edit
 }
@@ -59,6 +68,11 @@ change_mode :: proc(
 	despawned: bool,
 ) {
 	from := mode_of(e.session.mode)
+	if m, rendering := &e.session.mode.(Mode_Render); rendering {
+		// A render out ends with any mode that the editor sets, as Stop does.
+		end_render_run(e, w, &m.run)
+		from = .Edit
+	}
 	if end_overrides(e, w, link.Override_End_Reason.Mode) {
 		despawned = true
 		forget_dead(w, &e.session.view.selection)
@@ -84,6 +98,24 @@ change_mode :: proc(
 		if from == .Edit && to == .Play {
 			script.restart_random(scripts)
 		}
+	}
+	return
+}
+
+// enter_render leaves Edit for a render out, as Play leaves it: the overrides and the cutscene preview end, the editor
+// sends its scene again after the run, and the scripts get every callback, with the numbers that a Play draws.
+@(private)
+enter_render :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, run: Render_Run) -> (despawned: bool) {
+	if end_overrides(e, w, link.Override_End_Reason.Mode) {
+		despawned = true
+		forget_dead(w, &e.session.view.selection)
+		forget_dead(w, &e.session.view.hidden)
+	}
+	e.session.mode = Mode_Render{run}
+	e.session.mirror = nil
+	if scripts != nil {
+		script.set_callbacks(scripts, callbacks_between_frames(e))
+		script.restart_random(scripts)
 	}
 	return
 }
@@ -140,6 +172,9 @@ simulation :: proc(
 	what: Simulation,
 	step: time.Duration,
 ) {
+	if m, rendering := &e.session.mode.(Mode_Render); rendering && active(e) {
+		return render_simulation(&m.run, dt)
+	}
 	switch mode(e) {
 	case .Play:
 		return .Run, dt

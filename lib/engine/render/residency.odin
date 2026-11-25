@@ -716,6 +716,28 @@ resident_streaming :: proc(r: ^Residency) -> (count: int) {
 	return
 }
 
+// residency_unsettled is how many of the entries that the last frames asked for would draw differently in a later frame:
+// those that are not ready or still stream, and the textures whose top mip is coarser than the one that they want. A
+// render out waits until it is 0 (see docs/editor/cutscene-editor.md#render-out), so no frame shows a lower mip.
+residency_unsettled :: proc(r: ^Residency) -> (count: int) {
+	for &e in r.entries[:r.count] {
+		// A failed entry draws its default in every frame until its retry, so it does not hold the frame back.
+		if _, wanted := current_want(r, &e); !wanted || e.failed_at != 0 {
+			continue
+		}
+		if !e.ready || e.stream != nil {
+			count += 1
+			continue
+		}
+		if res, is_texture := &e.current.(Texture_Resources); is_texture && res.texture.virtual == 0 {
+			if res.texture.top_mip > wanted_mip(r, &e, res.texture.size, res.texture.mip_count) {
+				count += 1
+			}
+		}
+	}
+	return
+}
+
 // residency_baked_count is how many entries only thumbnails asked for.
 residency_baked_count :: proc(r: ^Residency) -> (count: int) {
 	for &e in r.entries[:r.count] {
