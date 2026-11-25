@@ -12,7 +12,9 @@ namespace Cinnabar.Editor.Model;
 /// meters and the angles in radians that <c>camera</c> places the editor's camera at, the panel whose window <c>ui</c>
 /// draws, the viewport (0 to 3) that <c>screenshot</c>, <c>gif</c>, <c>viewport</c> and <c>camera</c> act on, and in the
 /// settings, what <c>content</c> changes in the content browser, and the summaries that <c>timing</c> skips and takes, and
-/// the passes it answers for.
+/// the passes it answers for. <c>render-out</c> takes the cutscene by its path or GUID, its range (<c>whole</c>,
+/// <c>inout</c>, <c>shot:&lt;name&gt;</c> or two times in ticks, <c>&lt;from&gt;-&lt;to&gt;</c>), its size, rate, format,
+/// pattern, warm-up and camera binding, and whether to write the sound and a video, with the folder as its path.
 /// </summary>
 public sealed record AutomationRequest(
     long Id,
@@ -27,7 +29,20 @@ public sealed record AutomationRequest(
     int? Viewport = null,
     int? Samples = null,
     int? Skip = null,
-    string[]? Passes = null);
+    string[]? Passes = null,
+    string? Cutscene = null,
+    string? Range = null,
+    string? Size = null,
+    uint? Rate = null,
+    string? Format = null,
+    string? Pattern = null,
+    uint? Warmup = null,
+    uint? Camera = null,
+    bool? Audio = null,
+    bool? Video = null);
+
+/// <summary>What <c>render-out</c> answers: how the run ended, its frames, its folder, and its sound and video files.</summary>
+public sealed record AutomationRenderOut(string Outcome, string? Reason, int Frames, string Folder, string? Audio, string? Video);
 
 /// <summary>A shown viewport's number and the size that the game draws it at, and whether that size is fixed rather than its pane's.</summary>
 public sealed record AutomationViewportSize(int Viewport, int Width, int Height, bool Fixed);
@@ -39,7 +54,7 @@ public sealed record AutomationStatus(bool Linked, string HostState, string Mode
 public sealed record AutomationContent(string? Folder, string Search, string[] Selection, string[] Items, int ThumbnailsWaiting = 0, string[]? ThumbnailsFailed = null);
 
 /// <summary>The answer to a request. Files are the ones a capture wrote, the sidecar last.</summary>
-public sealed record AutomationResponse(long Id, bool Ok, string[]? Files = null, string? Error = null, AutomationStatus? Status = null, AutomationContent? Content = null, AutomationTiming? Timing = null);
+public sealed record AutomationResponse(long Id, bool Ok, string[]? Files = null, string? Error = null, AutomationStatus? Status = null, AutomationContent? Content = null, AutomationTiming? Timing = null, AutomationRenderOut? RenderOut = null);
 
 /// <summary>What the editor writes beside its build for tools to find it: the port, and the editor's process, so a stale file is known.</summary>
 public sealed record AutomationInfo(int Port, int Pid, DateTime Started);

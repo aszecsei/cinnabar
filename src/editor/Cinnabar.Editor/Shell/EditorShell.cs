@@ -272,6 +272,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
             // The game ends the overrides of an editor that goes, so a token that wrote nothing would only seem live.
             Overrides.EndAll(OverrideEnd.LinkClosed);
             CutscenePreview.OnLinkLost();
+            RenderOuts.OnLinkLost("the link to the game was lost");
             if (Stats.Host != null || Stats.Game != null)
             {
                 Stats.Clear();
@@ -300,6 +301,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Overrides.EndAll(OverrideEnd.NewGameState);
         // The new state has no cutscene preview either. The scene's send opens the owner's again, after the scene.
         CutscenePreview.OnNewGameState();
+        RenderOuts.OnLinkLost("the game started again");
         ResetMode();
         SendScene();
         SendViewportTools();

@@ -267,3 +267,31 @@ a_timing_response_decodes_with_its_passes_and_sizes :: proc(t: ^testing.T) {
 	testing.expect_value(t, timing.viewports[0], Viewport_Size{0, 1920, 1080, true})
 	testing.expect_value(t, timing.missing[0], "nothing")
 }
+
+// render-out takes the cutscene and the folder, then a range and a size, and its own options, which no other command
+// takes.
+@(test)
+render_out_arguments_are_read_and_checked :: proc(t: ^testing.T) {
+	o, problem := parse_args(
+		{"render-out", "cutscenes/intro.cutscene", "out", "shot:Close", "1280x720", "--rate", "24", "--video", "--no-audio"},
+	)
+	defer delete(o.positional)
+	testing.expect_value(t, problem, "")
+	testing.expect_value(t, len(o.positional), 4)
+	testing.expect_value(t, o.rate.? or_else 0, 24)
+	testing.expect(t, o.video && o.no_audio)
+
+	line := string(request_line(o, 7, context.temp_allocator))
+	testing.expect(t, strings.contains(line, `"command":"render-out"`))
+	testing.expect(t, strings.contains(line, `"cutscene":"cutscenes/intro.cutscene"`))
+	testing.expect(t, strings.contains(line, `"range":"shot:Close"`))
+	testing.expect(t, strings.contains(line, `"size":"1280x720"`))
+	testing.expect(t, strings.contains(line, `"audio":false`))
+	testing.expect(t, strings.contains(line, `"video":true`))
+
+	short, short_problem := parse_args({"render-out", "intro"})
+	defer delete(short.positional)
+	testing.expect(t, strings.contains(short_problem, "a cutscene and a folder"))
+	_, misplaced := parse_args({"status", "--rate", "30"})
+	testing.expect(t, strings.contains(misplaced, "go with render-out"))
+}

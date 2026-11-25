@@ -82,6 +82,7 @@ static partial class EditorCommands
     public const string CutsceneOpenInOwnTab = "cutscene.openInOwnTab";
     public const string CutsceneNewShot = "cutscene.newShot";
     public const string CutsceneShots = "cutscene.shots";
+    public const string CutsceneRenderOut = "cutscene.renderOut";
 
     /// <summary>The timeline's commands, which act on the active cutscene while its timeline has the keyboard.</summary>
     public static readonly string[] CutsceneTimelineCommands =
@@ -95,7 +96,7 @@ static partial class EditorCommands
         CutsceneCurves, CutsceneCurvesNormalized, CutsceneTangentAuto, CutsceneTangentUnify, CutsceneTangentBreak, CutsceneTangentLinear,
         CutsceneTangentConstant, CutsceneTangentFlatten, CutsceneTangentWeighted, CutscenePreInfinity, CutscenePostInfinity,
         CutsceneCurveValueSnap, CutsceneRevealClip, CutsceneOpenClip, CutsceneMatchClipLength, CutsceneAddEvent, CutsceneJumpToHandler,
-        CutsceneOpenSubSequence, CutsceneUpOneLevel, CutsceneOpenInOwnTab, CutsceneNewShot, CutsceneShots,
+        CutsceneOpenSubSequence, CutsceneUpOneLevel, CutsceneOpenInOwnTab, CutsceneNewShot, CutsceneShots, CutsceneRenderOut,
     ];
 
     /// <summary>
@@ -223,6 +224,9 @@ static partial class EditorCommands
         Register(CutsceneNewShot, "New Shot at Playhead", "cutscene",
             "Make a new cutscene beside this one, move the selected sections into it, and play it from a sub-sequence section in their place. With nothing selected, the new shot is empty and starts at the playhead.", "Ctrl+Alt+N");
         Register(CutsceneShots, "Shot List", "cutscene", "Show the sub-sequence sections in time order beside the timeline, to go to, rename and reorder them.", null);
+        Register(CutsceneRenderOut, "Render Out…", "cutscene",
+            "Render the saved cutscene out of real time to a PNG for each frame, with its sound, and with ffmpeg, a video (see docs/editor/cutscene-editor.md#render-out).",
+            "Ctrl+Shift+R");
         // Keys (see docs/editor/cutscene-editor.md#keying) act on the selection wherever the keyboard is, so K stays the
         // timeline's Shuttle Pause.
         commands.Register(new Command(CutsceneKeyTransform, "Key Transform", () => shell.Keying.KeyTransform())

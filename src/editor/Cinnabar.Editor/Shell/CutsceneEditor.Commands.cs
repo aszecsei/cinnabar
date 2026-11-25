@@ -29,6 +29,7 @@ public sealed partial class CutsceneEditor
         EditorCommands.DuplicateEntity => new(Duplicate, () => CanDuplicate),
 
         EditorCommands.CutscenePlayPause => new(_shell.CutscenePreview.PlayPause, () => _shell.CutscenePreview.CanPlay(this)),
+        EditorCommands.CutsceneRenderOut => new(RequestRenderOut, () => _shell.RenderOutRefusal(this) == null),
         EditorCommands.CutsceneStepBack => new(() => Step(-1)),
         EditorCommands.CutsceneStepForward => new(() => Step(1)),
         EditorCommands.CutsceneStepBack10 => new(() => Step(-10)),

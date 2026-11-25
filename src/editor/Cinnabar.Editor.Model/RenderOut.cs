@@ -109,6 +109,7 @@ public sealed class RenderOutRun(ulong ticket, RenderOutSettings settings, objec
     internal Dictionary<int, RenderOutFrame> Drawn { get; } = [];
     internal List<string> Files { get; } = [];
     internal List<string> Failures { get; } = [];
+    internal int FramesWritten { get; set; }
     internal string? Audio { get; set; }
 }
 
@@ -258,8 +259,7 @@ public sealed class RenderOutModel(Action<ILinkMessage> send)
         }
         var frames = run.Drawn.Values;
         var ms = frames.Count == 0 ? 0 : frames.Average(f => f.Ms);
-        var written = run.Files.Count - (run.Audio != null ? 1 : 0);
-        Become(new RenderOutState.Running(run, new RenderOutProgressInfo(stage, frames.Count, written, run.Settings.FrameCount, ms)));
+        Become(new RenderOutState.Running(run, new RenderOutProgressInfo(stage, frames.Count, run.FramesWritten, run.Settings.FrameCount, ms)));
     }
 
     void Written(RenderOutRun run, RenderOutWritten w)
@@ -275,6 +275,7 @@ public sealed class RenderOutModel(Action<ILinkMessage> send)
             run.Audio = w.Path;
             return;
         }
+        run.FramesWritten++;
         try
         {
             var sidecar = Path.ChangeExtension(w.Path, ".json");

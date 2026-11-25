@@ -898,6 +898,9 @@ public sealed partial class EditorShell
             case Link.Protocol.OverrideEnded ended:
                 Overrides.OnEnded(ended);
                 return;
+            case Link.Protocol.RenderOutProgress or Link.Protocol.RenderOutFrame or Link.Protocol.RenderOutWritten or Link.Protocol.RenderOutEnded:
+                RenderOuts.Apply(message);
+                return;
             case Link.Protocol.CutscenePreviewOpened opened:
                 CutscenePreview.OnOpened(opened);
                 return;

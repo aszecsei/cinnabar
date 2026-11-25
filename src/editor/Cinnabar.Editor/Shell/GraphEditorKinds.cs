@@ -131,6 +131,7 @@ public sealed partial class EditorShell
             {
                 s.EndBindingPickFor(null, e);
                 s.CutscenePreview.OnTabClosed(e);
+                s.RenderOuts.OnOwnerClosed(e);
                 s.ForgetKeyed();
             }),
     ];

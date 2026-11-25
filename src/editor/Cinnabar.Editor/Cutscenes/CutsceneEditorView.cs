@@ -7,6 +7,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Host;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Ribbon;
 using Cinnabar.Editor.Shell;
@@ -32,6 +33,7 @@ public sealed class CutsceneEditorView : DockPanel
     readonly ToggleButton _loop = new() { Content = "Loop", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(4, 0) };
     readonly Button _play = new() { Classes = { "viewport-tool" }, Focusable = false, Margin = new Thickness(8, 0, 0, 0) };
     readonly Button _here;
+    readonly Button _render;
     bool _flushQueued;
     readonly TextBlock _time = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0) };
     readonly TextBlock _status = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
@@ -116,6 +118,22 @@ public sealed class CutsceneEditorView : DockPanel
         _here.Margin = new Thickness(8, 0, 0, 0);
         DockPanel.SetDock(_here, DockSide.Right);
         toolbar.Children.Add(_here);
+        // Render Out… opens its dialog, and while a run of this tab is under way, shows how far it is and cancels it.
+        _render = SmallButton("Render Out…", CommandViews.Tip(shell.KeyBindings, "Render the saved cutscene to frames, its sound and a video", EditorCommands.CutsceneRenderOut),
+            () =>
+            {
+                if (shell.RenderOuts.Busy && OwnsRenderOut())
+                {
+                    shell.RenderOuts.Cancel();
+                }
+                else
+                {
+                    editor.RequestRenderOut();
+                }
+            });
+        _render.Margin = new Thickness(8, 0, 0, 0);
+        DockPanel.SetDock(_render, DockSide.Right);
+        toolbar.Children.Add(_render);
         DockPanel.SetDock(_status, DockSide.Right);
         toolbar.Children.Add(_status);
         toolbar.Children.Add(new Panel());
@@ -268,12 +286,15 @@ public sealed class CutsceneEditorView : DockPanel
         }
         void AskTracks(IReadOnlyList<string> kinds) => _ = AskPasteTracks(kinds);
         void SpawnPrefab() => _spawnPicker.Flyout?.ShowAt(_spawnPicker);
+        void RenderOut() => _ = AskRenderOut();
         new ViewSubscriptions(this, attached: Show)
             .Add(() => _editor.Changed += Show, () => _editor.Changed -= Show)
             .Add(() => _editor.FindRequested += Find, () => _editor.FindRequested -= Find)
             .Add(() => _editor.GoToTimeRequested += GoToTime, () => _editor.GoToTimeRequested -= GoToTime)
             .Add(() => _editor.PasteTracksRequested += AskTracks, () => _editor.PasteTracksRequested -= AskTracks)
             .Add(() => _editor.SpawnPrefabRequested += SpawnPrefab, () => _editor.SpawnPrefabRequested -= SpawnPrefab)
+            .Add(() => _editor.RenderOutRequested += RenderOut, () => _editor.RenderOutRequested -= RenderOut)
+            .Add(() => _shell.RenderOuts.Changed += ShowRenderOut, () => _shell.RenderOuts.Changed -= ShowRenderOut)
             .Add(() => _editor.ProblemsChanged += Show, () => _editor.ProblemsChanged -= Show)
             .Add(() => _shell.Cook.StateChanged += Show, () => _shell.Cook.StateChanged -= Show)
             .Add(() => _shell.CutscenePreview.Changed += Show, () => _shell.CutscenePreview.Changed -= Show)
@@ -318,6 +339,41 @@ public sealed class CutsceneEditorView : DockPanel
     }
 
     // A paste needs tracks that the cutscene lacks: Add pastes with them, Cancel pastes nothing.
+    bool OwnsRenderOut() => _shell.RenderOuts.State switch
+    {
+        RenderOutState.Starting s => s.Run.Owner == _editor,
+        RenderOutState.Running r => r.Run.Owner == _editor,
+        RenderOutState.Cancelling c => c.Run.Owner == _editor,
+        RenderOutState.Muxing m => m.Run.Owner == _editor,
+        _ => false,
+    };
+
+    // The button says how far this tab's run is: the frames written of the total and the time left, or that it makes
+    // the video, and a click cancels it.
+    void ShowRenderOut()
+    {
+        _render.Content = !OwnsRenderOut() ? "Render Out…" : _shell.RenderOuts.State switch
+        {
+            RenderOutState.Running { Progress: var p } => $"Cancel ({p.Written}/{p.Total}{(p.Left is { } left ? $", {(int)left.TotalMinutes}:{left.Seconds:00} left" : "")})",
+            RenderOutState.Muxing => "Cancel (video)",
+            RenderOutState.Cancelling => "Cancelling…",
+            _ => "Cancel (starting)",
+        };
+        _render.IsEnabled = !_shell.RenderOuts.Busy || OwnsRenderOut();
+    }
+
+    async Task AskRenderOut()
+    {
+        if (TopLevel.GetTopLevel(this) is not Window window)
+        {
+            return;
+        }
+        if (await RenderOutDialog.Ask(window, _shell, _editor) is { } settings)
+        {
+            await _shell.RenderOutAsync(_editor, settings);
+        }
+    }
+
     async Task AskPasteTracks(IReadOnlyList<string> kinds)
     {
         if (TopLevel.GetTopLevel(this) is not Window window)
