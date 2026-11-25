@@ -283,9 +283,9 @@ Render_Out_Desc :: struct {
 // Render_Out_Answer is what the host did with a frame or with sound: took it, has no room for it yet, so ask again
 // next frame, or has no render out of that run open.
 Render_Out_Answer :: enum u8 {
-	Accepted,
-	No_Room,
 	Not_Open,
+	No_Room,
+	Accepted,
 }
 
 // Render_Out_Status is where a run's files are: nil for a run that the host does not have, Writing with the frames

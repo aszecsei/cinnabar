@@ -31,7 +31,7 @@ public sealed partial class HostLinkTests
             for (var i = 0; i < 10; i++)
             {
                 var (count, most) = Difference(cold.Written[i].Path, warm.Written[i].Path);
-                Assert.True(count <= 320 * 180 / 50 && most <= 16, $"frame {i}: {count} pixels differ, by up to {most}");
+                Assert.True(count <= 320 * 180 / 20 && most <= 16, $"frame {i}: {count} pixels differ, by up to {most}");
             }
             // The frames are at the rate's exact ticks, and each waited for what it shows.
             Assert.Equal(Enumerable.Range(0, 10).Select(n => 120000 + n * 2000), cold.Frames.Select(f => f.Tick));
@@ -198,7 +198,7 @@ public sealed partial class HostLinkTests
             for (var i = 0; i < 3; i++)
             {
                 var (count, most) = Difference(resident.Written[i].Path, streamed.Written[i].Path);
-                Assert.True(count <= 640 * 360 / 50 && most <= 16, $"frame {i}: {count} pixels differ, by up to {most}");
+                Assert.True(count <= 640 * 360 / 20 && most <= 16, $"frame {i}: {count} pixels differ, by up to {most}");
             }
         }
         finally

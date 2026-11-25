@@ -69,10 +69,9 @@ Output_Open :: struct {
 	using files: Output_Files,
 }
 
-// Output_Closing writes the frames that it took, and keeps the sound file with keep.
+// Output_Closing writes the frames that it took. The sound is closed already.
 Output_Closing :: struct {
 	using files: Output_Files,
-	keep:        bool,
 }
 
 Output_Closed :: struct {
@@ -289,7 +288,7 @@ render_out_close :: proc(run: u64, keep: bool) {
 		}
 		delete(path, runtime.heap_allocator())
 	}
-	change_output(c, Output_Closing{files = o.files, keep = keep})
+	change_output(c, Output_Closing{files = o.files})
 	render_out_settle(c)
 }
 

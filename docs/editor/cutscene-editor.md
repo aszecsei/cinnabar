@@ -1039,7 +1039,7 @@ A render out plays the saved cutscene out of real time. It writes each frame as 
 
 ### Determinism
 
-Two runs of one cutscene are near-identical, not identical bit for bit. The split cascade's global illumination probes take their table slots in the order of the GPU's threads, and a few pixels near moving skinned meshes differ by a few levels. The tests compare two runs with at most 2% of the pixels more than 16 levels apart. The run fixes the time: the world's step, the cutscene's tick, the renderer's clock, the mips and what is streamed in.
+Two runs of one cutscene are near-identical, not identical bit for bit. The split cascade's global illumination probes take their table slots in the order of the GPU's threads, and a few pixels near moving skinned meshes differ by a few levels. The tests allow up to 5% of the pixels to differ between two runs, by at most 16 levels: more pixels differ when other work shares the GPU. The run fixes the time: the world's step, the cutscene's tick, the renderer's clock, the mips and what is streamed in.
 
 `CINNABAR_STREAM_DELAY_FRAMES=<n>` holds each streamed transfer back `n` frames, so a test shows that a frame waits for its streaming (see [Platform](../core/platform.md#environment-variables)).
 

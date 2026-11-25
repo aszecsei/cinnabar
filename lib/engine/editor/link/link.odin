@@ -2314,7 +2314,9 @@ Render_Out_Format :: enum u8 {
 }
 
 // How a render out ended: every frame written, a failure with its reason, or a cancel after the frame that it was on.
+// None is no end yet.
 Render_Out_Outcome :: enum u8 {
+	None,
 	Done,
 	Failed,
 	Cancelled,

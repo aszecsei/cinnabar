@@ -122,7 +122,10 @@ Frame_Step :: union #no_nil {
 	Step_Drawing,
 }
 
-Step_World :: struct {}
+// Step_World steps the world, and keeps a cut that its draw carried for the frame's own draw.
+Step_World :: struct {
+	cut: bool,
+}
 
 // Step_Settling counts the quiet draws in a row, every settle draw of the frame, and when it began. cut is a camera cut
 // that a draw of the frame carried, which the frame's own draw takes (see plan_render_frame).
@@ -428,14 +431,17 @@ end_render_run :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run) {
 	case Render_Ended:
 	case Render_Preparing:
 		send_render_ended(e, run, .Cancelled, "the editor left the render out", 0)
-	case Render_Warming, Render_Rendering:
+	case Render_Warming:
 		e.platform.render_out.close(run.ticket, false)
 		send_render_ended(e, run, .Cancelled, "the editor left the render out", 0)
+	case Render_Rendering:
+		e.platform.render_out.close(run.ticket, false)
+		send_render_ended(e, run, .Cancelled, "the editor left the render out", s.frame)
 	case Render_Finishing:
 		send_render_ended(e, run, s.outcome, s.reason, s.frames)
 		delete(s.reason, heap)
 	}
-	run.stage = Render_Ended{}
+	run.stage = Render_Ended{outcome = .Cancelled}
 	if e.cutscenes != nil {
 		cutscene.stop(e.cutscenes, w, run.player)
 	}
@@ -458,6 +464,14 @@ end_render_run :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run) {
 	delete(run.folder, heap)
 	delete(run.pattern, heap)
 	run.name, run.folder, run.pattern = "", "", ""
+}
+
+// end_render_out ends the session's render out, if any, as the game shuts down or the editor that asked for it goes.
+// Its files stay as they are.
+end_render_out :: proc(e: ^Editor, w: ^ecs.World) {
+	if run := rendering(e); run != nil {
+		end_render_run(e, w, run)
+	}
 }
 
 // render_frame_time is what the frame of a run steps the world by, at the top of the game's frame: the frame's duration
@@ -558,6 +572,11 @@ finish_render :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run, s: Render_Fin
 		}
 	} else if status != nil {
 		return
+	} else if s.outcome == .Done {
+		f := &run.stage.(Render_Finishing)
+		delete(f.reason, e.platform.heap_allocator)
+		f.outcome = .Failed
+		f.reason = strings.clone("the host lost the render out's files", e.platform.heap_allocator)
 	}
 	change_render(e, w, run, Render_Ended{outcome = run.stage.(Render_Finishing).outcome, frames = s.frames})
 }
@@ -625,9 +644,7 @@ plan_render_frame :: proc(
 	out.cut = false
 	switch &st in step {
 	case Step_World:
-		if desc.cut {
-			step^ = Step_Settling{cut = true}
-		}
+		st.cut ||= desc.cut
 	case Step_Settling:
 		st.cut ||= desc.cut
 	case Step_Drawing:
@@ -674,11 +691,8 @@ render_drew :: proc(e: ^Editor, w: ^ecs.World, run: ^Render_Run, drew: bool) {
 	}
 	switch &st in step {
 	case Step_World:
-		step^ = Step_Settling{since = now}
+		step^ = Step_Settling{since = now, cut = st.cut}
 	case Step_Settling:
-		if st.since == 0 {
-			st.since = now
-		}
 		st.draws += 1
 		st.quiet = st.quiet + 1 if drew && settled(e, run) else 0
 		if st.quiet >= SETTLE_QUIET_DRAWS {

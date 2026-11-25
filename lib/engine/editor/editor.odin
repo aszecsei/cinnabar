@@ -328,9 +328,7 @@ poll :: proc(
 			despawned = true
 		}
 		// A render out of an editor that went stops, and its files stay as they are.
-		if run := rendering(e); run != nil {
-			end_render_run(e, w, run)
-		}
+		end_render_out(e, w)
 		end_session(e)
 		begin_session(e, connection)
 		// A new editor is in Edit, so its first scene replaces the world without the old behaviours' callbacks.

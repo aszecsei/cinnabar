@@ -80,13 +80,13 @@ change_mode :: proc(
 	}
 	switch to {
 	case .Edit:
-		e.session.mode = Mode_Edit{}
+		set_mode(e, Mode_Edit{})
 	case .Play:
-		e.session.mode = Mode_Play{}
+		set_mode(e, Mode_Play{})
 	case .Paused:
 		// A pause of a pause keeps the steps that wait.
 		if _, paused := e.session.mode.(Mode_Paused); !paused {
-			e.session.mode = Mode_Paused{}
+			set_mode(e, Mode_Paused{})
 		}
 	}
 	// The world runs, or stops as it is, and the editor sends its scene again before Edit edits it. The edits that
@@ -102,6 +102,19 @@ change_mode :: proc(
 	return
 }
 
+// set_mode is the one writer of the session's mode, which change_mode and enter_render call. Only a render out begins
+// from Edit, and leaving one ends it first.
+@(private = "file")
+set_mode :: proc(e: ^Editor, to: Session_Mode) {
+	if m, rendering := e.session.mode.(Mode_Render); rendering {
+		_, ended := m.run.stage.(Render_Ended)
+		assert(ended, "a render out ends before the mode changes")
+	}
+	_, renders := to.(Mode_Render)
+	assert(!renders || mode_of(e.session.mode) == .Edit, "a render out begins in Edit")
+	e.session.mode = to
+}
+
 // enter_render leaves Edit for a render out, as Play leaves it: the overrides and the cutscene preview end, the editor
 // sends its scene again after the run, and the scripts get every callback, with the numbers that a Play draws.
 @(private)
@@ -111,7 +124,7 @@ enter_render :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, run: R
 		forget_dead(w, &e.session.view.selection)
 		forget_dead(w, &e.session.view.hidden)
 	}
-	e.session.mode = Mode_Render{run}
+	set_mode(e, Mode_Render{run})
 	e.session.mirror = nil
 	if scripts != nil {
 		script.set_callbacks(scripts, callbacks_between_frames(e))

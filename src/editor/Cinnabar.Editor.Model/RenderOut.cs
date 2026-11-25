@@ -44,6 +44,7 @@ public sealed record RenderOutSettings(
         Rate < 15 ? $"a rate of {Rate} is below 15 frames a second"
         : FrameCount <= 0 ? "the range has no frame"
         : Width == 0 || Height == 0 || Width > 8192 || Height > 8192 ? $"a size of {Width}x{Height} is not 1 to 8192 on a side"
+        : Warmup > 64 ? "the warm-up is 0 to 64 frames"
         : Format == RenderOutFormat.Exr ? "EXR frames need an HDR target, which the renderer does not have yet"
         : string.IsNullOrWhiteSpace(Folder) ? "the render out has no folder"
         : !Pattern.Contains("{frame}") ? "the file name pattern has no {frame}"
@@ -130,8 +131,11 @@ public sealed class RenderOutModel(Action<ILinkMessage> send)
     /// <summary>The game ended a run, and the world is no longer the document's: the shell gives it back, as Stop does.</summary>
     public event Action? GameEnded;
 
-    /// <summary>A run is under way, from its start to the end of its video.</summary>
+    /// <summary>A run is under way, from its start to the end of its video, so no other may start.</summary>
     public bool Busy => State is not RenderOutState.Idle;
+
+    /// <summary>The game renders: the world is the run's, from the start to the game's end of it, before any video.</summary>
+    public bool InGame => State is RenderOutState.Starting or RenderOutState.Running or RenderOutState.Cancelling;
 
     /// <summary>Whether the state may go from one kind to another.</summary>
     public static bool Allowed(RenderOutState from, RenderOutState to) => (from, to) switch
@@ -204,7 +208,13 @@ public sealed class RenderOutModel(Action<ILinkMessage> send)
                 Become(new RenderOutState.Cancelling(r.Run));
                 break;
             case RenderOutState.Muxing m:
-                m.Cancel.Cancel();
+                try
+                {
+                    m.Cancel.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
                 break;
         }
     }
@@ -326,32 +336,52 @@ public sealed class RenderOutModel(Action<ILinkMessage> send)
         {
             var cancel = new CancellationTokenSource();
             Become(new RenderOutState.Muxing(run, result, cancel));
-            _ = MuxAsync(run, result, cancel.Token);
+            _ = MuxAsync(run, result, cancel);
             return;
         }
         Finish(run, result);
     }
 
-    async Task MuxAsync(RenderOutRun run, RenderOutResult result, CancellationToken cancel)
+    // The video, which always ends the run: a file that cannot be moved, as one that a player has open, fails it.
+    async Task MuxAsync(RenderOutRun run, RenderOutResult result, CancellationTokenSource source)
     {
         var s = run.Settings;
         var video = Path.Combine(s.Folder, $"{s.Name}.mp4");
-        var (ok, error) = await EncodeAsync(run.Ffmpeg!, FfmpegArguments(s, result.Audio, video + ".tmp.mp4"), cancel);
-        if (ok)
+        var temporary = video + ".tmp.mp4";
+        var cancel = source.Token;
+        try
         {
-            File.Move(video + ".tmp.mp4", video, overwrite: true);
-            result = result with { Video = video, Files = [.. result.Files, video] };
-        }
-        else
-        {
-            File.Delete(video + ".tmp.mp4");
-            result = result with
+            var (ok, error) = await EncodeAsync(run.Ffmpeg!, FfmpegArguments(s, result.Audio, temporary), cancel);
+            if (ok)
             {
-                Outcome = cancel.IsCancellationRequested ? RenderOutOutcome.Cancelled : RenderOutOutcome.Failed,
-                Reason = cancel.IsCancellationRequested ? "the video was cancelled" : $"ffmpeg: {error}",
-            };
+                File.Move(temporary, video, overwrite: true);
+                result = result with { Video = video, Files = [.. result.Files, video] };
+            }
+            else
+            {
+                result = result with
+                {
+                    Outcome = cancel.IsCancellationRequested ? RenderOutOutcome.Cancelled : RenderOutOutcome.Failed,
+                    Reason = cancel.IsCancellationRequested ? "the video was cancelled" : $"ffmpeg: {error}",
+                };
+            }
         }
-        Finish(run, result);
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            result = result with { Outcome = RenderOutOutcome.Failed, Reason = $"video: {e.Message}" };
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(temporary);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+            }
+            source.Dispose();
+            Finish(run, result);
+        }
     }
 
     void Finish(RenderOutRun run, RenderOutResult result)
@@ -409,7 +439,7 @@ public sealed class RenderOutModel(Action<ILinkMessage> send)
             var text = (await errors).Trim();
             return process.ExitCode == 0 ? (true, null) : (false, text.Length > 400 ? text[^400..] : text);
         }
-        catch (Exception e) when (e is System.ComponentModel.Win32Exception or IOException)
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
         {
             return (false, e.Message);
         }

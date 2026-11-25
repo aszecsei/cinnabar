@@ -68,8 +68,7 @@ public sealed partial class EditorShell
         InterruptEdit();
         Overrides.EndAll(OverrideEnd.Mode);
         CutscenePreview.OnPlay();
-        Mode = EditorMode.Play;
-        OnModeChanged();
+        SetModeTo(EditorMode.Play, send: false);
     }
 
     // The game ended the run: its world goes back to the editor's scene, as at Stop.
