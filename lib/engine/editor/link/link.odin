@@ -142,6 +142,7 @@ Message :: union {
 	Viewport_Look,
 	Viewport_Look_Shown,
 	Cutscene_Preview_Shown,
+	Cutscene_Preview_Fired,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -2261,4 +2262,25 @@ Viewport_Look_Shown :: struct {
 // values that have no entity of its own, as a binding's pose, against it.
 Cutscene_Preview_Shown :: struct {
 	shown: Shown_Preview,
+}
+
+Cutscene_Preview_Fired_Kind :: enum u8 {
+	// A range's end.
+	End,
+	Trigger,
+	// A range's begin.
+	Begin,
+}
+
+// Game to editor: an event that the preview's event tracks sent while it played with Settings.events, in the frame
+// that sends it to the scripts (see docs/editor/cutscene-editor.md#events). tick is the time on the cutscene's own
+// time, and name is the full name that the scripts get, such as alarm_begin. event is the key's ID in the cutscene,
+// or with nested, in the sub-sequence of the tree that it is in.
+Cutscene_Preview_Fired :: struct {
+	ticket: u64,
+	tick:   i32,
+	event:  u32,
+	kind:   Cutscene_Preview_Fired_Kind,
+	name:   string,
+	nested: bool,
 }

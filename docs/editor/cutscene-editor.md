@@ -349,7 +349,7 @@ A text without problems goes in the cache's preview area, `<cache>/dev/preview/<
 - **Follow.** While the preview plays, the timeline pages when the playhead leaves it: forward, the playhead starts again near the left edge, and backward, near the right one. A pan or a zoom by hand stops it until the next play.
 - **Typing a time.** A click on the playhead's time, or **Go to Time**, shows a box. It reads timecode, `[[hh:]mm:]ss:ff`, or a count of frames, `120` or `120f`, at the cutscene's rate (`CutsceneTime.TryParse`). Enter moves the playhead there, and Enter or Esc gives the keyboard back to the timeline. The time always shows the frame that is drawn, from the integer playhead.
 - **Sound.** While the preview plays, its audio tracks play. While it is scrubbed, they play short grains under the playhead (see [Tracks: Audio tracks](../cinematics/tracks.md#audio-tracks)). **Scrub Sound** turns the grains off and on.
-- **Events.** **Events in Preview** sends the event tracks' events while the preview plays. A scrub or a step never sends them. They go where a player's go: to the behaviours' `on_<name>`, which in Edit only the behaviours that run in edit mode get, in the next edit phase, and to the game's native handlers (`register_event_handler`), at once. What a handler changes is not the preview's to give back when it ends, so the toggle is off at first.
+- **Events.** **Events in Preview** sends the event tracks' events while the preview plays. A scrub or a step never sends them. They go where a player's go: to the behaviours' `on_<name>`, which in Edit only the behaviours that run in edit mode get, in the next edit phase, and to the game's native handlers (`register_event_handler`), at once. What a handler changes is not the preview's to give back when it ends, so the toggle is off at first. Each event that the preview sends flashes on its track and goes in the console (see [Events in the preview](#events-in-the-preview)).
 - **Each user's.** The scrub sound and the events are each user's, for each cutscene, in `cutscene-timeline.json` with the locks, mutes and solos. The play rate is the tab's.
 - **The frame counter.** While a session is open, the Game view shows the playhead's timecode and frame and the shot there at its bottom left: the camera of the cutscene's own camera cut section over the time (`CutsceneTimelineLayout.ShotAt`), or "gameplay". A sub-sequence's own cuts show as "gameplay" there.
 
@@ -847,6 +847,20 @@ An event sends up to four values, in order (`value = <kind> <value>` lines).
 - **Without a handler,** or past its parameters, each value is a row with its kind, and **Add Value** adds one.
 - The × removes a value, and the later ones move up. Each change is one undo entry. A value line keeps its place and its comment.
 
+### Flags on the timeline
+
+- **A flag.** A trigger draws as its diamond with a flag beside it that holds its name, and a range as its bar with its name in it. A flag is as wide as its name, at a fixed width for each character, so the draw and the hit test agree without a font (`CutsceneTimelineLayout.Flags`).
+- **A badge.** Triggers closer than the first one's flag is wide collapse into a badge with their count, as wide as its name or its count, whichever is wider. A glyph joins the flag before it while it is closer to that flag's start than the flag is wide. The grouping starts at the left edge of the view, so a zoom or a scroll can change it.
+- **A click** on a diamond, a name or a badge takes all of its triggers, as a merged glyph does, so a drag moves them together. A bar under the point comes before a flag's name, so a range under a name keeps its body and its edges. The box selects by time.
+- **A hover** on a badge lists its triggers' names in time order, and then the warning of any of them that has one (see [Names](#names)).
+
+### Events in the preview
+
+While **Events in Preview** is on and the preview plays (see [Scrub, play and step](#scrub-play-and-step)), the game tells the editor of each event that it sends to the scripts, in the frame that it sends it (`Cutscene_Preview_Fired`).
+- **The flash.** The event's diamond, or its range's bar, flashes white and fades over 400 ms (`CutsceneEventFlashes`). The flash is the view's: it is in no document and no undo entry, and it fades after the play stops.
+- **The console** gets a line for each event, such as `cutscene: guard_bark_begin at 00:06:00 on "Story"`, with the full name that the scripts get and the time on the cutscene's own time.
+- **Which events.** A message of another ticket is dropped. A play that stops at the end of the range stops in the frame that sends the last events, so a paused session still takes them.
+
 ### Flags and commands
 
 - **Fire when skipped** and **Fire on seek** are check boxes for `fire_when_skipped` and `fire_on_seek`.
@@ -855,5 +869,6 @@ An event sends up to four values, in order (`value = <kind> <value>` lines).
 
 ### Limits
 
-- **Event keys draw as diamonds and bars,** with no flags or names, and keys close together merge as other keys do. Flags with their names, counted badges and their hover lists, and the flash and log of each event fired while Events in Preview is on, come in a later change.
+- **A sub-sequence's events log but do not flash.** Their IDs are the child's, which the parent's tab cannot find until a child opens in context (#557). An event whose ID the tab's text no longer has, after an edit that the game has not cooked yet, also only logs.
+- **A name wider than its flag's estimate** is cut at the flag's end.
 - **The list is read when the rows are built.** A script that the daemon cooks again changes the list at the next build.

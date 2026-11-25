@@ -176,6 +176,64 @@ public sealed class CutscenePreviewTests : IDisposable
     }
 
     [Fact]
+    public void AFiredEventFlashesItsKeyAndGoesInTheConsoleWithoutTouchingTheDocument()
+    {
+        var (shell, editor) = NewShell();
+        using var _ = shell;
+        var now = TimeSpan.FromSeconds(1);
+        editor.Flashes.Clock = () => now;
+        var text = editor.Document.Text;
+        var ticket = Opened(shell);
+        var trigger = CutsceneFile.PathOf(editor.File.Blocks.Single(b => b.Kind == CutsceneBlockKind.Trigger && b.Id == 1));
+        var range = CutsceneFile.PathOf(editor.File.Blocks.Single(b => b.Kind == CutsceneBlockKind.Range && b.Id == 2));
+        var flashed = 0;
+        editor.Flashed += () => flashed++;
+        shell.CutscenePreview.PlayPause();
+        _sent.Clear();
+
+        shell.OnGameMessage(new CutscenePreviewFired(ticket, 360000, 2, CutscenePreviewFiredKind.Begin, "guard_bark_begin", false));
+        // The play stops at the end in the frame that sends intro_seen, so the stop comes first.
+        shell.OnGameMessage(new CutscenePreviewTick(ticket, 600000, false));
+        shell.OnGameMessage(new CutscenePreviewFired(ticket, 600000, 1, CutscenePreviewFiredKind.Trigger, "intro_seen", false));
+
+        Assert.Equal(2, flashed);
+        Assert.Equal(1, editor.Flashes.Strength(range));
+        Assert.Equal(1, editor.Flashes.Strength(trigger));
+        Assert.Contains(shell.Console.Lines, l => l.Text == "cutscene: guard_bark_begin at 00:06:00 on \"Story\"");
+        Assert.Contains(shell.Console.Lines, l => l.Text == "cutscene: intro_seen at 00:10:00 on \"Story\"");
+        now += CutsceneEventFlashes.Length;
+        Assert.Equal(0, editor.Flashes.Strength(trigger));
+        Assert.False(editor.Flashes.Live());
+
+        Assert.False(editor.Document.IsDirty);
+        Assert.Empty(editor.Document.History);
+        Assert.Equal(text, editor.Document.Text);
+        Assert.Empty(_sent);
+    }
+
+    [Fact]
+    public void AFiredEventOfAnotherTicketASubSequenceOrAGoneKeyDoesNotFlash()
+    {
+        var (shell, editor) = NewShell();
+        using var _ = shell;
+        var ticket = Opened(shell);
+        var flashed = 0;
+        editor.Flashed += () => flashed++;
+        var lines = shell.Console.Lines.Count;
+
+        shell.OnGameMessage(new CutscenePreviewFired(ticket + 1, 0, 1, CutscenePreviewFiredKind.Trigger, "intro_seen", false));
+        Assert.Equal(lines, shell.Console.Lines.Count);
+
+        // A sub-sequence's event ID is the child's, and an ID that the text no longer has finds nothing: both only log.
+        shell.OnGameMessage(new CutscenePreviewFired(ticket, 30000, 1, CutscenePreviewFiredKind.Trigger, "door_open", true));
+        shell.OnGameMessage(new CutscenePreviewFired(ticket, 30000, 99, CutscenePreviewFiredKind.Trigger, "lost", false));
+
+        Assert.Equal(0, flashed);
+        Assert.Contains(shell.Console.Lines, l => l.Text == "cutscene: door_open at 00:00:15 in a sub-sequence");
+        Assert.Contains(shell.Console.Lines, l => l.Text == "cutscene: lost at 00:00:15");
+    }
+
+    [Fact]
     public void ALateAnswerForAnEarlierTicketDoesNothing()
     {
         var (shell, editor) = NewShell();

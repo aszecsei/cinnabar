@@ -245,6 +245,19 @@ public sealed partial class CutsceneEditor : IGraphEditor, ICommandScope
     /// </summary>
     internal HashSet<PossessRef> DeclinedPossess { get; } = [];
 
+    /// <summary>The events that the preview fired a moment ago, which the timeline flashes. The view's, in no undo entry.</summary>
+    public CutsceneEventFlashes Flashes { get; } = new();
+
+    /// <summary>An event's flash began (see <see cref="FlashEvent"/>).</summary>
+    public event Action? Flashed;
+
+    /// <summary>Flashes the trigger or range at the path, which the preview fired.</summary>
+    public void FlashEvent(string path)
+    {
+        Flashes.Flash(path);
+        Flashed?.Invoke();
+    }
+
     /// <summary>The playhead in ticks: where a split, Home and End act. It is the editor's, not the document's, so it is in no undo entry.</summary>
     public int Playhead => _playhead;
 

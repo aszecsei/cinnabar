@@ -427,6 +427,9 @@ send_lifecycle :: proc(
 		args[0], args[1] = cutscene, failure_text(failure)
 	}
 	for e in recipients {
-		append(&s.outbox, Sent{player = h, name = name, entity = e, args = args, lifecycle = true})
+		append(
+			&s.outbox,
+			Sent{player = h, name = name, entity = e, args = args, origin = Player_Lifecycle{}},
+		)
 	}
 }
