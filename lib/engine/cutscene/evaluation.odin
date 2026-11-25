@@ -6,6 +6,7 @@ import "core:slice"
 import "core:time"
 
 import "cinnabar:core"
+import core_math "cinnabar:core/math"
 import "cinnabar:engine/anim"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
@@ -826,8 +827,7 @@ section_in :: proc(
 // ease is the shape of a section's ease in and ease out: smoothstep, 3x² − 2x³, from 0 to 1 with no slope at either
 // end.
 ease :: proc "contextless" (progress: f64) -> f32 {
-	x := clamp(progress, 0, 1)
-	return f32(x * x * (3 - 2 * x))
+	return f32(core_math.ease(.Smoothstep, progress))
 }
 
 // Blend sums the values of a track's sections at a time, each by its weight. T is f32 or an array of f32.

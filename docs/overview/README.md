@@ -80,6 +80,7 @@ cinnabar/
 │   │   ├── input.odin, window_windows.odin, file.odin
 │   │   ├── jobs/            The fiber job system
 │   │   ├── layout/          Type layout hashing and the pointer audit, for reload checks
+│   │   ├── math/            Curves and paths: keyed curves, easing, tweens, splines, arc length, frames
 │   │   ├── gpu/             The GPU interface, the null backend, the D3D12 backend, and cinnabar.hlsli
 │   │   ├── luau/            Odin bindings to Luau, and the CMake project that builds it
 │   │   └── script/          The script VM's heap and host trampolines
@@ -123,6 +124,7 @@ Packages are small and single-purpose. A package's tests are beside it as `*_tes
 | `lib/core/gpu` | Shared | Backend-agnostic GPU interface: handles and the command list format. Backends execute the command lists that the engine records. |
 | `lib/core/luau` | Shared | Odin bindings to the Luau C API. |
 | `lib/core/script` | Host | The script VM's allocator, and every function pointer that Luau stores. |
+| `lib/core/math` | Shared | Curves and paths: keyed curves, which are the cutscene key's format, easing, tweens, Bezier splines and the segments that convert to them, arc length and frames along a path (see [Core: Math](../core/math.md#the-package)). It imports only `base:` and `core:`. |
 | `lib/core/layout` | Shared | Type layout hashing, used to detect `Game_State` and command format changes across a reload, and the debug [pointer audit](hot-reload.md#rules) of `Game_State` after a reload. |
 | `lib/core/gpu/d3d12` | Host | The D3D12 backend. |
 | `lib/core/gpu/null` | Host | A backend that validates command lists and executes nothing. Used for headless tests. |

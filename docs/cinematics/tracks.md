@@ -6,7 +6,7 @@ A track acts on the world at the cutscene's time. Its kind says what it writes: 
 
 ## Curves
 
-A channel of a section is a **curve**: keys in rising time, each with a time in ticks from the section's start, a value and an interpolation to the next key. Every keyed track uses this one curve and its one evaluator, `curve_value` (`curve.odin`).
+A channel of a section is a **curve**: keys in rising time, each with a time in ticks from the section's start, a value and an interpolation to the next key. Every keyed track uses this one curve and its one evaluator, `curve_value` (`curve.odin`). A channel's key is a keyed curve of the math package, `core_math.Key(i32)`, and `curve_value` is `core_math.key_value` at the ticks' rate (see [Core: Math](../core/math.md#keyed-curves)).
 
 | Interpolation | From the key to the next |
 |---|---|
@@ -16,7 +16,7 @@ A channel of a section is a **curve**: keys in rising time, each with a time in 
 | `Auto` | A Bezier curve whose tangents the evaluator computes from the neighbouring keys. |
 
 - **At a key.** At a key's time, the value is the key's value, exactly.
-- **Infinity.** Before the first key, the channel's `pre_infinity` decides the value, and after the last key, its `post_infinity` does. Both are `constant` unless the text sets them (`Cutscene_Infinity`, `curve_wrap`):
+- **Infinity.** Before the first key, the channel's `pre_infinity` decides the value, and after the last key, its `post_infinity` does. Both are `constant` unless the text sets them (`Cutscene_Infinity`, which is `core_math.Extrapolation`, and `core_math.key_wrap`):
 
   | Mode | Outside the keys, the curve |
   |---|---|
@@ -51,8 +51,8 @@ A channel of a section is a **curve**: keys in rising time, each with a time in 
 **Exact and shared.** The evaluator is a pure procedure of the keys and a time.
 - It never bakes, so a value at any tick is exact.
 - It finds the segment by halves. The `hint` from the last call finds it at once in playback, and never changes the value.
-- Its arithmetic is `f64` `+ - * /` in a fixed order. A weighted segment's solve takes a fixed number of halvings (`CURVE_SOLVE_STEPS`, 48), not a tolerance.
-- `lib/engine/cutscene/testdata/curve.txt` holds a shared test curve and its value at every 250 ticks, as `f32` bits. The runtime's test reads it, and so does the test of the editor's evaluator, `CutsceneCurve`, which gives the same bits (see [Editor: Cutscene editor](../editor/cutscene-editor.md#the-evaluator)). Run the cutscene tests with `CINNABAR_WRITE_CURVE_GOLDEN=1` to write it again after a deliberate change.
+- Its arithmetic is `f64` `+ - * /` in a fixed order. A weighted segment's solve takes a fixed number of halvings (`core_math.KEY_SOLVE_STEPS`, 48), not a tolerance.
+- `lib/core/math/testdata/curve.txt` holds a shared test curve and its value at every 250 ticks, as `f32` bits. The runtime's test reads it, and so does the test of the editor's evaluator, `CutsceneCurve`, which gives the same bits (see [Editor: Cutscene editor](../editor/cutscene-editor.md#the-evaluator)). Run the tests of `lib/core/math` with `CINNABAR_WRITE_CURVE_GOLDEN=1` to write it again after a deliberate change.
   - Its `infinity <pre> <post> <from> <to>` blocks hold the values of the curve's keys from `<from>` to before `<to>` with those modes, from -60000 to 180000 ticks. They end with the ticks beside the keys' ends and their repeats, where a floored division goes wrong first, and two far ticks.
   - Each mode is on each side once, beside another mode, so a side read as the other fails. Two more blocks extend `linear` along the other kinds of end segment: Bezier tangents on both sides, and a linear start with a constant end.
 
@@ -371,7 +371,7 @@ track 7 audio "Music"
 - A constant or a linear segment integrates in closed form.
 - A Bezier or an automatic segment integrates by three-point Gauss–Legendre over its parameter. That rule is exact for the segment's polynomial: of degree 3 without weights, and of degree 5, `y(u) × x'(u)`, with them.
 - A part of a weighted segment integrates over `[0, u(t)]`, with `u(t)` solved as `curve_value` solves it.
-- A Bezier segment whose handles leave the pitch's range can leave the range too. The voice plays the clamped pitch, so the integral clamps too, in `CURVE_CLAMPED_PIECES` (16) pieces. That is close, but not exact.
+- A Bezier segment whose handles leave the pitch's range can leave the range too. The voice plays the clamped pitch, so the integral clamps too, in `core_math.INTEGRAL_CLAMPED_PIECES` (16) pieces. That is close, but not exact.
 
 **The clock and sync.** The track evaluates in the `Late` phase, once a frame, at the time that the frame shows. On the game's clock, that time is the cutscene's time less the part of a tick that presentation is behind it (`1 − alpha` of a tick). So the sounds keep to the picture between ticks.
 - **Starts on the frame.** A section that starts within `SEEK_LEAD` (50 ms of audio) of the frame's time starts its voice ahead, at its sound's `offset`, at the time on the audio's clock when the cutscene reaches the section's start. So nothing of the sound's attack is cut, whatever the frame rate. A seek before that time starts it again.
@@ -661,9 +661,8 @@ Scripts read and change them with the `Subtitles` library ([Scripting: Subtitles
 | `child_time(section, trim, t)` | A parent's time on the child's time of a sub-sequence section, and how many loops it wrapped |
 | `trim_of(section, child)` | A sub-sequence section's trim, clamped into its child's range |
 | `child_range(section, trim, from, to)` | A parent's event range on a child's time, a segment for each loop |
-| `curve_value(keys, t, hint)` | A curve's value at a time in ticks from its section's start |
-
-| `curve_step(keys, t, hint)` | A curve's value as if every key were constant |
+| `curve_value(keys, t, pre, post, hint)` | A curve's value at a time in ticks from its section's start: `core_math.key_value` at the ticks' rate |
+| `curve_step(keys, t, pre, post, hint)` | A curve's value as if every key were constant: `core_math.key_step` |
 | `property_track(ctx)` | The property kind's evaluate procedure |
 | `transform_track(ctx)` | The transform kind's evaluate procedure |
 | `animation_track(ctx)` | The animation kind's evaluate procedure |
@@ -680,7 +679,7 @@ Scripts read and change them with the `Subtitles` library ([Scripting: Subtitles
 | `skip_fade(state, handle)` | How much a skipping player's fade covers the frame (see [Skipping](skipping.md#the-state)) |
 | `register_event_handler(state, name, procedure, data)` | Registers a native handler of the events of one name, from every cutscene |
 | `send_events(state)` | Delivers the queued events of the event tracks to the scripts and the native handlers. Call it from the frame code. |
-| `curve_integral(keys, t)` | A curve's integral from 0 to a time in ticks, in value × seconds |
+| `curve_integral(keys, t)` | A pitch curve's integral from 0 to a time in ticks, in value × seconds, clamped to a voice's pitch: `core_math.key_integral` |
 | `sound_place(data, blob, section, t, length)` | Where an audio section's sound is at a time, in seconds, and whether that is inside the sound |
 | `set_audition(evaluation, audition)` | Sets how an evaluation's audio tracks sound, and whether its event tracks send events. A change stops the voices and forgets the open ranges. |
 | `set_rate(state, rate)` | Sets the game clock's rate against real time. The game sets it each frame. |

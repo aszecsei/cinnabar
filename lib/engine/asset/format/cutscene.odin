@@ -5,6 +5,7 @@ import "core:mem"
 import "core:slice"
 
 import "cinnabar:core/layout"
+import core_math "cinnabar:core/math"
 
 // A cutscene is a .cutscene text file: bindings, the entities that it possesses or spawns, and tracks on one time axis,
 // each with sections of keyed channels, a clip, a sound or a sub-sequence (see docs/content/kinds/cutscenes.md). Every
@@ -36,9 +37,8 @@ MAX_CUTSCENE_MARKERS :: 1024
 // The most values that an event carries.
 MAX_CUTSCENE_EVENT_VALUES :: 4
 
-// CUTSCENE_TANGENT_WEIGHT is the weight of a tangent of a key that is not weighted: a third of the segment, which makes
-// a Bezier segment a cubic Hermite curve, whose time is linear in its parameter.
-CUTSCENE_TANGENT_WEIGHT :: 1.0 / 3.0
+// CUTSCENE_TANGENT_WEIGHT is the weight of a tangent of a key that is not weighted (see core_math.KEY_TANGENT_WEIGHT).
+CUTSCENE_TANGENT_WEIGHT :: core_math.KEY_TANGENT_WEIGHT
 
 // Cutscene_Clock is the clock that a cutscene's time follows: the game's, which its time scale and pause change, or
 // real time.
@@ -109,27 +109,22 @@ Cutscene_Space :: enum u32 {
 	Relative_To,
 }
 
-// Cutscene_Interp is how a key's value goes to the next key's (see docs/cinematics/tracks.md#curves).
-Cutscene_Interp :: enum u8 {
-	// The key's value holds until the next key.
-	Constant,
-	Linear,
-	// A Bezier curve from the key's out tangent to the next key's in tangent, each a slope and a weight.
-	Bezier,
-	// A Bezier curve whose tangents the evaluator computes from the keys' neighbours, so it does not overshoot.
-	Auto,
-}
+// Cutscene_Interp is how a key's value goes to the next key's: core_math.Interp (see docs/cinematics/tracks.md#curves).
+Cutscene_Interp :: core_math.Interp
 
-Cutscene_Key_Flag :: enum u8 {
-	// The in and out tangents are set apart. Without it they are one, and the editor moves them together.
-	Broken,
-	// The tangents have their own weights. Without it both are CUTSCENE_TANGENT_WEIGHT.
-	Weighted,
-	// An evaluation that crosses the key moves the entity at once, with no interpolation from its last pose. Only a
-	// transform track's keys teleport.
-	Teleport,
-}
-Cutscene_Key_Flags :: bit_set[Cutscene_Key_Flag;u8]
+// Cutscene_Key_Flag is core_math.Key_Flag. An evaluation that crosses a Teleport key moves the entity at once, with no
+// interpolation from its last pose. Only a transform track's keys teleport.
+Cutscene_Key_Flag :: core_math.Key_Flag
+Cutscene_Key_Flags :: core_math.Key_Flags
+
+// The curve's types are this blob's format, and the editor mirrors their values by number: a change to one is a
+// change to the format.
+#assert(size_of(Cutscene_Interp) == 1 && len(Cutscene_Interp) == 4)
+#assert(int(Cutscene_Interp.Constant) == 0 && int(Cutscene_Interp.Linear) == 1)
+#assert(int(Cutscene_Interp.Bezier) == 2 && int(Cutscene_Interp.Auto) == 3)
+#assert(size_of(Cutscene_Key_Flags) == 1 && len(Cutscene_Key_Flag) == 3)
+#assert(int(Cutscene_Key_Flag.Broken) == 0 && int(Cutscene_Key_Flag.Weighted) == 1)
+#assert(int(Cutscene_Key_Flag.Teleport) == 2)
 
 Cutscene_Section_Flag :: enum u32 {
 	// The section adds its value to the value of the sections below it, or to the field's own value, and does not blend
@@ -166,20 +161,13 @@ Cutscene_Channel_Flag :: enum u32 {
 }
 Cutscene_Channel_Flags :: bit_set[Cutscene_Channel_Flag;u16]
 
-// Cutscene_Infinity is what a channel's curve does before its first key or after its last, inside its section (see
-// docs/cinematics/tracks.md#curves).
-Cutscene_Infinity :: enum u8 {
-	// It holds the end key's value.
-	Constant,
-	// It goes on along the slope that the curve has at its end key.
-	Linear,
-	// It repeats the keys, from the first's time to the last's.
-	Cycle,
-	// It repeats the keys, each repeat moved by the change from the first key's value to the last's.
-	Cycle_Offset,
-	// It repeats the keys forward, then backward, in turn.
-	Oscillate,
-}
+// Cutscene_Infinity is what a channel's curve does before its first key or after its last, inside its section:
+// core_math.Extrapolation (see docs/cinematics/tracks.md#curves).
+Cutscene_Infinity :: core_math.Extrapolation
+#assert(size_of(Cutscene_Infinity) == 1 && len(Cutscene_Infinity) == 5)
+#assert(int(Cutscene_Infinity.Constant) == 0 && int(Cutscene_Infinity.Linear) == 1)
+#assert(int(Cutscene_Infinity.Cycle) == 2 && int(Cutscene_Infinity.Cycle_Offset) == 3)
+#assert(int(Cutscene_Infinity.Oscillate) == 4)
 
 Cutscene_Event_Flag :: enum u32 {
 	// The event spans [start, end): it sends on_<name>_begin at its start and on_<name>_end at its end. Without it, the
@@ -505,22 +493,17 @@ Cutscene_Channel :: struct {
 }
 #assert(size_of(Cutscene_Channel) == 24)
 
-// Cutscene_Key is a key of a channel, at a time in ticks from its section's start. Only a Bezier key has tangents of
-// its own: slopes in value per second, and, when it is weighted, weights, the part of the segment's duration that each
-// handle reaches, from 0 to 1. Other keys have zeros there, and a key that is not weighted has tangents of
-// CUTSCENE_TANGENT_WEIGHT.
-Cutscene_Key :: struct {
-	time:       i32,
-	value:      f32,
-	interp:     Cutscene_Interp,
-	flags:      Cutscene_Key_Flags,
-	reserved:   u16,
-	in_slope:   f32,
-	in_weight:  f32,
-	out_slope:  f32,
-	out_weight: f32,
-}
+// Cutscene_Key is a key of a channel, at a time in ticks from its section's start: core_math.Key(i32). Only a Bezier key
+// has tangents of its own: slopes in value per second, and, when it is weighted, weights, the part of the segment's
+// duration that each handle reaches, from 0 to 1. Other keys have zeros there, and a key that is not weighted has
+// tangents of CUTSCENE_TANGENT_WEIGHT.
+Cutscene_Key :: core_math.Key(i32)
 #assert(size_of(Cutscene_Key) == 28)
+#assert(offset_of(Cutscene_Key, time) == 0 && offset_of(Cutscene_Key, value) == 4)
+#assert(offset_of(Cutscene_Key, interp) == 8 && offset_of(Cutscene_Key, flags) == 9)
+#assert(offset_of(Cutscene_Key, reserved) == 10 && offset_of(Cutscene_Key, in_slope) == 12)
+#assert(offset_of(Cutscene_Key, in_weight) == 16 && offset_of(Cutscene_Key, out_slope) == 20)
+#assert(offset_of(Cutscene_Key, out_weight) == 24)
 
 // Cutscene_Event is an event of an event track (see docs/cinematics/tracks.md#event-tracks): a trigger at start, or a
 // range [start, end), in ticks on the cutscene's time, with its name and its values, which follow those of the events

@@ -1,4 +1,4 @@
-# The shared test curve and its values (see docs/cinematics/tracks.md#curves). lib/engine/cutscene/curve_test.odin
+# The shared test curve and its values (see docs/cinematics/tracks.md#curves). lib/core/math/key_test.odin
 # writes it. key: time, value, interpolation, flags (- for none), in slope, in weight, out slope, out weight.
 # at: a tick and the value there, as the bits of an f32 in hex.
 # infinity: the pre and post modes, and the keys from the first index to before the second, of the at lines after it.

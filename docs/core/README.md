@@ -13,6 +13,7 @@ Read them in this order the first time.
 | [Input](input.md) | Keyboard, mouse, gamepads and text with IME composition, and the editor's input. |
 | [Audio](audio.md) | The audio device: the queue and its thread, queue depth across a code reload, device loss and the test tone. |
 | [Profiling](profiling.md) | The frame profiler: CPU zones, frames, costs and captures. |
+| [Math](math.md) | Keyed curves, easing, tweens, splines, arc length and frames along a path. |
 
 ## Overview
 
@@ -24,6 +25,7 @@ Read them in this order the first time.
 | `lib/core/jobs` | The fiber job system: workers, fibers, counters and the fiber-aware mutex. |
 | `lib/core/profile` | The frame profiler: zones, the frame ring, costs and captures ([Profiling](profiling.md#profiler)). |
 | `lib/core/layout` | The type layout hash that `Game_API.layout_hash` and the blob headers use. |
+| `lib/core/math` | Curves and paths: keyed curves, the format of a cutscene's channels, easing, tweens, splines, arc length and frames ([Math](math.md#the-package)). Like `layout`, it is shared: it imports only `base:` and `core:`, and compiles into the game and the tools too. |
 | `lib/core/capture` | Frame captures as images: the conversion from each output mode, the half-size downscale, and the PNG and GIF encoders ([Editor: Capture](../editor/capture.md#capture)). |
 | `lib/core/gpu` | The GPU interface, validation, the null backend and the D3D12 backend ([GPU](../gpu/README.md)). |
 | `lib/core/luau`, `lib/core/script` | The Luau bindings and the VM's host side ([Scripting](../scripting/embedding.md#embedding)). |

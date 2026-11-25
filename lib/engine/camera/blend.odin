@@ -2,6 +2,7 @@ package camera
 
 import "core:math/linalg"
 
+import core_math "cinnabar:core/math"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/render"
 
@@ -31,20 +32,18 @@ Blend :: struct {
 // CUT is the change with no blend.
 CUT :: Blend{}
 
+// CURVE_EASE is the easing of each blend curve. Curve is a stored subset of core_math.Ease, with its own numbers.
+@(rodata)
+CURVE_EASE := [Curve]core_math.Ease {
+	.Linear   = .Linear,
+	.Smooth   = .Smoothstep,
+	.Ease_In  = .In_Quad,
+	.Ease_Out = .Out_Quad,
+}
+
 // ease maps a blend's progress, 0 to 1, along the curve. It is 0 at 0 and 1 at 1.
-ease :: proc(curve: Curve, t: f32) -> f32 {
-	x := clamp(t, 0, 1)
-	switch curve {
-	case .Linear:
-		return x
-	case .Smooth:
-		return x * x * (3 - 2 * x)
-	case .Ease_In:
-		return x * x
-	case .Ease_Out:
-		return 1 - (1 - x) * (1 - x)
-	}
-	return x
+ease :: proc "contextless" (curve: Curve, t: f32) -> f32 {
+	return core_math.ease(CURVE_EASE[curve], t)
 }
 
 // blend_views is the view a fraction t of the way from a to b. The position goes straight, and the rotation takes the

@@ -5,6 +5,7 @@ import "core:math"
 import "core:strconv"
 import "core:strings"
 
+import core_math "cinnabar:core/math"
 import format "cinnabar:engine/asset/format"
 
 // Effects are .effect text files: emitters of particles, each with settings, modules and curves, which the renderer's
@@ -34,10 +35,7 @@ Effect_Problem :: struct {
 
 // Curve_Key is a key of a curve: a point of a particle's life, from 0 to 1, and the value there.
 @(private = "file")
-Curve_Key :: struct {
-	t:     f32,
-	value: [4]f32,
-}
+Curve_Key :: core_math.Linear_Key([4]f32)
 
 // An emitter's settings when its text does not give them.
 @(private = "file")
@@ -515,24 +513,6 @@ parse_curve :: proc(fields: []string, components: int, keys: ^[dynamic]Curve_Key
 // bake_curve samples a curve's keys evenly over a particle's life, linearly between them and held beyond them.
 @(private = "file")
 bake_curve :: proc(keys: []Curve_Key, default: [4]f32) -> (row: format.Effect_Curve_Row) {
-	for &sample, i in row {
-		t := f32(i) / f32(format.EFFECT_CURVE_SAMPLES - 1)
-		switch {
-		case len(keys) == 0:
-			sample = default
-		case t <= keys[0].t:
-			sample = keys[0].value
-		case t >= keys[len(keys) - 1].t:
-			sample = keys[len(keys) - 1].value
-		case:
-			for k in 1 ..< len(keys) {
-				if t <= keys[k].t {
-					a, b := keys[k - 1], keys[k]
-					sample = math.lerp(a.value, b.value, (t - a.t) / (b.t - a.t))
-					break
-				}
-			}
-		}
-	}
+	core_math.linear_bake(keys, row[:], default)
 	return
 }
