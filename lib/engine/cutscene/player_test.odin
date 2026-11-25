@@ -1396,6 +1396,61 @@ a_skipped_cutscene_leaves_the_world_as_playing_it_to_the_end :: proc(t: ^testing
 	}
 }
 
+// A driven player moves only by drive, at the exact times of a render out's frames: at 24 fps, frame n is at 2500 n
+// ticks, which the game's 60 Hz ticks do not land on. The game's frames do not move it, a drive back is refused, and it
+// fires the events of a play and ends as a play does.
+@(test)
+a_driven_player_moves_only_by_drive_and_fires_its_events_on_the_way :: proc(t: ^testing.T) {
+	context.logger = testlog.expected_errors()
+	f := player_setup(t)
+	defer player_teardown(f)
+	s := &f.cutscenes
+	w := &f.world
+	write_skippable(t, f, INTRO_GUID, .Anywhere)
+	free, _ := play(s, w, {cutscene = INTRO_GUID, overrides = hero_of(f)})
+	frames_while(f, free, .Loading)
+	testing.expect_value(t, drive(s, w, free, SECOND), Command_Result.Refused)
+	testing.expect_value(t, stop(s, w, free), Command_Result.Done)
+	frames_while(f, free, .Finishing)
+	clear(&f.fired)
+
+	h, _ := play(s, w, {cutscene = INTRO_GUID, overrides = hero_of(f), driven = true})
+	frames_while(f, h, .Loading)
+	expect_status(t, f, h, .Playing)
+	for _ in 0 ..< 10 {
+		frame(f)
+	}
+	now, _ := player_time(s, h)
+	testing.expect_value(t, now, 0)
+
+	for n in i32(1) ..= 12 {
+		testing.expect_value(t, drive(s, w, h, n * 2500), Command_Result.Done)
+		advance_real(s, w, time.Second)
+		frame(f)
+		now, _ = player_time(s, h)
+		testing.expect_value(t, now, n * 2500)
+	}
+	testing.expect_value(t, drive(s, w, h, 2500), Command_Result.Refused)
+	testing.expect_value(t, len(f.fired), 2)
+
+	for n in i32(13) ..= 48 {
+		drive(s, w, h, n * 2500)
+		advance_real(s, w, 0)
+		frame(f)
+	}
+	frames_while(f, h, .Playing)
+	frames_while(f, h, .Finishing)
+	expect_status(t, f, h, .Restored)
+	testing.expect_value(t, dial(f, f.hero), 7)
+	testing.expect_value(t, len(f.fired), 4)
+	if len(f.fired) == 4 {
+		testing.expect_value(t, f.fired[0], 1)
+		testing.expect_value(t, f.fired[1], 2)
+		testing.expect_value(t, f.fired[2], 3)
+		testing.expect_value(t, f.fired[3], 9)
+	}
+}
+
 // A skip in a skip range goes to the range's end, fades in there, and plays on: the events after the range fire as
 // they play. A time after the range cannot be skipped.
 @(test)

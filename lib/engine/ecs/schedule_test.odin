@@ -251,6 +251,17 @@ ticks_run_one_at_a_time :: proc(t: ^testing.T) {
 	it = begin_ticks(w, 8 * time.Millisecond)
 	testing.expect(t, !next_tick(&it))
 	testing.expect(t, w.clock.alpha > 0.47 && w.clock.alpha < 0.49)
+
+	// Aligned, the clock drops that fraction: a frame of exactly a tick then runs one tick, not one and a half.
+	align_clock(w)
+	testing.expect_value(t, w.clock.alpha, 0)
+	testing.expect_value(t, w.clock.time, tick_start(&w.clock, 3))
+	it = begin_ticks(w, tick_length(w))
+	testing.expect(t, next_tick(&it))
+	run_tick_systems(&it, &r)
+	testing.expect(t, !next_tick(&it))
+	testing.expect_value(t, w.clock.tick, 4)
+	testing.expect_value(t, w.clock.alpha, 0)
 }
 
 @(test)

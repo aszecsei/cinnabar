@@ -935,17 +935,26 @@ base :: proc(
 	return
 }
 
-// advance_real advances the playing cutscenes on the real clock by the frame's real duration, and evaluates their
-// Fixed tracks, so the ticks that follow see them even while the game is paused. Call it in the frame code before the
-// ticks.
+// advance_real advances the playing cutscenes on the real clock by the frame's real duration, and those of a driven
+// clock to their targets, and evaluates their Fixed tracks, so the ticks that follow see them even while the game is
+// paused. Call it in the frame code before the ticks.
 advance_real :: proc(s: ^State, w: ^ecs.World, dt: time.Duration) {
 	for p in in_order(s, w) {
 		e := &live_of(&p.state).evaluation
 		data, blob, ok := cutscene_data(s, e)
-		if !ok || blob.clock != .Real || status_of(p.state) != .Playing {
+		if !ok || status_of(p.state) != .Playing {
 			continue
 		}
-		advance(e, blob, dt)
+		if driven, is_driven := p.clock.?; is_driven {
+			if driven.target > e.time {
+				e.time = min(driven.target, blob.range_end)
+				e.carry = 0
+			}
+		} else if blob.clock == .Real {
+			advance(e, blob, dt)
+		} else {
+			continue
+		}
 		evaluate(s, e, w, data, blob, .Fixed)
 	}
 	send_events(s)
@@ -954,7 +963,8 @@ advance_real :: proc(s: ^State, w: ^ecs.World, dt: time.Duration) {
 // fixed_system advances the playing cutscenes on the game's clock by the tick, and evaluates the Fixed tracks of every
 // cutscene that plays, is paused or skips, in the players' order, so the player that wins a field writes it last. The
 // tick's length is exact, from the world's clock, so the game's time scale and pause reach the cutscene through the
-// ticks. A cutscene on the real clock moved in advance_real, so it evaluates again at the same time, and fires nothing.
+// ticks. A cutscene on the real clock or a driven one moved in advance_real, so it evaluates again at the same time,
+// and fires nothing.
 @(private)
 fixed_system :: proc(ctx: ^ecs.System_Context) {
 	s := (^State)(ctx.data)
@@ -966,7 +976,7 @@ fixed_system :: proc(ctx: ^ecs.System_Context) {
 		if !ok {
 			continue
 		}
-		if blob.clock == .Game && status_of(p.state) == .Playing {
+		if blob.clock == .Game && p.clock == nil && status_of(p.state) == .Playing {
 			advance(e, blob, step)
 		}
 		run_phase(s, e, w, data, blob, .Fixed, events_of(p))

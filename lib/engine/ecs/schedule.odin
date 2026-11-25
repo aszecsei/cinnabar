@@ -331,6 +331,15 @@ tick_start :: proc "contextless" (c: ^Clock, tick: u64) -> time.Duration {
 	)
 }
 
+// align_clock drops the part of a tick that has passed, so the next frame's ticks fall where a fresh clock's would. A
+// run that must give the same ticks each time, such as a render out, aligns first (see
+// docs/editor/cutscene-editor.md#render-out).
+align_clock :: proc(w: ^World) {
+	c := &w.clock
+	c.time = tick_start(c, c.tick)
+	c.alpha = 0
+}
+
 // set_tick_rate changes the rate from the next tick on.
 set_tick_rate :: proc(w: ^World, rate: u32) {
 	assert(rate > 0)
