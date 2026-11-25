@@ -234,6 +234,8 @@ Asset_Source :: struct {
 	size:         [2]u32,
 	tool_texture: format.Guid,
 	hotspots:     [][4]u32,
+	// For a sound, its length in ticks, from its blob, or 0 before it has cooked (see cook_link.Asset.length).
+	length:       u64,
 	// For a source that a stage generates, such as its prefab, the stage's GUID: it is not a file of its own, and its
 	// meta is only its GUID (see stages.odin).
 	owner:        format.Guid,
@@ -296,6 +298,7 @@ uncarry :: proc(a: ^Asset_Source) {
 	a.size = {}
 	a.tool_texture = {}
 	a.hotspots = nil
+	a.length = 0
 }
 
 // carry_kind settles the carried assets of some kinds, with the problems that the last pass found in them, and gives
@@ -392,9 +395,11 @@ make_output_dir :: proc(pass: ^Pass, dir: string, kinds: Asset_Kinds) -> bool {
 
 // Subasset is an asset that a source file makes, with its own GUID from the file's .meta file and its own blob.
 Subasset :: struct {
-	kind: format.Asset_Kind,
-	name: string,
-	guid: format.Guid,
+	kind:   format.Asset_Kind,
+	name:   string,
+	guid:   format.Guid,
+	// For an animation clip, its length in ticks, from its blob, or 0 (see cook_link.Asset.length).
+	length: u64,
 }
 
 // Folder is a directory in a root, by the root's index and its path in the root, such as "scripts/ui".
@@ -781,7 +786,14 @@ subasset_lines :: proc(
 		}
 		append(&result, format.Meta_Subasset{kind, w.name, guid})
 		// The pass's index reads the names after the file's parse, which they may point into, is freed.
-		append(&a.subassets, Subasset{w.kind, strings.clone(w.name, context.temp_allocator), guid})
+		append(
+			&a.subassets,
+			Subasset {
+				kind = w.kind,
+				name = strings.clone(w.name, context.temp_allocator),
+				guid = guid,
+			},
+		)
 		current[fmt.tprintf("%s.%s", kind, w.name)] = true
 	}
 	for s in a.meta.subassets {
@@ -829,6 +841,33 @@ cooked_key :: proc(output: string, kind: format.Asset_Kind, layout: u64) -> u64 
 // rename over an open file. Reads are far shorter than this.
 WRITE_BLOB_ATTEMPTS :: 10
 WRITE_BLOB_WAIT :: 20 * time.Millisecond
+
+// blob_start reads the start of a cooked blob, the struct T, and checks its header's magic, kind and layout. It fails
+// for a file that is not there or not one.
+blob_start :: proc(
+	path: string,
+	$T: typeid,
+	kind: format.Asset_Kind,
+	layout: u64,
+) -> (
+	blob: T,
+	ok: bool,
+) {
+	f, open_err := os.open(path)
+	if open_err != nil {
+		return
+	}
+	defer os.close(f)
+	n, read_err := os.read(f, ([^]byte)(&blob)[:size_of(blob)])
+	if read_err != nil ||
+	   n < size_of(blob) ||
+	   blob.header.magic != format.BLOB_MAGIC ||
+	   blob.header.kind != kind ||
+	   blob.header.layout != layout {
+		return {}, false
+	}
+	return blob, true
+}
 
 // write_blob writes a blob or a .meta file to a temporary file and renames it, so no reader sees a partial file: not
 // the running game a blob, nor another cook's scan or the editor a .meta file. Every .meta file that a cook writes goes

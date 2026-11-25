@@ -2209,7 +2209,7 @@ use_manifest :: proc(
 	problems: ^Problems,
 ) -> bool {
 	for s in m.subassets {
-		append(&a.subassets, Subasset{s.kind, s.name, s.guid})
+		append(&a.subassets, Subasset{kind = s.kind, name = s.name, guid = s.guid})
 	}
 	return add_generated(a, m, generated, problems)
 }

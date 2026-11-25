@@ -384,6 +384,7 @@ carry_source :: proc(a: ^Asset_Source, saved: Saved_Source) -> bool {
 	a.size = saved.size
 	a.tool_texture = saved.tool_texture
 	a.hotspots = saved.hotspots
+	a.length = saved.length
 	a.carried = Carried{saved.problems}
 	return true
 }

@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.VisualTree;
+using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Ribbon;
@@ -56,6 +57,14 @@ sealed class CutsceneTimeline : Control
     static readonly IBrush SoloBrush = new SolidColorBrush(Color.Parse("#FFD24A"));
     static readonly IPen StrikePen = new Pen(new SolidColorBrush(Color.Parse("#9A9AA2")), 1);
     static readonly IBrush MarkerDefault = new SolidColorBrush(Color.Parse("#F5A623"));
+    static readonly IBrush OverlapBrush = new SolidColorBrush(Color.FromArgb(0x38, 0x00, 0x00, 0x00));
+    static readonly IBrush HeldBrush = new SolidColorBrush(Color.FromArgb(0x60, 0x1B, 0x1B, 0x1E));
+    static readonly IPen LoopPen = new Pen(new SolidColorBrush(Color.FromArgb(0x70, 0x10, 0x10, 0x12)), 1);
+    static readonly IBrush LoopRun = new SolidColorBrush(Color.FromArgb(0x50, 0x10, 0x10, 0x12));
+    static readonly IPen ClipEndPen = new Pen(new SolidColorBrush(Color.FromArgb(0xC0, 0x10, 0x10, 0x12)), 1, new DashStyle([3, 2], 0));
+    static readonly IPen EasePen = new Pen(new SolidColorBrush(Color.FromArgb(0xB0, 0x10, 0x10, 0x12)), 1.2);
+    static readonly IBrush EaseHandle = new SolidColorBrush(Color.FromArgb(0xE0, 0xF4, 0xF4, 0xF6));
+    static readonly IPen EaseHandlePen = new Pen(new SolidColorBrush(Color.FromArgb(0xC0, 0x10, 0x10, 0x12)), 1);
     static readonly Typeface Face = new("Inter");
 
     readonly CutsceneEditor _editor;
@@ -136,6 +145,21 @@ sealed class CutsceneTimeline : Control
             _ => "#888888",
         });
         return new SolidColorBrush(dim ? Color.FromArgb(0x70, color.R, color.G, color.B) : color);
+    }
+
+    static readonly Dictionary<string, IBrush> HintFills = [];
+
+    // A clip's faded head and tail past its section's edges: its kind's color, faint.
+    static IBrush HintFill(string? kind)
+    {
+        kind ??= "";
+        if (!HintFills.TryGetValue(kind, out var brush))
+        {
+            var color = ((ISolidColorBrush)Fill(kind, false)).Color;
+            brush = new SolidColorBrush(Color.FromArgb(0x38, color.R, color.G, color.B));
+            HintFills[kind] = brush;
+        }
+        return brush;
     }
 
     string Units(int ticks) => _editor.ShowFrames
@@ -346,11 +370,52 @@ sealed class CutsceneTimeline : Control
         var height = Layout.RowHeight - 6;
         // A camera cut track names each cut's camera past a short cut's end (see docs/editor/cutscene-editor.md#the-cut-strip).
         var cuts = row.Row.Kind == CutsceneRowKind.Track && row.Row.TrackKind == "camera_cut";
+        var view = Input.View;
+        var area = Bounds.Width - Layout.Gutter;
+        var track = row.Row.Kind == CutsceneRowKind.Track;
+        // A clip's cut-off head and tail, under the bars (see docs/editor/cutscene-editor.md#loops-and-hints).
+        var marks = new Dictionary<CutsceneVisibleBar, CutsceneClipMarks>();
+        foreach (var bar in row.Bars)
+        {
+            if (track && bar.Item.Clip is { } clip)
+            {
+                var m = Layout.ClipMarks(bar.Item.Start, bar.Item.End, clip, view, area);
+                marks[bar] = m;
+                foreach (var (h0, h1) in new[] { m.Head, m.Tail }.OfType<(double X0, double X1)>())
+                {
+                    context.FillRectangle(HintFill(row.Row.TrackKind), new Rect(Layout.Gutter + h0, top + 2, Math.Max(h1 - h0, 1), height - 4), 2);
+                }
+            }
+        }
         foreach (var bar in row.Bars)
         {
             var x0 = Layout.Gutter + bar.X0;
             var rect = new Rect(x0, bar.Item.Kind == CutsceneItemKind.Range ? top + height / 4 : top, Math.Max(bar.X1 - bar.X0, 2), bar.Item.Kind == CutsceneItemKind.Range ? height / 2 : height);
             context.FillRectangle(silent ? SilentFill : Fill(row.Row.TrackKind, locked || row.Row.Kind == CutsceneRowKind.Channel), rect, 2);
+            if (marks.TryGetValue(bar, out var clipMarks))
+            {
+                // Past a clip that does not loop, the pose holds or the sound is silent.
+                if (clipMarks.End is { } end)
+                {
+                    context.FillRectangle(HeldBrush, new Rect(Layout.Gutter + end, top, Math.Max(rect.Right - Layout.Gutter - end, 0), height));
+                    context.DrawLine(ClipEndPen, new Point(Layout.Gutter + end, top), new Point(Layout.Gutter + end, top + height));
+                }
+                foreach (var (l0, l1) in clipMarks.Loops)
+                {
+                    if (l1 - l0 < 1)
+                    {
+                        context.DrawLine(LoopPen, new Point(Layout.Gutter + l0 + 0.5, top + 2), new Point(Layout.Gutter + l0 + 0.5, top + height - 2));
+                    }
+                    else
+                    {
+                        context.FillRectangle(LoopRun, new Rect(Layout.Gutter + l0, top + 2, l1 - l0, height - 4));
+                    }
+                }
+            }
+            if (track && !cuts && bar.Item.Kind == CutsceneItemKind.Section)
+            {
+                DrawEases(context, bar, view, top, height);
+            }
             if (problems.Contains(bar.Item.Path))
             {
                 context.DrawRectangle(ErrorPen, rect.Deflate(0.75), 2);
@@ -359,18 +424,38 @@ sealed class CutsceneTimeline : Control
             {
                 context.DrawRectangle(SelectedPen, rect.Deflate(1), 2);
             }
-            if (rect.Width > 40 && row.Row.Kind == CutsceneRowKind.Track && !cuts && bar.Item.Label is { Length: > 0 } label)
+            // The label stays in the part of its bar in view (see docs/editor/cutscene-editor.md#labels).
+            if (track && !cuts && bar.Item.Label is { Length: > 0 } label && Layout.LabelRoom(bar.X0, bar.X1, area) is var (lx, room))
             {
-                using (context.PushClip(rect.Deflate(new Thickness(4, 0))))
+                using (context.PushClip(new Rect(Layout.Gutter + lx, rect.Y, room, rect.Height)))
                 {
                     var text = Text(label, BarText, 10);
-                    context.DrawText(text, new Point(Math.Max(rect.X, Layout.Gutter) + 4, rect.Y + (rect.Height - text.Height) / 2));
+                    context.DrawText(text, new Point(Layout.Gutter + lx, rect.Y + (rect.Height - text.Height) / 2));
+                }
+            }
+        }
+        // Where sections overlap, they blend: a darker band, across which their eases are the blend's curve.
+        if (track && !cuts)
+        {
+            foreach (var (o0, o1) in Layout.Overlaps(row.Bars))
+            {
+                context.FillRectangle(OverlapBrush, new Rect(Layout.Gutter + o0, top, Math.Max(o1 - o0, 1), height));
+            }
+            foreach (var bar in row.Bars)
+            {
+                if (Layout.Handles(bar.Item, view) is { } handles)
+                {
+                    foreach (var hx in new[] { handles.In, handles.Out })
+                    {
+                        var square = new Rect(Layout.Gutter + hx - Layout.HandleSize / 2, top - 1, Layout.HandleSize, Layout.HandleSize);
+                        context.FillRectangle(EaseHandle, square);
+                        context.DrawRectangle(EaseHandlePen, square);
+                    }
                 }
             }
         }
         if (cuts)
         {
-            var area = Bounds.Width - Layout.Gutter;
             foreach (var (at, room, name) in Layout.CutNames(row.Bars, area))
             {
                 var x0 = Layout.Gutter + at + 3;
@@ -391,6 +476,49 @@ sealed class CutsceneTimeline : Control
         {
             var radius = glyph.Items.Count > 1 ? 4.5 : 3.5;
             Diamond(context, Layout.Gutter + glyph.X, middle, radius, glyph.Paths.Any(selected.Contains) ? SelectedKey : KeyBrush, glyph.Paths.Any(problems.Contains));
+        }
+    }
+
+    // A section's eases as smoothstep ramps, the shape that the runtime weighs them by: up from its bottom left over
+    // ease_in, and down to its bottom right over ease_out.
+    static void DrawEases(DrawingContext context, CutsceneVisibleBar bar, TimelineView view, double top, double height)
+    {
+        void Ramp(double from, double to, bool rising)
+        {
+            if (Math.Abs(to - from) < 2)
+            {
+                return;
+            }
+            var g = new StreamGeometry();
+            using (var c = g.Open())
+            {
+                const int Steps = 12;
+                for (var i = 0; i <= Steps; i++)
+                {
+                    var u = i / (double)Steps;
+                    var w = u * u * (3 - 2 * u);
+                    var point = new Point(Layout.Gutter + from + (to - from) * u, top + height - height * (rising ? w : 1 - w));
+                    if (i == 0)
+                    {
+                        c.BeginFigure(point, false);
+                    }
+                    else
+                    {
+                        c.LineTo(point);
+                    }
+                }
+                c.EndFigure(false);
+            }
+            context.DrawGeometry(null, EasePen, g);
+        }
+        var item = bar.Item;
+        if (item.EaseIn > 0)
+        {
+            Ramp(bar.X0, view.X(item.Start + item.EaseIn), rising: true);
+        }
+        if (item.EaseOut > 0)
+        {
+            Ramp(view.X(item.End - item.EaseOut), bar.X1, rising: false);
         }
     }
 
@@ -560,9 +688,21 @@ sealed class CutsceneTimeline : Control
         Input.Resize(e.NewSize.Width, e.NewSize.Height);
     }
 
-    // Whether a drag holds what the timeline takes: an entity, or an asset that places a prefab.
-    bool DropOf(DragEventArgs e) =>
-        !_editor.Document.InTransaction && (EntityView.Dropped(e) != 0 || ContentBrowserView.DroppedAll(e) is { } assets && _editor.PrefabsOf(assets).Count > 0);
+    // Whether a drag holds what the timeline takes: an entity, an animation or a sound that has a track to go on, or an
+    // asset that places a prefab.
+    bool DropOf(DragEventArgs e)
+    {
+        if (_editor.Document.InTransaction)
+        {
+            return false;
+        }
+        if (EntityView.Dropped(e) != 0)
+        {
+            return true;
+        }
+        var at = e.GetPosition(this);
+        return ContentBrowserView.DroppedAll(e) is { } assets && (Input.CanDropClips(assets, at.X, at.Y) || _editor.PrefabsOf(assets).Count > 0);
+    }
 
     void Drop(DragEventArgs e)
     {
@@ -573,10 +713,32 @@ sealed class CutsceneTimeline : Control
         }
         else if (ContentBrowserView.DroppedAll(e) is { } assets)
         {
-            _editor.Spawn(_editor.PrefabsOf(assets));
+            // Clips go on tracks at the drop's time (see docs/editor/cutscene-editor.md#drops), and prefabs spawn.
+            Input.DropClips(assets, at.X, at.Y);
+            if (_editor.PrefabsOf(assets) is { Count: > 0 } prefabs)
+            {
+                _editor.Spawn(prefabs);
+            }
         }
         Focus();
         e.Handled = true;
+    }
+
+    // The section menu, over an animation or audio section (see docs/editor/cutscene-editor.md#the-section-menu).
+    void OpenSectionMenu()
+    {
+        var shell = _editor.Shell;
+        var menu = new ContextMenu();
+        // The commands act while the timeline has the keyboard, which the menu's popup takes: a click gives it back first.
+        void Refocus()
+        {
+            Focus();
+            _editor.SetKeyboardPane(CutscenePane.Timeline);
+        }
+        MenuBuilder.Build(menu.Items,
+            [EditorCommands.CutsceneRevealClip, EditorCommands.CutsceneOpenClip, new MenuSeparator(), EditorCommands.CutsceneMatchClipLength],
+            shell.Commands, shell.KeyBindings, MenuBinding.Snapshot, Refocus);
+        menu.Open(this);
     }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
@@ -598,7 +760,11 @@ sealed class CutsceneTimeline : Control
             PointerUpdateKind.RightButtonPressed => MouseButton.Right,
             _ => MouseButton.Left,
         };
-        if (Input.Press(point.Position.X, point.Position.Y, button, e.KeyModifiers))
+        if (button == MouseButton.Right && !e.KeyModifiers.HasFlag(KeyModifiers.Alt) && Input.ContextAt(point.Position.X, point.Position.Y) != null)
+        {
+            OpenSectionMenu();
+        }
+        else if (Input.Press(point.Position.X, point.Position.Y, button, e.KeyModifiers))
         {
             e.Pointer.Capture(this);
         }

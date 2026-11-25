@@ -121,10 +121,26 @@ cook_models :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 		defer step_advance(pass)
 		asset_source(pass, i)
 		result := cook_model(options, &assets[i], out_dir, pass)
+		clip_lengths(&assets[i], out_dir)
 		settle(pass, i, result)
 		ok &&= !asset_failed(result)
 	}
 	return ok
+}
+
+// clip_lengths gives each animation sub-asset its length from its blob, whether the model cooked now, was current, or
+// failed and kept its old blobs.
+@(private = "file")
+clip_lengths :: proc(a: ^Asset_Source, out_dir: string) {
+	for &s in a.subassets {
+		if s.kind != .Animation {
+			continue
+		}
+		buffer: [32]u8
+		path := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.guid, &buffer))
+		blob, _ := blob_start(path, format.Animation_Blob, .Animation, format.animation_layout())
+		s.length = u64(math.round(f64(blob.duration) * format.CUTSCENE_TICKS_PER_SECOND))
+	}
 }
 
 @(private = "file")

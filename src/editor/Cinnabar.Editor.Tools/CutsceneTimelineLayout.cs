@@ -29,7 +29,43 @@ public sealed record CutsceneTimelineItem(CutsceneItemKind Kind, int Start, int 
 
     /// <summary>A marker's color as <c>#rrggbb</c>, or null for the default.</summary>
     public string? Color { get; init; }
+
+    /// <summary>A section's <c>ease_in</c> and <c>ease_out</c> in ticks, which its handles set. 0 for a camera cut, whose blends are its own.</summary>
+    public int EaseIn { get; init; }
+
+    public int EaseOut { get; init; }
+
+    /// <summary>An animation's or a sound's clip under its section, when the index knows the clip's length.</summary>
+    public CutsceneClipSpan? Clip { get; init; }
+
+    /// <summary>The time that the bar draws over: its span, and the faded parts of its clip before and after it.</summary>
+    public (double Start, double End) Reach => Clip is { } clip && CutsceneTimelineLayout.Hints(Start, End, clip) is var hints
+        ? (hints.HeadStart ?? Start, hints.TailEnd ?? End)
+        : (Start, End);
 }
+
+/// <summary>What the content index knows of a section's clip or sound: its name, and its length in ticks, or null before it has cooked.</summary>
+public sealed record CutsceneClipInfo(string Name, int? Length);
+
+/// <summary>
+/// An animation's or a sound's clip under its section (see docs/editor/cutscene-editor.md#loops-and-hints): the clip's
+/// ticks where the section starts (<c>offset</c>), the clip's ticks for each of the cutscene's (<c>speed</c>, 1 for a
+/// sound), whether it loops, and the clip's length in ticks, above 0.
+/// </summary>
+public sealed record CutsceneClipSpan(int Offset, double Speed, bool Loop, int Length);
+
+/// <summary>
+/// The parts of a clip's pass that a section cuts off, on the cutscene's time: where the pass that the section starts in
+/// began, where the pass that it ends in would end, and where a clip that does not loop ends inside the section. Each is
+/// null when there is none.
+/// </summary>
+public sealed record CutsceneClipHints(double? HeadStart, double? TailEnd, double? ClipEnd);
+
+/// <summary>
+/// A clip's marks in view, in the time area's pixels: a line at each loop, with marks closer than 2 pixels as one run,
+/// where a clip that does not loop ends, and its faded head and tail.
+/// </summary>
+public sealed record CutsceneClipMarks(IReadOnlyList<(double X0, double X1)> Loops, double? End, (double X0, double X1)? Head, (double X0, double X1)? Tail);
 
 /// <summary>
 /// Which rows the timeline shows (see docs/editor/cutscene-editor.md#search-and-filter): those whose binding's or
@@ -169,6 +205,10 @@ public enum CutsceneHitKind
     Body,
     StartEdge,
     EndEdge,
+    /// <summary>A section's ease in handle, at the top of its bar, which sets its <c>ease_in</c>.</summary>
+    EaseIn,
+    /// <summary>A section's ease out handle, at the top of its bar, which sets its <c>ease_out</c>.</summary>
+    EaseOut,
     /// <summary>The time area where nothing is, on a row or under the rows.</summary>
     Empty,
 }
@@ -197,6 +237,12 @@ public sealed class CutsceneTimelineLayout
     public const double LockWidth = 22;
     /// <summary>The marker flags' strip: the top of the ruler.</summary>
     public const double MarkerHeight = 12;
+    /// <summary>The top of a row in which a press is on a section's ease handles, not on its edges or body.</summary>
+    public const double HandleBand = 9;
+    /// <summary>The size of an ease handle's square.</summary>
+    public const double HandleSize = 6;
+    /// <summary>A label needs this many pixels of its bar in view.</summary>
+    public const double LabelMinWidth = 16;
 
     /// <summary>The left edge of the mute toggle in a track's header.</summary>
     public const double MuteX = Gutter - 3 * LockWidth;
@@ -241,10 +287,10 @@ public sealed class CutsceneTimelineLayout
     /// opens it: toggled holds the paths whose fold is not the default. A filter leaves out the tracks that it does not
     /// show, and a binding with none of its tracks shown, unless the text names the binding and no span is given. A
     /// filter's bindings leave out every other binding, and the tracks that no binding has. bindingInfo tells each
-    /// binding's row what it binds.
+    /// binding's row what it binds, and clipInfo each animation or audio section's clip, by its GUID, what it is.
     /// </summary>
     public static CutsceneTimelineLayout Build(CutsceneFile file, IReadOnlySet<string> toggled, CutsceneRowFilter? filter = null,
-        Func<CutsceneBlock, CutsceneBindingInfo?>? bindingInfo = null)
+        Func<CutsceneBlock, CutsceneBindingInfo?>? bindingInfo = null, Func<string, CutsceneClipInfo?>? clipInfo = null)
     {
         filter ??= CutsceneRowFilter.None;
         var rows = new List<CutsceneTimelineRow>();
@@ -260,7 +306,7 @@ public sealed class CutsceneTimelineLayout
             .ToList();
         foreach (var track in master)
         {
-            AddTrack(rows, file, track, 0, toggled);
+            AddTrack(rows, file, track, 0, toggled, clipInfo);
         }
         foreach (var binding in file.Bindings)
         {
@@ -291,7 +337,7 @@ public sealed class CutsceneTimelineLayout
             }
             foreach (var track in tracks)
             {
-                AddTrack(rows, file, track, 1, toggled);
+                AddTrack(rows, file, track, 1, toggled, clipInfo);
             }
         }
         for (var i = 0; i < rows.Count; i++)
@@ -311,7 +357,8 @@ public sealed class CutsceneTimelineLayout
 
     static string TrackLabel(CutsceneBlock track) => string.IsNullOrEmpty(track.Name) ? track.TrackKind ?? "track" : track.Name;
 
-    static void AddTrack(List<CutsceneTimelineRow> rows, CutsceneFile file, CutsceneBlock track, int depth, IReadOnlySet<string> toggled)
+    static void AddTrack(List<CutsceneTimelineRow> rows, CutsceneFile file, CutsceneBlock track, int depth, IReadOnlySet<string> toggled,
+        Func<string, CutsceneClipInfo?>? clipInfo)
     {
         var path = CutsceneFile.PathOf(track);
         var label = TrackLabel(track);
@@ -332,12 +379,22 @@ public sealed class CutsceneTimelineLayout
             switch (child)
             {
                 case { Kind: CutsceneBlockKind.Section, Start: { } s, End: { } e }:
-                    row.Bars.Add(new CutsceneTimelineItem(CutsceneItemKind.Section, s, e, CutsceneFile.PathOf(child)) { Label = SectionLabel(file, track, child) });
+                {
+                    var clip = track.TrackKind is "animation" or "audio" && child.Get("asset") is { } asset ? clipInfo?.Invoke(asset.Trim().TrimStart('$')) : null;
+                    var eased = track.TrackKind != "camera_cut";
+                    row.Bars.Add(new CutsceneTimelineItem(CutsceneItemKind.Section, s, e, CutsceneFile.PathOf(child))
+                    {
+                        Label = SectionLabel(file, track, child, clip),
+                        EaseIn = eased ? Ticks(child, "ease_in") : 0,
+                        EaseOut = eased ? Ticks(child, "ease_out") : 0,
+                        Clip = SpanOf(track, child, clip),
+                    });
                     foreach (var (key, keyPath) in Keys(child, null))
                     {
                         row.Keys.Add(new CutsceneTimelineItem(CutsceneItemKind.Key, s + key.Start!.Value, s + key.Start!.Value, keyPath));
                     }
                     break;
+                }
                 case { Kind: CutsceneBlockKind.Range, Start: { } s, End: { } e }:
                     row.Bars.Add(new CutsceneTimelineItem(CutsceneItemKind.Range, s, e, CutsceneFile.PathOf(child)));
                     break;
@@ -397,15 +454,163 @@ public sealed class CutsceneTimelineLayout
         }
     }
 
-    // What a section's bar says: a presentation section's line or kind, a camera cut's camera, or else its ID.
-    static string SectionLabel(CutsceneFile file, CutsceneBlock track, CutsceneBlock section) => track.TrackKind switch
+    // What a section's bar says: a presentation section's line or kind, a camera cut's camera, an animation's or a
+    // sound's clip, or else its ID.
+    static string SectionLabel(CutsceneFile file, CutsceneBlock track, CutsceneBlock section, CutsceneClipInfo? clip) => track.TrackKind switch
     {
+        "animation" or "audio" when clip != null => clip.Name,
         "presentation" => section.Get("text") is { } text ? TextQuote.Unquote(text) ?? text : section.Get("kind") ?? "",
         "camera_cut" => section.Get("camera") is { } camera && CutsceneFile.TryParseId(camera, out var id)
             ? file.Bindings.FirstOrDefault(b => b.Id == id)?.Name ?? $"binding {id}"
             : "",
         _ => $"#{section.Id}",
     };
+
+    static int Ticks(CutsceneBlock block, string key) =>
+        block.Get(key)?.Trim() is { } text && CutsceneFile.TryParseTicks(text, out var ticks) ? ticks : 0;
+
+    /// <summary>
+    /// A section's clip, when the index knows its length, or null. A sound with a <c>pitch</c> channel plays at a rate
+    /// that changes over the section, so it has none, and neither its loops nor its hints show.
+    /// </summary>
+    public static CutsceneClipSpan? SpanOf(CutsceneBlock track, CutsceneBlock section, CutsceneClipInfo? clip)
+    {
+        if (clip?.Length is not { } length || length <= 0)
+        {
+            return null;
+        }
+        var animation = track.TrackKind == "animation";
+        if (!animation && section.Children.Any(c => c.Kind == CutsceneBlockKind.Channel && c.Name == "pitch"))
+        {
+            return null;
+        }
+        var speed = animation && section.Get("speed") is { } text
+            && double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value) && value > 0
+            ? value
+            : 1;
+        return new CutsceneClipSpan(Ticks(section, "offset"), speed, section.Get("loop")?.Trim() == "true", length);
+    }
+
+    /// <summary>
+    /// The parts of a clip's pass that a section from start to end cuts off (see docs/editor/cutscene-editor.md#loops-and-hints),
+    /// on the cutscene's time. The clip's time at t is <c>offset + (t - start) × speed</c>. A clip that loops shows the
+    /// rest of the pass that it starts in before the start, and the rest of the pass that it ends in after the end. A
+    /// clip that does not loop shows the part of its clip before its offset, the part past the end, and where it ends
+    /// inside the section, after which the pose holds or the sound is silent.
+    /// </summary>
+    public static CutsceneClipHints Hints(int start, int end, CutsceneClipSpan clip)
+    {
+        double length = clip.Length, offset = clip.Offset, speed = clip.Speed;
+        // Less than half a tick of clip is none.
+        const double Least = 0.5;
+        if (clip.Loop)
+        {
+            var phase = offset % length;
+            var rest = (offset + (end - start) * speed) % length;
+            return new CutsceneClipHints(
+                phase > Least ? start - phase / speed : null,
+                rest > Least && length - rest > Least ? end + (length - rest) / speed : null,
+                null);
+        }
+        var clipEnd = start + (length - offset) / speed;
+        return new CutsceneClipHints(
+            offset > Least && offset < length ? start - offset / speed : null,
+            clipEnd > end + Least / speed ? clipEnd : null,
+            clipEnd < end - Least / speed ? Math.Max(clipEnd, start) : null);
+    }
+
+    /// <summary>
+    /// A section's clip marks in view: a mark at each loop inside the section, only those in view, and one run over the
+    /// visible part when they are closer than <see cref="MergeWidth"/>; where a clip that does not loop ends; and its
+    /// <see cref="Hints"/> as spans. Pixels are the time area's, and width is its width.
+    /// </summary>
+    public static CutsceneClipMarks ClipMarks(int start, int end, CutsceneClipSpan clip, TimelineView view, double width)
+    {
+        var hints = Hints(start, end, clip);
+        var loops = new List<(double X0, double X1)>();
+        if (clip.Loop)
+        {
+            double length = clip.Length, offset = clip.Offset, speed = clip.Speed;
+            var from = Math.Max(start, view.At(0));
+            var to = Math.Min(end, view.At(width));
+            // The k-th loop is where the clip's time is k lengths: past the offset, so not at the start, and before the end.
+            var first = Math.Floor(offset / length) + 1;
+            double At(double k) => start + (k * length - offset) / speed;
+            var spacing = length / speed / view.PerPixel;
+            var k0 = Math.Max(first, Math.Ceiling(((from - start) * speed + offset) / length));
+            if (from < to && At(first) < end && At(k0) <= to)
+            {
+                if (spacing < MergeWidth)
+                {
+                    loops.Add((view.X(At(k0)), view.X(Math.Min(to, end - 1))));
+                }
+                else
+                {
+                    for (var k = k0; At(k) < end && At(k) <= to; k++)
+                    {
+                        var x = view.X(At(k));
+                        loops.Add((x, x));
+                    }
+                }
+            }
+        }
+        return new CutsceneClipMarks(
+            loops,
+            hints.ClipEnd is { } clipEnd ? view.X(clipEnd) : null,
+            hints.HeadStart is { } head ? (view.X(head), view.X(start)) : null,
+            hints.TailEnd is { } tail ? (view.X(end), view.X(tail)) : null);
+    }
+
+    /// <summary>
+    /// Where a bar's label goes in the time area: 4 pixels into the part of the bar in view, so a section that starts
+    /// off screen still shows its label, with the room to its visible end. Null when less than
+    /// <see cref="LabelMinWidth"/> is in view.
+    /// </summary>
+    public static (double X, double Room)? LabelRoom(double x0, double x1, double width)
+    {
+        var x = Math.Max(x0, 0) + 4;
+        var room = Math.Min(x1, width) - 4 - x;
+        return room >= LabelMinWidth ? (x, room) : null;
+    }
+
+    /// <summary>
+    /// Where sections in view overlap, from x0 to x1, in start order: where they blend over each other, through the
+    /// earlier one's ease out and the later one's ease in.
+    /// </summary>
+    public static List<(double X0, double X1)> Overlaps(IReadOnlyList<CutsceneVisibleBar> bars)
+    {
+        var overlaps = new List<(double X0, double X1)>();
+        var reach = double.NegativeInfinity;
+        foreach (var bar in bars)
+        {
+            if (bar.Item.Kind != CutsceneItemKind.Section)
+            {
+                continue;
+            }
+            if (bar.X0 < reach)
+            {
+                overlaps.Add((bar.X0, Math.Min(bar.X1, reach)));
+            }
+            reach = Math.Max(reach, bar.X1);
+        }
+        return overlaps;
+    }
+
+    /// <summary>Whether a row's sections have ease handles: a track's row of any kind but camera cuts, whose blends are their own.</summary>
+    public static bool HasHandles(CutsceneTimelineRow row) => row.Kind == CutsceneRowKind.Track && row.TrackKind != "camera_cut";
+
+    /// <summary>
+    /// A section's ease handles' x in the time area: the ease in's at its start and its ease in, and the ease out's at its
+    /// end less its ease out. Null for a bar too narrow for them, which is only its body.
+    /// </summary>
+    public static (double In, double Out)? Handles(CutsceneTimelineItem bar, TimelineView view)
+    {
+        if (bar.Kind != CutsceneItemKind.Section || view.X(bar.End) - view.X(bar.Start) < 3 * Grab)
+        {
+            return null;
+        }
+        return (view.X(bar.Start + bar.EaseIn), view.X(bar.End - bar.EaseOut));
+    }
 
     /// <summary>The row at a y in the control, or null over the ruler or under the rows.</summary>
     public CutsceneTimelineRow? RowAt(double y, double scrollY)
@@ -437,7 +642,8 @@ public sealed class CutsceneTimelineLayout
             var bars = new List<CutsceneVisibleBar>();
             foreach (var bar in row.Bars)
             {
-                if (bar.End >= from && bar.Start <= to)
+                var (reachStart, reachEnd) = bar.Reach;
+                if (reachEnd >= from && reachStart <= to)
                 {
                     bars.Add(new CutsceneVisibleBar(view.X(bar.Start), view.X(bar.End), bar));
                 }
@@ -545,6 +751,35 @@ public sealed class CutsceneTimelineLayout
             return new CutsceneHit(CutsceneHitKind.Empty, null, [], tick);
         }
         var px = x - Gutter;
+        // In the top of a row, a section's ease handles come first, over its keys and edges, so a key at its start does not
+        // take its handle: the nearest within Grab, and of two as near, the bar drawn last. Where a section's two handles
+        // meet, a point left of them is on the ease in, which ends there, and a point right of them on the ease out.
+        if (y - (RulerHeight + row.Top - scrollY) < HandleBand && HasHandles(row))
+        {
+            CutsceneHit? best = null;
+            var nearest = double.PositiveInfinity;
+            for (var i = row.Bars.Count - 1; i >= 0; i--)
+            {
+                if (Handles(row.Bars[i], view) is not { } handles)
+                {
+                    continue;
+                }
+                foreach (var (hx, kind) in new[] { (handles.Out, CutsceneHitKind.EaseOut), (handles.In, CutsceneHitKind.EaseIn) })
+                {
+                    var distance = Math.Abs(px - hx);
+                    var meets = distance == nearest && kind == CutsceneHitKind.EaseIn && px < hx && best?.Paths[0] == row.Bars[i].Path;
+                    if (distance <= Grab && (distance < nearest || meets))
+                    {
+                        nearest = distance;
+                        best = new CutsceneHit(kind, row, [row.Bars[i].Path], tick);
+                    }
+                }
+            }
+            if (best != null)
+            {
+                return best;
+            }
+        }
         // Keys first, as they sit on the bars, then triggers, then the bars' edges and bodies.
         if (Nearest(row.Keys, view, px) is { } keys)
         {

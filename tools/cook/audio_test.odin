@@ -539,3 +539,28 @@ when WRITE_AUDIO_FIXTURES {
 		}
 	}
 }
+
+// The index has a sound's length in ticks, from its blob, when it cooks, and when a daemon that starts again carries it.
+@(test)
+the_index_has_a_sounds_length_in_ticks :: proc(t: ^testing.T) {
+	tree := make_tree(t, {{"content/audio/hum.wav", wav(tone(48000, 48000), 1, 48000)}})
+	defer remove_tree(tree)
+	options := tree_options(tree)
+	first := Daemon {
+		options = options,
+	}
+	defer index_destroy(&first.index)
+	testing.expect(t, daemon_pass(&first, Changed_Everything{}).ok)
+	buffer: [32]u8
+	guid := format.guid_format(tree_guid(t, tree, "audio/hum.wav"), &buffer)
+	testing.expect_value(t, first.index.assets[guid].length, 60000)
+
+	again := Daemon {
+		options = options,
+	}
+	defer index_destroy(&again.index)
+	testing.expect(t, index_load(&again.index, options))
+	pass := daemon_pass(&again, Changed_Everything{})
+	testing.expect_value(t, pass.cooked[.Audio], 0)
+	testing.expect_value(t, again.index.assets[guid].length, 60000)
+}

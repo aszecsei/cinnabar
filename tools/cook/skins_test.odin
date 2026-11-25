@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:math"
 import "core:mem"
 import "core:os"
+import "core:strings"
 import "core:testing"
 
 import format "cinnabar:engine/asset/format"
@@ -248,4 +249,42 @@ a_skinned_model_imports_its_skin_and_animations :: proc(t: ^testing.T) {
 	again := cook(options, {.Model})
 	testing.expect_value(t, again.current[.Model], 1)
 	testing.expect_value(t, again.cooked[.Skin], 0)
+}
+
+// The index has each animation's length in ticks, from its blob, when the model cooks, when it is up to date, and when
+// a daemon that starts again carries it.
+@(test)
+the_index_has_each_animations_length_in_ticks :: proc(t: ^testing.T) {
+	tree := make_tree(t, {{"content/rig.gltf", skinned_gltf()}})
+	defer remove_tree(tree)
+	options := tree_options(tree)
+	first := Daemon {
+		options = options,
+	}
+	defer index_destroy(&first.index)
+	testing.expect(t, daemon_pass(&first, Changed_Everything{}).ok)
+	meta := skinned_meta(t, tree)
+	bend, _ := format.meta_subasset(meta, format.ANIMATION_KIND, "Bend")
+	mesh, _ := format.meta_subasset(meta, format.MESH_KIND, "Bar")
+	buffer: [32]u8
+	bend_text := strings.clone(format.guid_format(bend, &buffer), context.temp_allocator)
+	mesh_text := strings.clone(format.guid_format(mesh, &buffer), context.temp_allocator)
+	// Bend's keys are at 0 and 1 seconds. A mesh has no length.
+	testing.expect_value(t, first.index.assets[bend_text].length, 60000)
+	testing.expect_value(t, first.index.assets[mesh_text].length, 0)
+
+	pass := cook(options, {.Model}, log_problems = false)
+	testing.expect_value(t, pass.current[.Model], 1)
+	current: Index
+	index_build(&current, pass, options.roots[:])
+	defer index_destroy(&current)
+	testing.expect_value(t, current.assets[bend_text].length, 60000)
+
+	again := Daemon {
+		options = options,
+	}
+	defer index_destroy(&again.index)
+	testing.expect(t, index_load(&again.index, options))
+	daemon_pass(&again, Changed_Everything{})
+	testing.expect_value(t, again.index.assets[bend_text].length, 60000)
 }

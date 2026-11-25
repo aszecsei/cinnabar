@@ -160,6 +160,12 @@ public sealed class AssetIndex
 
     public Asset? Find(string guid) => _assets.GetValueOrDefault(guid);
 
+    /// <summary>
+    /// A sound's or an animation clip's length in ticks, from its cooked blob. Null when it has none: before it has cooked,
+    /// for a clip of one pose, or for another kind.
+    /// </summary>
+    public static int? LengthOf(Asset asset) => asset.Length == 0 ? null : (int)Math.Min(asset.Length, int.MaxValue);
+
     /// <summary>The import settings that an asset's kind takes.</summary>
     public IReadOnlyList<SettingInfo> SettingsOf(AssetKind kind) => _importers.Find(i => i.Kind == kind)?.Settings ?? [];
 

@@ -174,6 +174,9 @@ Asset :: struct {
 	// texture that the editor's texture tools measure by (see docs/editor/mesh-editing.md#texture-tools), by GUID or
 	// "", and the hotspot rectangles of the material's source, in that texture's texels.
 	size:            [2]u32,
+	// For a sound or an animation clip, its length in ticks (60,000 a second), from its cooked blob, or 0 when it has
+	// no length: before it has cooked, or for a clip of one pose.
+	length:          u64,
 	tool_texture:    string,
 	hotspots:        []Hotspot,
 	// For a sub-asset whose source the cooker generates, as a USD stage's prefab, the generated text's absolute path,

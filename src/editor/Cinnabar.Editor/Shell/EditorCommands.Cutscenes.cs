@@ -72,6 +72,9 @@ static partial class EditorCommands
     public const string CutsceneConvertToSlot = "cutscene.convertToSlot";
     public const string CutscenePickBinding = "cutscene.pickBinding";
     public const string CutsceneStandInSelection = "cutscene.standInSelection";
+    public const string CutsceneRevealClip = "cutscene.revealClip";
+    public const string CutsceneOpenClip = "cutscene.openClip";
+    public const string CutsceneMatchClipLength = "cutscene.matchClipLength";
 
     /// <summary>The timeline's commands, which act on the active cutscene while its timeline has the keyboard.</summary>
     public static readonly string[] CutsceneTimelineCommands =
@@ -84,7 +87,7 @@ static partial class EditorCommands
         CutscenePreviousKey, CutsceneNextKey, CutsceneGoToTime, CutsceneScrubSound, CutscenePreviewEvents,
         CutsceneCurves, CutsceneCurvesNormalized, CutsceneTangentAuto, CutsceneTangentUnify, CutsceneTangentBreak, CutsceneTangentLinear,
         CutsceneTangentConstant, CutsceneTangentFlatten, CutsceneTangentWeighted, CutscenePreInfinity, CutscenePostInfinity,
-        CutsceneCurveValueSnap,
+        CutsceneCurveValueSnap, CutsceneRevealClip, CutsceneOpenClip, CutsceneMatchClipLength,
     ];
 
     /// <summary>
@@ -190,6 +193,12 @@ static partial class EditorCommands
         Register(CutsceneKeysUnderSelection, "Keys Under Selection", "search",
             "Show only the tracks with keys in the span of the selection, as it is when this is turned on, or show them all again.", null,
             e => e.KeysUnderSelection);
+        // The section menu's (see docs/editor/cutscene-editor.md#the-section-menu).
+        Register(CutsceneRevealClip, "Reveal in Content Browser", "search", "Show the selected section's animation clip or sound in the content browser.", null);
+        Register(CutsceneOpenClip, "Open Clip", "cutscene",
+            "Show the selected section's animation clip or sound in the content browser, and open it there. Clips and sounds have no editor yet, so they are only shown.", null);
+        Register(CutsceneMatchClipLength, "Match Clip Length", "cutscene",
+            "Trim each selected animation or audio section that does not loop so that it ends where its clip ends.", null);
         // Keys (see docs/editor/cutscene-editor.md#keying) act on the selection wherever the keyboard is, so K stays the
         // timeline's Shuttle Pause.
         commands.Register(new Command(CutsceneKeyTransform, "Key Transform", () => shell.Keying.KeyTransform())

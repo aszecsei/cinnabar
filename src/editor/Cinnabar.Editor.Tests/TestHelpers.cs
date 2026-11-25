@@ -108,13 +108,14 @@ static class TestAssets
         uint permutations = 0,
         uint[]? size = null,
         string toolTexture = "",
+        ulong length = 0,
         Link.Cook.Hotspot[]? hotspots = null,
         string generated = "",
         string thumbnail = "",
         bool thumbnailReady = false,
         string action = "",
         Link.Cook.ActionParam[]? @params = null) =>
-        new(guid, kind, root, path, status, errors, warnings, behaviour, category, editMode, action, @params ?? [], settings ?? [], dependencies ?? [], parent, subasset, permutations, size ?? [0, 0], toolTexture, hotspots ?? [], generated, thumbnail, thumbnailReady);
+        new(guid, kind, root, path, status, errors, warnings, behaviour, category, editMode, action, @params ?? [], settings ?? [], dependencies ?? [], parent, subasset, permutations, size ?? [0, 0], length, toolTexture, hotspots ?? [], generated, thumbnail, thumbnailReady);
 }
 
 /// <summary>Editor shells over a scene file in a test's temp directory.</summary>

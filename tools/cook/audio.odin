@@ -103,6 +103,8 @@ cook_sound :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Resu
 	key = hash.fnv64a(guid[:], key)
 	buffer: [32]u8
 	output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(guid, &buffer))
+	// From the blob, whether it cooks now, was current, or failed and kept its old one.
+	defer a.length = audio_blob_length(output)
 	if cooked_key(output, .Audio, format.audio_layout()) == key && !pass.force[guid] {
 		return .Current
 	}
@@ -327,4 +329,12 @@ kaiser :: proc(x: f64) -> f64 {
 		return sum
 	}
 	return i0(AUDIO_SINC_BETA * math.sqrt(1 - x * x)) / i0(AUDIO_SINC_BETA)
+}
+
+// audio_blob_length is a cooked sound's length in ticks, rounded, from its blob's header, or 0 for a file that is not
+// one.
+audio_blob_length :: proc(path: string) -> u64 {
+	blob, _ := blob_start(path, format.Audio_Blob, .Audio, format.audio_layout())
+	rate := u64(format.AUDIO_SAMPLE_RATE)
+	return (blob.frames * format.CUTSCENE_TICKS_PER_SECOND + rate / 2) / rate
 }
