@@ -258,6 +258,32 @@ public sealed class CutsceneSubSequenceTests : IDisposable
         Assert.Null(shell.CutsceneDocuments.Find(Child));
     }
 
+    // A child that a level change lets go is no longer observed: once the parent's tab closes, the child's own tab edits
+    // without the closed editor hearing it.
+    [Fact]
+    public void AChildThatTheTabLetGoIsNoLongerObserved()
+    {
+        var (shell, editor, _) = Open();
+        using var _s = shell;
+        editor.OpenSubSequence("section:1");
+        editor.OpenInOwnTab();
+        var own = Assert.Single(shell.Cutscenes, c => c != editor);
+        var heard = 0;
+        editor.Changed += () => heard++;
+
+        editor.UpOneLevel();
+        Assert.DoesNotContain(own.Document, editor.Documents);
+        heard = 0;
+        own.Select(own.File.Tracks.Single());
+        own.EditSelected("Rename", b => b.SetName("Hits"));
+        Assert.Equal(0, heard);
+
+        shell.CloseGraph(editor, discard: true);
+        own.EditSelected("Rename", b => b.SetName("Beats"));
+        Assert.Equal(0, heard);
+        Assert.Equal("Beats", own.File.Tracks.Single().Name);
+    }
+
     [Fact]
     public void ADroppedCutsceneIsASubSequenceAndOneThatPlaysItsParentIsRefused()
     {

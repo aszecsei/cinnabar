@@ -200,7 +200,8 @@ public sealed class PreviewValues(EditorShell shell)
     /// </summary>
     public bool SetBindingPose(CutsceneEditor editor, int binding, IReadOnlyList<long> position, Quat rotation)
     {
-        if (shell.CutscenePreview.State is not CutscenePreviewState.Open { Playing: false } open || open.Editor != editor || position.Count != 3)
+        // In context, the tab shows a sub-sequence, whose binding IDs the parent's blob does not have.
+        if (shell.CutscenePreview.State is not CutscenePreviewState.Open { Playing: false } open || open.Editor != editor || editor.InContext || position.Count != 3)
         {
             return false;
         }
@@ -223,7 +224,7 @@ public sealed class PreviewValues(EditorShell shell)
     /// </summary>
     public bool SetBindingFields(CutsceneEditor editor, IReadOnlyList<(BindingFieldKey Key, SceneValue Value)> values)
     {
-        if (shell.CutscenePreview.State is not CutscenePreviewState.Open { Playing: false } open || open.Editor != editor || values.Count == 0)
+        if (shell.CutscenePreview.State is not CutscenePreviewState.Open { Playing: false } open || open.Editor != editor || editor.InContext || values.Count == 0)
         {
             return false;
         }
@@ -356,8 +357,9 @@ public sealed class PreviewValues(EditorShell shell)
                 ? live.Editor.CleanBlob is { } blob
                     && (live.Components.Keys.Any(k => shell.World.ShownPreviewOf(k.Handle) is { } s && s.Ticket == open.Ticket && s.Blob == blob)
                         || (live.HasBindingValues && _shown is { } preview && preview.Ticket == open.Ticket && preview.Blob == blob))
-                : !live.Editor.Document.IsDirty;
-            if (shown)
+                : !live.Editor.RootDocument.IsDirty;
+            // In context, the keys went to the sub-sequence, whose last edit must have cooked too.
+            if (shown && live.Editor.ShownCookedCurrent)
             {
                 Drop();
             }

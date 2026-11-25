@@ -53,6 +53,12 @@ public sealed partial class CutsceneEditor
     /// <summary>The way down to the level that the tab shows. Only <see cref="SetLevels"/> changes it.</summary>
     public CutsceneLevels Levels => _levels;
 
+    /// <summary>
+    /// Why a camera's look, pilot and values over the preview wait for the top level: the game plays the tab's own
+    /// cutscene, whose binding IDs are not the sub-sequence's.
+    /// </summary>
+    public const string InContextCameraRefusal = "The preview plays the tab's own cutscene. Go up to it to look through, pilot or preview a binding's values.";
+
     /// <summary>Whether the tab shows a sub-sequence in context, not its own cutscene.</summary>
     public bool InContext => _levels.Depth > 0;
 
@@ -290,8 +296,9 @@ public sealed partial class CutsceneEditor
         Unobserve();
         _levels = next;
         _shown = InContext ? _levelHolds[next.Path[^1].Guid].Document : RootDocument;
-        Observe();
+        // A child let go here is no longer observed, so it is let go before the documents that stay are.
         ReleaseIdle();
+        Observe();
 
         // The view of the level, and its own locks and stand-ins, since its tracks' and bindings' IDs are its own.
         var settings = _shell.CutsceneTimelineSettingsOf(ShownGuid);

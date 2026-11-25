@@ -133,7 +133,7 @@ public sealed class ViewportToolbar : StackPanel
         var look = menu.Submenu(menu.Items, () => _shell.Looks[index] switch
         {
             ViewLook.Cuts => "Look Through: Cuts",
-            ViewLook.Camera camera => $"Look Through: {camera.Owner.File.Bindings.FirstOrDefault(b => b.Id == camera.Binding)?.Name ?? "Camera"}",
+            ViewLook.Camera camera => $"Look Through: {camera.Owner.RootFile.Bindings.FirstOrDefault(b => b.Id == camera.Binding)?.Name ?? "Camera"}",
             _ => "Look Through",
         }, "Draw this view from a camera of the cutscene that holds the preview, in place of its own.");
         menu.OnOpening(() =>

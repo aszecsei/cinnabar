@@ -405,7 +405,8 @@ sealed class CutsceneTimeline : Control
         var y = row.Y;
         var locked = row.Row.TrackId is { } id && _editor.Locked.Contains(id);
         // A track that the preview does not play, as muted or not soloed, draws grey, as a locked one draws faint.
-        var silent = row.Row.TrackId is { } trackId && !_editor.Audible(trackId);
+        // Mute and solo are the tab's own cutscene's, so in context only a track that its asset mutes is silent.
+        var silent = _editor.InContext ? row.Row.AssetMuted : row.Row.TrackId is { } trackId && !_editor.Audible(trackId);
         var top = y + 3;
         var height = Layout.RowHeight - 6;
         // A camera cut track names each cut's camera past a short cut's end (see docs/editor/cutscene-editor.md#the-cut-strip).

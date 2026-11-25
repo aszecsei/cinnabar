@@ -242,16 +242,17 @@ public sealed class ViewLooks
         if (viewport.IsGame)
         {
             return _shell.CutscenePreview.State is CutscenePreviewState.Open open
-                ? (null, CutsceneTimelineLayout.ShotAt(open.Editor.File, open.Editor.Playhead, open.Editor.SilentTracks()) ?? "gameplay")
+                ? (null, CutsceneTimelineLayout.ShotAt(open.Editor.RootFile, open.Editor.RootPlayhead, open.Editor.SilentTracks()) ?? "gameplay")
                 : (null, null);
         }
         if (this[viewport.Index] is not ViewLook.Through { Shown: { Camera: true } shown } through)
         {
             return (null, null);
         }
-        var file = through.Owner.File;
+        // The game draws from the tab's own cutscene's bindings, at its playhead, whatever level the tab shows.
+        var file = through.Owner.RootFile;
         var camera = file.Bindings.FirstOrDefault(b => b.Id == (int)shown.Binding)?.Name;
-        var shot = CutsceneTimelineLayout.ShotAt(file, through.Owner.Playhead, through.Owner.SilentTracks());
+        var shot = CutsceneTimelineLayout.ShotAt(file, through.Owner.RootPlayhead, through.Owner.SilentTracks());
         double? aspect = shown.Sensor is [> 0 and var w, > 0 and var h] ? w / h : null;
         return (aspect, FrameGuides.CameraInfo(camera, shown.FocalLength > 0 ? shown.FocalLength : null, shot));
     }
@@ -289,7 +290,7 @@ public sealed class ViewLooks
         {
             return ready;
         }
-        if (PilotKeys.Refusal(camera.Owner.File, camera.Binding, camera.Owner.Locked) is { } why)
+        if ((camera.Owner.InContext ? CutsceneEditor.InContextCameraRefusal : PilotKeys.Refusal(camera.Owner.File, camera.Binding, camera.Owner.Locked)) is { } why)
         {
             return new Pilot.Refused(why);
         }
@@ -349,7 +350,7 @@ public sealed class ViewLooks
         var keys = moving.Keys;
         if (keys == null)
         {
-            var name = camera.Owner.File.Bindings.FirstOrDefault(b => b.Id == camera.Binding)?.Name ?? "Camera";
+            var name = camera.Owner.RootFile.Bindings.FirstOrDefault(b => b.Id == camera.Binding)?.Name ?? "Camera";
             keys = camera.Owner.BeginHeldDrag($"Pilot {name}");
             if (keys == null)
             {

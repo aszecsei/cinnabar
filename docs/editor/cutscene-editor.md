@@ -886,7 +886,7 @@ A shot is often a sub-sequence: a section that plays another cutscene, its child
 - **What changes.** The timeline, the curve editor, the details, the keys, the drops and the clipboard act on the child's text, as they act on the tab's own at the top level: `CutsceneEditor.Document`, `File` and `Playhead` are the shown level's. `RootDocument`, `RootFile` and `RootPlayhead` are the tab's own cutscene's, which the preview, the tab's cook, the title and the frame counter read.
 - **Locks and stand-ins** are the shown level's, in its own settings, since its tracks' and bindings' IDs are its own.
 - **Mute and solo** are the tab's own cutscene's, which the preview plays. In context they show nothing and do nothing, and the console says so. The loop, the in and out points and the play rate stay the tab's, and the timeline does not draw them in context.
-- **Up.** The breadcrumb bar shows `parent › child › …` while a child is shown. A click on a crumb goes up to it, and **Up One Level** (Backspace in the timeline) goes up one. An edit that takes a level's section away, or points it at another cutscene, as an undo or another tab's edit can, shows the deepest level that is still there.
+- **Up.** The breadcrumb bar shows `parent › child › …` while a child is shown. A click on a crumb goes up to it, and **Up One Level** (Backspace in the timeline, `Back` in `keybindings.json`) goes up one. An edit that takes a level's section away, or points it at another cutscene, as an undo or another tab's edit can, shows the deepest level that is still there.
 
 ### Time
 
@@ -917,7 +917,7 @@ A drop of a cutscene that plays the shown level, at any depth, is refused at the
 | Command | Default | What it does |
 |---|---|---|
 | Open Sub-sequence | Ctrl+Enter | Shows the selected sub-sequence's child in context. |
-| Up One Level | Backspace | Shows the cutscene that plays the shown child. |
+| Up One Level | Backspace (`Back`) | Shows the cutscene that plays the shown child. |
 | Open in Own Tab | | Opens the shown child, or the selected section's, as its own asset. |
 
 They are timeline commands, which the timeline and the curve editor have, and they are not in the ribbon.
@@ -926,4 +926,6 @@ They are timeline commands, which the timeline and the curve editor have, and th
 
 - **The parent's cook reads its children's files.** The cook daemon checks the parent against each child's saved file, so a problem that a child's unsaved edit makes or fixes in the parent shows after the child saves. The preview still plays the child's unsaved blob.
 - **Bindings that a section maps** (`bind <child> = <parent>`) show as the child's own bindings in context, which possess or spawn as at the top level. Keys go to a binding that possesses the selected entity itself.
+- **Cameras and binding values wait for the top level.** The game plays the tab's own cutscene, whose binding IDs are not the child's, so in context Look Through, the pilot, and values over the preview by a binding's ID (a spawned camera's pose and lens) are refused with a reason. Look Through Cuts follows the tab's own cut track.
+- **A child open in its own tab cooks twice,** once for each tab that holds it, as each has its own checks. The preview takes the unsaved text only of the children that its tab holds in context.
 - **The shot list and New Shot at Playhead** are not built yet.

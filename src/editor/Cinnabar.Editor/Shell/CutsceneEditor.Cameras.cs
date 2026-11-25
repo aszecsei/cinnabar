@@ -56,6 +56,11 @@ public sealed partial class CutsceneEditor
     /// </summary>
     public void ToggleLookThrough(int binding)
     {
+        if (InContext)
+        {
+            _shell.Console.Add(Model.LogLevel.Info, $"cutscene: {InContextCameraRefusal}");
+            return;
+        }
         var view = LookView;
         if (_shell.Looks[view] is ViewLook.Camera camera && camera.Owner == this && camera.Binding == binding)
         {
