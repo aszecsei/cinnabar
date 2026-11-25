@@ -1,3 +1,4 @@
+using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Protocol;
 
 namespace Cinnabar.Editor.Tests;
@@ -87,6 +88,84 @@ public sealed partial class HostLinkTests
                 Directory.Delete(folder, true);
             }
         }
+    }
+
+    // The sample's intro, its whole range, through the editor's model: 300 frames at 30 a second with a sidecar each, its
+    // sound, and with ffmpeg, an MP4 of both that is as long as the range.
+    [Fact]
+    public async Task TheSampleIntroRendersToPngAndMp4WithSound()
+    {
+        SkipWithoutTheFox();
+        var ffmpeg = Ffmpeg();
+        if (ffmpeg == null)
+        {
+            Assert.Skip("ffmpeg is not installed");
+        }
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<Welcome>();
+        var scene = AnimationSceneFile();
+        var folder = Path.Combine(Path.GetTempPath(), $"cinnabar-render-{Guid.NewGuid():N}");
+        try
+        {
+            editor.Link.Send(new SetMode(EditorMode.Edit));
+            await Load(editor, scene, guid: AnimationScene);
+            var model = new Model.RenderOutModel(m => editor.Link.Send(m));
+            var settings = new Model.RenderOutSettings(Convert.FromHexString(IntroCutscene), "intro", 0, 600000, 30, 640, 360,
+                RenderOutFormat.Png, 0, 4, folder, Model.RenderOutSettings.DefaultPattern, true, true);
+            var run = model.RunAsync(settings, this, ffmpeg, tick => new Model.RenderOutFrameTime($"{tick}", tick / 2000, "shot"));
+            while (model.State is Model.RenderOutState.Starting or Model.RenderOutState.Running or Model.RenderOutState.Cancelling)
+            {
+                model.Apply(await editor.Next<ILinkMessage>(m => m is RenderOutProgress or RenderOutFrame or RenderOutWritten or RenderOutEnded));
+            }
+            var result = await run.WaitAsync(TimeSpan.FromMinutes(2), TestContext.Current.CancellationToken);
+            Assert.True(result.Outcome == RenderOutOutcome.Done, $"{result.Outcome}: {result.Reason}");
+            Assert.Equal(300, result.Frames);
+            Assert.Equal(300, Directory.GetFiles(folder, "intro.*.png").Length);
+            Assert.Equal(300, Directory.GetFiles(folder, "intro.*.json").Length);
+            Assert.Equal(Path.Combine(folder, "intro.wav"), result.Audio);
+            // 10 s of 16-bit stereo at 48 kHz, and its header.
+            Assert.Equal(44 + 10 * 48000 * 4, new FileInfo(result.Audio!).Length);
+            Assert.Equal(Path.Combine(folder, "intro.mp4"), result.Video);
+            var probe = Probe(ffmpeg!, result.Video!);
+            Assert.Contains("codec_name=h264", probe);
+            Assert.Contains("codec_name=aac", probe);
+            var duration = double.Parse(probe.Split('\n').First(l => l.StartsWith("duration=")).Split('=')[1], System.Globalization.CultureInfo.InvariantCulture);
+            Assert.InRange(duration, 9.9, 10.1);
+            Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+            editor.Link.Send(new SetMode(EditorMode.Edit));
+            await Load(editor, scene, guid: AnimationScene);
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, true);
+            }
+        }
+    }
+
+    // ffmpeg on the PATH, or where the Windows builds install it, or null.
+    static string? Ffmpeg()
+    {
+        var names = new[] { "ffmpeg.exe", "ffmpeg" };
+        var paths = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator).Append(@"C:fmpegin");
+        return paths.SelectMany(p => names.Select(n => Path.Combine(p, n))).FirstOrDefault(File.Exists);
+    }
+
+    // What ffprobe, beside ffmpeg, says of a file's format and streams, a key=value a line.
+    static string Probe(string ffmpeg, string file)
+    {
+        var ffprobe = Path.Combine(Path.GetDirectoryName(ffmpeg)!, Path.GetFileName(ffmpeg).Replace("ffmpeg", "ffprobe"));
+        var info = new System.Diagnostics.ProcessStartInfo(ffprobe, ["-v", "error", "-show_format", "-show_streams", file])
+        {
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+        using var process = System.Diagnostics.Process.Start(info)!;
+        var text = process.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        return text.ReplaceLineEndings("\n");
     }
 
     // A host whose streamed transfers report done only 60 frames after they are, so every texture of the intro streams

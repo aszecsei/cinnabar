@@ -48,6 +48,16 @@ Output_Files :: struct {
 	written:     i32,
 	// The first frame that could not be written, from the heap, or "".
 	failure:     string,
+	// The sound, while it is written (see Wav_Output).
+	wav:         Maybe(Wav_Output),
+}
+
+// Wav_Output is a run's sound, written to a temporary file beside its name as the frames come, and given its name
+// with its header's sizes when the run closes. Its path is from the heap.
+Wav_Output :: struct {
+	file:   ^os.File,
+	path:   string,
+	frames: u32,
 }
 
 Render_In_Flight :: struct {
@@ -125,6 +135,31 @@ free_files :: proc(f: ^Output_Files) {
 	delete(f.pattern, heap)
 	delete(f.failure, heap)
 	delete(f.in_flight)
+	if w, writing := f.wav.?; writing {
+		end_wav(w, false)
+	}
+}
+
+// end_wav ends the tap and closes the sound's file, which keep gives its name to and the other deletes, and gives the
+// name written, from the heap, or "".
+@(private = "file")
+end_wav :: proc(w: Wav_Output, keep: bool) -> (path: string, reason: string) {
+	heap := runtime.heap_allocator()
+	core.audio_tap_end()
+	header := capture.wav_header(w.frames, core.AUDIO_SAMPLE_RATE, 2)
+	_, err := os.write_at(w.file, header[:], 0)
+	os.close(w.file)
+	final := strings.trim_suffix(w.path, ".tmp")
+	if keep && err == nil && os.rename(w.path, final) == nil {
+		path = strings.clone(final, heap)
+	} else {
+		os.remove(w.path)
+		if keep {
+			reason = "the sound could not be written"
+		}
+	}
+	delete(w.path, heap)
+	return
 }
 
 @(private = "file")
@@ -149,6 +184,21 @@ render_out_open :: proc(desc: core.Render_Out_Desc) -> (ok: bool, reason: string
 		return false, fmt.tprintf("cannot make %s: %v", desc.folder, err)
 	}
 	heap := runtime.heap_allocator()
+	wav: Maybe(Wav_Output)
+	if desc.audio {
+		path, _ := filepath.join({desc.folder, fmt.tprintf("%s.wav.tmp", desc.name)}, heap)
+		file, err := os.create(path)
+		header := capture.wav_header(0, core.AUDIO_SAMPLE_RATE, 2)
+		if err == nil {
+			_, err = os.write(file, header[:])
+		}
+		if err != nil {
+			delete(path, heap)
+			return false, fmt.tprintf("cannot write the sound to %s: %v", desc.folder, err)
+		}
+		core.audio_tap_begin()
+		wav = Wav_Output{file = file, path = path}
+	}
 	change_output(
 		c,
 		Output_Open {
@@ -161,6 +211,7 @@ render_out_open :: proc(desc: core.Render_Out_Desc) -> (ok: bool, reason: string
 				size = desc.size,
 				first_frame = desc.first_frame,
 				in_flight = make([dynamic]Render_In_Flight, heap),
+				wav = wav,
 			},
 		},
 	)
@@ -198,9 +249,24 @@ render_out_frame :: proc(run: u64, frame: i32, texture: gpu.Texture) -> core.Ren
 
 @(private = "file")
 render_out_audio :: proc(run: u64, frames: int) -> core.Render_Out_Answer {
-	if open_files(render_capture, run) == nil {
+	f := open_files(render_capture, run)
+	if f == nil {
 		return .Not_Open
 	}
+	w, writing := &f.wav.?
+	if !writing || frames <= 0 {
+		return .Accepted
+	}
+	samples := make([]core.Audio_Frame, frames, context.temp_allocator)
+	if !core.audio_tap_take(samples) && f.failure == "" {
+		f.failure = strings.clone("the audio backend did not mix the sound in time", runtime.heap_allocator())
+	}
+	flat := ([^]f32)(raw_data(samples))[:2 * frames]
+	bytes := capture.pcm16(flat, make([]u8, 4 * frames, context.temp_allocator))
+	if _, err := os.write(w.file, bytes); err != nil && f.failure == "" {
+		f.failure = strings.clone(fmt.tprintf("cannot write the sound: %v", err), runtime.heap_allocator())
+	}
+	w.frames += u32(frames)
 	return .Accepted
 }
 
@@ -210,6 +276,18 @@ render_out_close :: proc(run: u64, keep: bool) {
 	o, open := c.render_output.(Output_Open)
 	if !open || o.run != run {
 		return
+	}
+	// The sound is whole now: the frames that are still writing have theirs in it.
+	if w, writing := o.wav.?; writing {
+		o.wav = nil
+		path, reason := end_wav(w, keep)
+		if reason != "" && o.failure == "" {
+			o.failure = strings.clone(reason, runtime.heap_allocator())
+		}
+		if path != "" && c.editor != nil && link_linked(c.editor) {
+			link_send(c.editor, link.Render_Out_Written{ticket = run, frame = -1, ok = true, path = path})
+		}
+		delete(path, runtime.heap_allocator())
 	}
 	change_output(c, Output_Closing{files = o.files, keep = keep})
 	render_out_settle(c)

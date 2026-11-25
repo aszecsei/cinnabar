@@ -5,8 +5,10 @@ import "core:log"
 import "core:slice"
 import "core:sync"
 import "core:thread"
+import "core:time"
 
 import audio "cinnabar:core/audio"
+import audio_mixer "cinnabar:core/audio/mixer"
 
 // The device's one format, whatever the endpoint's is: 48 kHz stereo, 32-bit float (see docs/core/audio.md#format).
 AUDIO_SAMPLE_RATE :: 48000
@@ -63,6 +65,10 @@ Audio_Device :: struct {
 	thread:         ^thread.Thread,
 	// The host's. A write can come from the game, whose context holds procedures in its DLL.
 	thread_context: runtime.Context,
+	// While tapped, the host takes the queue's frames and the device plays silence (see audio_tap_begin). The mutex
+	// keeps the queue's one reader at a time across the switch.
+	tapped:         bool,
+	read_mutex:     sync.Mutex,
 }
 
 @(private)
@@ -112,6 +118,11 @@ audio_ring_skip :: proc(ring: ^Audio_Ring, count: int) -> int {
 // audio_device_take fills out for the endpoint: the queue's frames, then silence.
 @(private)
 audio_device_take :: proc(device: ^Audio_Device, out: []Audio_Frame) {
+	sync.guard(&device.read_mutex)
+	if device.tapped {
+		slice.zero(out)
+		return
+	}
 	count := audio_ring_read(&device.ring, out)
 	slice.zero(out[count:])
 	played := sync.atomic_add_explicit(&device.played, u64(count), .Relaxed) + u64(count)
@@ -123,6 +134,10 @@ audio_device_take :: proc(device: ^Audio_Device, out: []Audio_Frame) {
 // audio_device_skip drains the queue while no endpoint takes it, so that a writer keeps its pace.
 @(private)
 audio_device_skip :: proc(device: ^Audio_Device, count: int) {
+	sync.guard(&device.read_mutex)
+	if device.tapped {
+		return
+	}
 	sync.atomic_add_explicit(&device.played, u64(audio_ring_skip(&device.ring, count)), .Relaxed)
 }
 
@@ -226,4 +241,62 @@ audio_status :: proc() -> Audio_Status {
 		starved = sync.atomic_load_explicit(&device.starved, .Relaxed),
 		open = sync.atomic_load_explicit(&device.open, .Relaxed),
 	}
+}
+
+// The tap (see docs/editor/cutscene-editor.md#render-out): while a render out writes sound, the host is the queue's
+// reader in place of the device, which plays silence. The host takes exactly the frames that each frame of the run
+// covers, and waits for the backend to write them and to fill the queue to its depth again, so the backend mixes the
+// same blocks after the same game frames in every run, and the game's commands of a frame take effect at the same
+// sample.
+
+// How long a take waits for the backend to write. A backend that keeps no queue of AUDIO_TAP_DEPTH, or is stuck,
+// gives up the wait, and the take gives what came.
+AUDIO_TAP_WAIT :: time.Second
+// The queue's depth that the mixer keeps, which a take waits for the queue to reach again.
+AUDIO_TAP_DEPTH :: audio_mixer.QUEUE_TARGET
+
+// audio_tap_begin makes the host the queue's reader, and drops what is queued, which the backend mixed before.
+audio_tap_begin :: proc() {
+	device := &platform.audio
+	sync.guard(&device.read_mutex)
+	device.tapped = true
+	audio_ring_skip(&device.ring, audio_ring_queued(&device.ring))
+}
+
+// audio_tap_take fills out with the backend's next frames, and gives false when the backend did not write them in
+// AUDIO_TAP_WAIT, with what came and silence after it.
+audio_tap_take :: proc(out: []Audio_Frame) -> bool {
+	device := &platform.audio
+	start := time.tick_now()
+	taken := 0
+	ok := true
+	for taken < len(out) {
+		sync.lock(&device.read_mutex)
+		taken += audio_ring_read(&device.ring, out[taken:])
+		sync.unlock(&device.read_mutex)
+		if taken == len(out) {
+			break
+		}
+		if time.tick_since(start) > AUDIO_TAP_WAIT {
+			slice.zero(out[taken:])
+			ok = false
+			break
+		}
+		time.sleep(100 * time.Microsecond)
+	}
+	for ok && audio_ring_queued(&device.ring) < AUDIO_TAP_DEPTH {
+		if time.tick_since(start) > AUDIO_TAP_WAIT {
+			ok = false
+			break
+		}
+		time.sleep(100 * time.Microsecond)
+	}
+	return ok
+}
+
+// audio_tap_end gives the queue back to the device.
+audio_tap_end :: proc() {
+	device := &platform.audio
+	sync.guard(&device.read_mutex)
+	device.tapped = false
 }
