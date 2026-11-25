@@ -729,9 +729,15 @@ sealed class CutsceneTimeline : Control
     {
         var shell = _editor.Shell;
         var menu = new ContextMenu();
+        // The commands act while the timeline has the keyboard, which the menu's popup takes: a click gives it back first.
+        void Refocus()
+        {
+            Focus();
+            _editor.SetKeyboardPane(CutscenePane.Timeline);
+        }
         MenuBuilder.Build(menu.Items,
             [EditorCommands.CutsceneRevealClip, EditorCommands.CutsceneOpenClip, new MenuSeparator(), EditorCommands.CutsceneMatchClipLength],
-            shell.Commands, shell.KeyBindings, MenuBinding.Snapshot);
+            shell.Commands, shell.KeyBindings, MenuBinding.Snapshot, Refocus);
         menu.Open(this);
     }
 

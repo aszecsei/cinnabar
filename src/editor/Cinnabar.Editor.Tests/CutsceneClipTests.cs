@@ -196,6 +196,52 @@ public sealed class CutsceneClipTests : IDisposable
     }
 
     [Fact]
+    public void TheBlendHandlesOfTwoOverlappingSectionsSnapToTheOverlapsEndsAsACrossfade()
+    {
+        var (shell, editor, input, _) = Intro();
+        var bark = Y(input, "track:3");
+        // A hum over the bark's last 20000 ticks: the bark is from 360000 to 420000, the hum from 400000 to 520000.
+        input.DropClips([Hum], X(400000), bark);
+        var overlapped = editor.Document.Text;
+        Assert.Contains("section 14 400000 520000", overlapped);
+        Assert.Equal([(400.0, 420.0)], L.Overlaps(input.Layout.Visible(input.View, input.TimeWidth, 0, 800).First(r => r.Row.Path == "track:3").Bars));
+
+        // The bark's ease out handle, at its end, snaps to the hum's start, and the hum's ease in handle to the bark's end.
+        var top = Top(input, "track:3");
+        Drag(input, X(420000) - 1, top, X(400000) + 2);
+        Drag(input, X(400000) + 1, top, X(420000) - 3);
+        var crossfade = overlapped.Replace("""
+            		max_distance = 30
+            	section 14 400000 520000
+            		asset = $bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+            """.ReplaceLineEndings("\n"), """
+            		max_distance = 30
+            		ease_out = 20000
+            	section 14 400000 520000
+            		asset = $bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+            		ease_in = 20000
+            """.ReplaceLineEndings("\n"));
+        Assert.Equal(crossfade, editor.Document.Text);
+        Assert.Equal(["Add Section", "Set Ease", "Set Ease"], editor.Document.History);
+        shell.Commands.Get("edit.undo").Execute();
+        shell.Commands.Get("edit.undo").Execute();
+        Assert.Equal(overlapped, editor.Document.Text);
+    }
+
+    [Fact]
+    public void AClipsNameAndLengthFollowTheIndex()
+    {
+        var (shell, _, input, _) = Intro();
+        CutsceneTimelineItem Spoken() => input.Layout.Rows.SelectMany(r => r.Bars).Single(b => b.Path == "section:10");
+        Assert.Equal(("line", new CutsceneClipSpan(0, 1, false, 120000)), (Spoken().Label, Spoken().Clip));
+        // A cook that has not reached the sound yet: the section shows its ID, and then its name once the index has it.
+        shell.Assets.Apply(new AssetSnapshot([TestAssets.Make(Guid, AssetKind.Cutscene, "intro.cutscene")], []));
+        Assert.Equal(("#10", null), (Spoken().Label, Spoken().Clip));
+        shell.Assets.Apply(new AssetSnapshot([TestAssets.Make(Guid, AssetKind.Cutscene, "intro.cutscene"), TestAssets.Make(Line, AssetKind.Audio, "audio/line.wav")], []));
+        Assert.Equal(("line", null), (Spoken().Label, Spoken().Clip));
+    }
+
+    [Fact]
     public void MatchClipLengthTrimsToWhatIsLeftOfTheClipAndTheMenuShowsTheClip()
     {
         var (shell, editor, input, text) = Intro();
