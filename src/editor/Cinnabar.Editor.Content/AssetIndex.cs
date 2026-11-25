@@ -172,6 +172,12 @@ public sealed class AssetIndex
     /// </summary>
     public static string? PeaksOf(Asset asset) => asset.Peaks == "" ? null : asset.Peaks;
 
+    /// <summary>
+    /// The event handlers of a behaviour script's class, sorted by name, which the cooker reads from its source (see
+    /// docs/scripting/behaviours.md#events). Empty for a script that defines none, and for another kind.
+    /// </summary>
+    public static IReadOnlyList<BehaviourHandler> HandlersOf(Asset asset) => asset.Handlers;
+
     /// <summary>The import settings that an asset's kind takes.</summary>
     public IReadOnlyList<SettingInfo> SettingsOf(AssetKind kind) => _importers.Find(i => i.Kind == kind)?.Settings ?? [];
 

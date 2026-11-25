@@ -183,6 +183,24 @@ public sealed class CookLinkTests : IDisposable
         Assert.Null(AssetIndex.PeaksOf(index.Assets.Values.First(a => a.Kind == AssetKind.Script)));
     }
 
+    // The cooker reads a behaviour's handlers from its source (see docs/scripting/behaviours.md#events), and the editor gets
+    // them through the index, with their lines and their parameters' kinds.
+    [Fact]
+    public async Task TheIndexCarriesABehavioursEventHandlers()
+    {
+        Write("scripts/gate.luau", "local Gate = Behaviour.define('Gate', {})\n\nfunction Gate:on_open(by: Entity, why)\nend\nfunction Gate:on_enable() end\nreturn Gate");
+        var index = new AssetIndex();
+        using var session = Start(index);
+        var output = new List<string>();
+        session.Output += line => { lock (output) { output.Add(line); } };
+        await Until(() => session.Linked && index.Assets.Values.Any(a => a.Path == "scripts/gate.luau" && a.Behaviour == "Gate"), session, output);
+
+        var handler = Assert.Single(AssetIndex.HandlersOf(index.Assets.Values.Single(a => a.Path == "scripts/gate.luau")));
+        Assert.Equal(("open", 3u), (handler.Name, handler.Line));
+        Assert.Equal([new HandlerParam("by", HandlerParamKind.Entity), new HandlerParam("why", HandlerParamKind.Untyped)], handler.Params);
+        Assert.Empty(AssetIndex.HandlersOf(index.Assets.Values.Single(a => a.Path == "scripts/door.luau")));
+    }
+
     [Fact]
     public async Task SettingsOfTwoAssetsMakeOnePass()
     {

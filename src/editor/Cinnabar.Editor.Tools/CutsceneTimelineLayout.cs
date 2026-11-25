@@ -47,6 +47,12 @@ public sealed record CutsceneTimelineItem(CutsceneItemKind Kind, int Start, int 
     /// <summary>An animation section's clip events, from its binding's graph, in the clip's ticks.</summary>
     public IReadOnlyList<CutsceneClipEvent> Events { get; init; } = [];
 
+    /// <summary>
+    /// A trigger's or a range's warning, when no behaviour that its track sends to handles its name (see
+    /// docs/editor/cutscene-editor.md#events), or null.
+    /// </summary>
+    public string? Warning { get; init; }
+
     /// <summary>The time that the bar draws over: its span, and the faded parts of its clip before and after it.</summary>
     public (double Start, double End) Reach => Clip is { } clip && CutsceneTimelineLayout.Hints(Start, End, clip) is var hints
         ? (hints.HeadStart ?? Start, hints.TailEnd ?? End)
@@ -304,9 +310,9 @@ public sealed class CutsceneTimelineLayout
     /// </summary>
     public static CutsceneTimelineLayout Build(CutsceneFile file, IReadOnlySet<string> toggled, CutsceneRowFilter? filter = null,
         Func<CutsceneBlock, CutsceneBindingInfo?>? bindingInfo = null, Func<string, CutsceneClipInfo?>? clipInfo = null,
-        Func<CutsceneBlock, string, IReadOnlyList<CutsceneClipEvent>>? clipEvents = null)
+        Func<CutsceneBlock, string, IReadOnlyList<CutsceneClipEvent>>? clipEvents = null, Func<CutsceneBlock, string?>? eventWarning = null)
     {
-        var sources = new ClipSources(clipInfo, clipEvents);
+        var sources = new ClipSources(clipInfo, clipEvents, eventWarning);
         filter ??= CutsceneRowFilter.None;
         var rows = new List<CutsceneTimelineRow>();
         var bindingIds = file.Bindings.Select(b => b.Id).OfType<int>().ToHashSet();
@@ -373,7 +379,8 @@ public sealed class CutsceneTimelineLayout
     static string TrackLabel(CutsceneBlock track) => string.IsNullOrEmpty(track.Name) ? track.TrackKind ?? "track" : track.Name;
 
     // What the editor tells a build of the clips under sections.
-    sealed record ClipSources(Func<string, CutsceneClipInfo?>? Info, Func<CutsceneBlock, string, IReadOnlyList<CutsceneClipEvent>>? Events);
+    sealed record ClipSources(Func<string, CutsceneClipInfo?>? Info, Func<CutsceneBlock, string, IReadOnlyList<CutsceneClipEvent>>? Events,
+        Func<CutsceneBlock, string?>? EventWarning);
 
     static void AddTrack(List<CutsceneTimelineRow> rows, CutsceneFile file, CutsceneBlock track, int depth, IReadOnlySet<string> toggled,
         ClipSources sources)
@@ -419,10 +426,10 @@ public sealed class CutsceneTimelineLayout
                     break;
                 }
                 case { Kind: CutsceneBlockKind.Range, Start: { } s, End: { } e }:
-                    row.Bars.Add(new CutsceneTimelineItem(CutsceneItemKind.Range, s, e, CutsceneFile.PathOf(child)));
+                    row.Bars.Add(new CutsceneTimelineItem(CutsceneItemKind.Range, s, e, CutsceneFile.PathOf(child)) { Warning = sources.EventWarning?.Invoke(child) });
                     break;
                 case { Kind: CutsceneBlockKind.Trigger, Start: { } t }:
-                    row.Points.Add(new CutsceneTimelineItem(CutsceneItemKind.Trigger, t, t, CutsceneFile.PathOf(child)));
+                    row.Points.Add(new CutsceneTimelineItem(CutsceneItemKind.Trigger, t, t, CutsceneFile.PathOf(child)) { Warning = sources.EventWarning?.Invoke(child) });
                     break;
             }
         }

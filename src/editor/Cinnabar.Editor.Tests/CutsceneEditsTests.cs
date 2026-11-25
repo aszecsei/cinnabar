@@ -56,6 +56,45 @@ public sealed class CutsceneEditsTests
         return text;
     }
 
+    // An event goes on the target's event track in time order, or on a new one after the binding's tracks, and not on a
+    // locked track (see docs/editor/cutscene-editor.md#events).
+    [Fact]
+    public void AnEventGoesOnItsTargetsEventTrackInTimeOrder()
+    {
+        var file = Parse();
+        Assert.Equal("trigger:2", CutsceneEdits.AddEvent(file, file.Find("track:5"), 120000, "gate"));
+        Assert.Equal(With(("\ttrigger 1 300000 seen\n", "\ttrigger 2 120000 gate\n\ttrigger 1 300000 seen\n")), file.Text);
+
+        // The fox has no event track yet, so it gets one, after its tracks; and the time stays inside the length.
+        file = Parse();
+        Assert.Equal("trigger:2", CutsceneEdits.AddEvent(file, file.Find("binding:1"), 900000, "bark"));
+        Assert.Equal(With(("track 3 audio", "track 6 event \"Events\"\n\tbinding = 1\n\ttrigger 2 600000 bark\ntrack 3 audio")), file.Text);
+
+        file = Parse();
+        Assert.Null(CutsceneEdits.AddEvent(file, file.Find("track:5"), 0, "gate", new HashSet<int> { 5 }));
+        Assert.Equal(Text.ReplaceLineEndings("\n"), file.Text);
+    }
+
+    // An event's values keep their lines and comments, and the extra ones go.
+    [Fact]
+    public void AnEventsValuesKeepTheirLines()
+    {
+        var file = CutsceneFile.Parse(With(("\ttrigger 1 300000 seen\n", "\ttrigger 1 300000 seen\n\t\tvalue = number 1\n\t\t# The gate.\n\t\tvalue = entity 1\n\t\tfire_on_seek = true\n"))).File!;
+        var trigger = file.Find("trigger:1")!;
+        Assert.Equal(["number 1", "entity 1"], trigger.Values);
+
+        trigger.SetValues(["number 2", "entity 1", "bool true"]);
+        Assert.Equal(With(("\ttrigger 1 300000 seen\n", "\ttrigger 1 300000 seen\n\t\tvalue = number 2\n\t\t# The gate.\n\t\tvalue = entity 1\n\t\tvalue = bool true\n\t\tfire_on_seek = true\n")), file.Text);
+        trigger.SetValues(["number 2"]);
+        Assert.Equal(With(("\ttrigger 1 300000 seen\n", "\ttrigger 1 300000 seen\n\t\tvalue = number 2\n\t\t# The gate.\n\t\tfire_on_seek = true\n")), file.Text);
+        trigger.SetName("gate_open");
+        Assert.Equal("gate_open", trigger.Name);
+        Assert.Equal(new CutsceneEventValue(CutsceneValueKind.String, "a \"b\""), CutsceneEventValue.Parse("string \"a \\\"b\\\"\""));
+        Assert.Null(CutsceneEventValue.Parse("colour red"));
+        Assert.Equal("three numbers, such as [0, 1, 0]", CutsceneEventValue.Problem(CutsceneValueKind.Vector, "[0, 1]"));
+        Assert.Null(CutsceneEventValue.Problem(CutsceneValueKind.Vector, "[0, 1.5, -2]"));
+    }
+
     [Fact]
     public void AMoveKeepsTheTracksSectionsInOrderWithTheirComments()
     {

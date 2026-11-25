@@ -98,6 +98,8 @@ public sealed partial class CutsceneEditor
         EditorCommands.CutsceneRevealClip => new(RevealClip, () => SelectedClip != null),
         EditorCommands.CutsceneOpenClip => new(OpenClip, () => SelectedClip != null),
         EditorCommands.CutsceneMatchClipLength => new(MatchClipLength, () => CanMatchClipLength),
+        EditorCommands.CutsceneAddEvent => new(AddEvent, () => !Document.InTransaction),
+        EditorCommands.CutsceneJumpToHandler => new(JumpToHandler, () => JumpToHandlerRefusal() == null),
         _ => null,
     };
 

@@ -16,7 +16,7 @@ import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/wire"
 
 // Change it to drop every saved index, when what a pass learns of an asset changes.
-SAVED_INDEX_VERSION :: 4
+SAVED_INDEX_VERSION :: 5
 SAVED_INDEX_FILE :: ".index"
 
 // Saved_Source is what a pass learnt of one source, a file of the content or a stage's generated text, which the next
@@ -40,6 +40,7 @@ Saved_Source :: struct {
 	edit_mode:    bool,
 	action:       string,
 	params:       []cook_link.Action_Param,
+	handlers:     []cook_link.Behaviour_Handler,
 	subassets:    []Subasset,
 	permutations: int,
 	size:         [2]u32,
@@ -129,6 +130,7 @@ index_keep_sources :: proc(index: ^Index, pass: Pass) {
 			edit_mode    = a.edit_mode,
 			action       = strings.clone(a.action, allocator),
 			params       = clone_params(a.params, allocator),
+			handlers     = clone_handlers(a.handlers, allocator),
 			subassets    = subassets,
 			permutations = a.permutations,
 			size         = a.size,

@@ -115,8 +115,9 @@ static class TestAssets
         bool thumbnailReady = false,
         string peaks = "",
         string action = "",
-        Link.Cook.ActionParam[]? @params = null) =>
-        new(guid, kind, root, path, status, errors, warnings, behaviour, category, editMode, action, @params ?? [], settings ?? [], dependencies ?? [], parent, subasset, permutations, size ?? [0, 0], length, toolTexture, hotspots ?? [], generated, thumbnail, thumbnailReady, peaks);
+        Link.Cook.ActionParam[]? @params = null,
+        Link.Cook.BehaviourHandler[]? handlers = null) =>
+        new(guid, kind, root, path, status, errors, warnings, behaviour, category, editMode, action, @params ?? [], handlers ?? [], settings ?? [], dependencies ?? [], parent, subasset, permutations, size ?? [0, 0], length, toolTexture, hotspots ?? [], generated, thumbnail, thumbnailReady, peaks);
 }
 
 /// <summary>Editor shells over a scene file in a test's temp directory.</summary>

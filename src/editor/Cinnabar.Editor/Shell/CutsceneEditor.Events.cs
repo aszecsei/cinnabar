@@ -4,7 +4,7 @@ using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Shell;
 
-// An animation section's clip events (see docs/editor/cutscene-editor.md#events): the markers that its binding's
+// An animation section's clip events (see docs/editor/cutscene-editor.md#clip-events): the markers that its binding's
 // Animator's graph gives the clip, which the runtime raises as the section plays it.
 public sealed partial class CutsceneEditor
 {

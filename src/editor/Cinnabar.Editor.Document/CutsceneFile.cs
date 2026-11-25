@@ -161,6 +161,13 @@ public sealed class CutsceneBlock : FieldBlock
             case CutsceneBlockKind.Marker when words.Length >= 2:
                 SetHead($"marker {words[0]} {words[1]} {TextQuote.Quote(name)}");
                 break;
+            // An event's name is a bare word, which IsEventName checks.
+            case CutsceneBlockKind.Trigger when words.Length >= 2:
+                SetHead($"trigger {words[0]} {words[1]} {name}");
+                break;
+            case CutsceneBlockKind.Range when words.Length >= 3:
+                SetHead($"range {words[0]} {words[1]} {words[2]} {name}");
+                break;
             default:
                 throw new InvalidOperationException($"a {Kind} has no name to set");
         }
@@ -223,6 +230,45 @@ public sealed class CutsceneBlock : FieldBlock
             throw new InvalidOperationException($"a {Kind} has no interpolation to set");
         }
         SetHead($"key {words[0]} {words[1]} {interpolation.Trim()}");
+    }
+
+    /// <summary>Whether a name is one that an event can have: letters, digits and <c>_</c>, as the cooker takes it.</summary>
+    public static bool IsEventName(string name) => name.Length > 0 && name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
+
+    /// <summary>
+    /// A trigger's or a range's <c>value</c> lines, in order, as the file writes them after <c>value =</c>, such as
+    /// <c>entity 1</c>. Empty for another block.
+    /// </summary>
+    public IReadOnlyList<string> Values =>
+        Kind is CutsceneBlockKind.Trigger or CutsceneBlockKind.Range ? [.. FieldLines.Where(l => l.Key == "value").Select(l => l.Value)] : [];
+
+    /// <summary>
+    /// Sets a trigger's or a range's values, in order: the lines that it has keep their places and comments, the extra
+    /// ones go, and new ones go after the last value, or after the last setting.
+    /// </summary>
+    public void SetValues(IReadOnlyList<string> values)
+    {
+        if (Kind is not (CutsceneBlockKind.Trigger or CutsceneBlockKind.Range))
+        {
+            throw new InvalidOperationException($"a {Kind} has no values to set");
+        }
+        var lines = FieldLines.Where(l => l.Key == "value").ToList();
+        for (var i = 0; i < Math.Min(lines.Count, values.Count); i++)
+        {
+            lines[i].SetValue(values[i].ReplaceLineEndings(" "));
+        }
+        foreach (var extra in lines.Skip(values.Count))
+        {
+            Lines.Remove(extra);
+        }
+        var fields = FieldLines.ToList();
+        var at = lines.Count > 0 && lines.Count <= values.Count ? Lines.IndexOf(lines[^1]) + 1
+            : fields.Count > 0 ? Lines.IndexOf(fields[^1]) + 1
+            : Head is { } head ? Lines.IndexOf(head) + 1 : Lines.Count;
+        foreach (var value in values.Skip(lines.Count))
+        {
+            Lines.Insert(at++, new TextLine($"{NewLineIndent}value = {value.ReplaceLineEndings(" ")}", "", Head?.HashInWord ?? false));
+        }
     }
 
     void SetHead(string code)

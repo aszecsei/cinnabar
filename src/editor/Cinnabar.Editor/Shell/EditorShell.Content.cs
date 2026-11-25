@@ -111,6 +111,11 @@ public sealed partial class EditorShell
     /// </summary>
     public void OpenScript(string path, uint line = 0)
     {
+        if (ScriptOpener is { } opener)
+        {
+            opener(path, line);
+            return;
+        }
         var command = Settings.ScriptEditor();
         var args = command.Select(a => a.Replace("{file}", path).Replace("{line}", Math.Max(line, 1).ToString())).ToList();
         try
@@ -124,6 +129,9 @@ public sealed partial class EditorShell
             Console.Add(LogLevel.Warning, $"content: cannot run {string.Join(' ', args)}: {e.Message}");
         }
     }
+
+    // In place of the script editor, for tests: what OpenScript would open, and at which line.
+    internal Action<string, uint>? ScriptOpener { get; set; }
 
     /// <summary>Shows a file in Explorer, selected.</summary>
     public void ShowInExplorer(string path)

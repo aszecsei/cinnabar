@@ -2,9 +2,9 @@
 
 The cutscene editor edits a cutscene (see [Content: Cutscenes](../content/kinds/cutscenes.md)), which the game plays as [Cinematics](../cinematics/README.md) describes. Each open one is a tab, a `GraphEditorDocument` with the ID `cutscene.{guid}`, over a `CutsceneEditor` in the shell, which holds its state. Docking can rebuild the view, and tests drive the editor without a window.
 
-The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, the bindings, the cameras with their lenses and focus, and the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)): names, loops, eases, drops, the section menu, sounds' waveforms and clips' events. Pose thumbnails wait for render out ([#559](https://github.com/aszecsei/cinnabar/issues/559)).
+The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, keys from the inspector and the viewport, the curve editor, the bindings, the cameras with their lenses and focus, and the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)): names, loops, eases, drops, the section menu, sounds' waveforms and clips' events. Pose thumbnails wait for render out ([#559](https://github.com/aszecsei/cinnabar/issues/559)). Event keys ([#558](https://github.com/aszecsei/cinnabar/issues/558)) take their names from the bound behaviours' handlers, with typed payloads and Jump to Handler. Their flags with names and their flashes in the preview are not built yet.
 
-**In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Sections](#sections) · [Preview](#preview) · [Keying](#keying) · [Bindings](#bindings) · [Curves](#curves) · [Cameras](#cameras)
+**In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Sections](#sections) · [Preview](#preview) · [Keying](#keying) · [Bindings](#bindings) · [Curves](#curves) · [Cameras](#cameras) · [Events](#events)
 
 ## The file
 
@@ -231,6 +231,8 @@ Each action is a command, so it is in the command palette, and `keybindings.json
 | Reveal in Content Browser | `cutscene.revealClip` | None |
 | Open Clip | `cutscene.openClip` | None |
 | Match Clip Length | `cutscene.matchClipLength` | None |
+| Add Event | `cutscene.addEvent` | E |
+| Jump to Handler | `cutscene.jumpToHandler` | None |
 
 ### Cost
 
@@ -282,7 +284,7 @@ An audio section draws its sound's waveform over its bar, so a designer can cut 
 - **The gain.** A column is scaled by the track's `gain`, the section's `weight` and its `gain` channel there, and clamped to the bar. The curve is read every 8 pixels, with straight lines between. The eases are not in it, as their ramps draw over the bar.
 - **Pitch.** A section with a `pitch` channel has no waveform, as it has no loops: its place in the sound is the integral of its pitch.
 
-### Events
+### Clip events
 
 An animation section shows its clip's events as ticks along the bottom of its bar. A hover over one, in the bar's bottom 6 pixels, names it with its arguments, as the graph writes them. A press there is still on the section.
 - **Where they come from.** The runtime raises the markers of the graph of the binding's `Animator` (see [Cinematics: Tracks](../cinematics/tracks.md#animation-tracks)), so the events are that graph's, for the section's clip. The graph is a possessed entity's `Animator.graph` in its open scene, a spawned prefab's root's, or a slot's stand-in's. A binding with no `Animator`, a graph that is not there, and a scene that is not open show none.
@@ -817,3 +819,41 @@ While a cutscene's preview is open, the helpers draw each camera's frustum in a 
 - **The frustums are the same in every view.** The helpers' lines are shared by the scene views, so a camera that any view looks through has no frustum in the others either.
 - **No cut or pose thumbnails yet.** A cut's hover shows its camera and its times, not a picture of its first frame, and an animation section shows no pose. Both wait for render out ([#559](https://github.com/aszecsei/cinnabar/issues/559)), which makes the preview's renders.
 - **A preview value keys at the preview's time.** Past the range's end, the preview stands at the end, so Enter keys a held lens value there.
+
+## Events
+
+An event track's triggers and ranges call script handlers at times in the cutscene (see [Cinematics: Event tracks](../cinematics/tracks.md#event-tracks)). The editor offers the names of handlers that exist, gives typed rows for an event's values, and opens a handler's script. A designer never types a handler's name, though a typed name is allowed.
+
+### Handlers
+
+- **From the cooker.** The cooker reads each script's source as it finds its requires, on every pass. It records each `function C:on_<name>(...)` and `function C.on_<name>(self, ...)` of the local `C` that `Behaviour.define` returns. It records the name without `on_`, the line, and each parameter after `self` with the kind that its annotation gives. The lifecycle methods `on_enable`, `on_disable`, `on_destroy` and `on_reload` are not events. The index carries the list (`cook_link.Asset.handlers`, `AssetIndex.HandlersOf`), so the editor parses no Luau.
+- **Kinds.** `number`, `boolean`, `string`, `vector`, `Entity`, `WorldPosition` and `Asset` are the value kinds number, bool, string, vector, entity, position and asset. An optional type is its type's kind. Any other type, or none, takes any kind.
+- **Limits.** A function assigned as a value (`C.on_x = f`) and a mixin from a `require` are not seen. A native handler that the game registers (`register_event_handler`) is not in the list.
+
+### Names
+
+- **The list.** A trigger's or a range's details show its name, and beside it the list of the events that its track sends to (`CutsceneEditor.HandlerChoices`):
+  - on a track with a binding, the handlers of the behaviours of the binding's entity: a possessed entity's in its open scene, a spawned prefab's root's, or a slot's stand-in's;
+  - on a track without one, every behaviour script's, each with its class.
+- **Ranges.** A range sends `on_<name>_begin` and `on_<name>_end`, so its list has each name that has one of the two. Its rows come from the begin's parameters, or without a begin, from the end's.
+- **A typed name** must be letters, digits and `_`, as the cooker takes it. Each rename is one undo entry.
+- **The warning.** When the list is known and has no handler for the name, the details say so, the event's diamond or bar has an amber outline, and a hover shows the warning. A native handler can still take the event, so it is a warning, not a problem, and the cooker takes the name. There is no warning while the list is not known: the binding's entity is in no open scene, is gone, or is a slot without a stand-in, or a script is not in the index yet.
+
+### Payloads
+
+An event sends up to four values, in order (`value = <kind> <value>` lines).
+- **With a handler,** each of its parameters is a row, with the parameter's name. A typed parameter's row edits a value of its kind: a box for a number, a string, a vector or a position, a check box for a bool, a list of the cutscene's bindings for an entity, and a box for an asset's GUID. An untyped parameter's row has a list of the kinds as well. A value of another kind than its parameter takes shows a warning.
+- **A value past the last one** fills the values before it with their parameters' defaults, so each value lands at its parameter.
+- **Without a handler,** or past its parameters, each value is a row with its kind, and **Add Value** adds one.
+- The × removes a value, and the later ones move up. Each change is one undo entry. A value line keeps its place and its comment.
+
+### Flags and commands
+
+- **Fire when skipped** and **Fire on seek** are check boxes for `fire_when_skipped` and `fire_on_seek`.
+- **Add Event** (E in the timeline) adds a trigger at the playhead and selects it. It goes on the selected event track, or on the first event track of the selected binding or of the selected track's binding, which it adds, named Events, after the binding's tracks when there is none. With nothing selected, it goes on the first event track of no binding. Its name is the first in its list, or `event`. A locked track takes nothing.
+- **Jump to Handler** opens the handler's script at its line, in the script editor that the settings name, as the content browser opens scripts. With several behaviours that handle the name, it opens the first in the list's order.
+
+### Limits
+
+- **Event keys draw as diamonds and bars,** with no flags or names, and keys close together merge as other keys do. Flags with their names, counted badges and their hover lists, and the flash and log of each event fired while Events in Preview is on, come in a later change.
+- **The list is read when the rows are built.** A script that the daemon cooks again changes the list at the next build.

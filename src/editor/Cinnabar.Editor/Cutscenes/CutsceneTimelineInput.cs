@@ -97,7 +97,7 @@ public sealed class CutsceneTimelineInput
         {
             return null;
         }
-        // A clip's event under the pointer names itself, over the section's bar (see docs/editor/cutscene-editor.md#events).
+        // A clip's event under the pointer names itself, over the section's bar (see docs/editor/cutscene-editor.md#clip-events).
         if (Layout.EventsAt(_pointer.X, _pointer.Y, View, ScrollY, TimeWidth) is { } events)
         {
             return string.Join(" · ", events);
@@ -107,6 +107,9 @@ public sealed class CutsceneTimelineInput
             { Kind: CutsceneHitKind.Header, Row.Binding: { State: not CutsceneBindingState.Bound, Reason: { } reason } } => reason,
             { Kind: CutsceneHitKind.Body or CutsceneHitKind.StartEdge or CutsceneHitKind.EndEdge, Row: { Kind: CutsceneRowKind.Track, TrackKind: "camera_cut" } row, Paths: [var path, ..] }
                 => row.Bars.FirstOrDefault(b => b.Path == path) is { } cut ? CutTip(cut, _editor.File.Rate) : null,
+            // An event whose name no behaviour handles says so (see docs/editor/cutscene-editor.md#events).
+            { Row: { Kind: CutsceneRowKind.Track, TrackKind: "event" } row, Paths: var paths }
+                => row.Bars.Concat(row.Points).FirstOrDefault(i => paths.Contains(i.Path) && i.Warning != null)?.Warning,
             _ => null,
         };
     }

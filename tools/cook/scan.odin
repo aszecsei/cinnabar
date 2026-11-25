@@ -380,6 +380,7 @@ carry_source :: proc(a: ^Asset_Source, saved: Saved_Source) -> bool {
 	a.edit_mode = saved.edit_mode
 	a.action = saved.action
 	a.params = saved.params
+	a.handlers = saved.handlers
 	a.permutations = saved.permutations
 	a.size = saved.size
 	a.tool_texture = saved.tool_texture
