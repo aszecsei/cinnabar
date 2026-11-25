@@ -149,7 +149,7 @@ public sealed partial class HostLinkTests
     static string? Ffmpeg()
     {
         var names = new[] { "ffmpeg.exe", "ffmpeg" };
-        var paths = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator).Append(@"C:fmpegin");
+        var paths = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator).Append(@"C:\ffmpeg\bin");
         return paths.SelectMany(p => names.Select(n => Path.Combine(p, n))).FirstOrDefault(File.Exists);
     }
 
