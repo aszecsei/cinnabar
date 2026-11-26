@@ -8,9 +8,9 @@ namespace Cinnabar.Editor.Shell;
 
 /// <summary>
 /// What the cut set knows of a cut target (see docs/editor/mesh-editing.md#cut-meshes). A target that it has no state
-/// for is Uncut. Each state that names a result has its GUID, which the target's <c>Mesh_Renderer</c> names.
+/// for is Uncut. A state that names a result has its GUID, which the target's <c>Mesh_Renderer</c> names.
 /// </summary>
-public abstract record CutState(string Result)
+public abstract record CutState(string? Result)
 {
     /// <summary>The first cut named a new result, which is not derived yet. Its document holds the source until it is.</summary>
     public sealed record Made(string Result) : CutState(Result);
@@ -18,8 +18,11 @@ public abstract record CutState(string Result)
     /// <summary>The result is derived from the inputs of the hash.</summary>
     public sealed record Cut(string Result, string Hash) : CutState(Result);
 
-    /// <summary>The inputs of the hash cannot be cut, for the reason. The result keeps the last good cut.</summary>
-    public sealed record Refused(string Result, string Hash, string Reason) : CutState(Result);
+    /// <summary>
+    /// The inputs of the hash cannot be cut, for the reason. The result keeps the last good cut, or the source when there
+    /// was none. A first cut that is refused before it names a result, for a ninth material, has none.
+    /// </summary>
+    public sealed record Refused(string? Result, string Hash, string Reason) : CutState(Result);
 }
 
 /// <summary>
@@ -30,12 +33,6 @@ public abstract record CutState(string Result)
 /// </summary>
 public sealed class CutSet
 {
-    enum Check
-    {
-        // The scene opened, and its results have not been compared with the inputs yet.
-        Unchecked,
-        Checked,
-    }
 
     enum Flush
     {
@@ -48,7 +45,6 @@ public sealed class CutSet
     {
         public readonly Action<IReadOnlyList<Operation>> Applied = applied;
         public readonly Dictionary<ulong, CutState> Targets = [];
-        public Check Check = Check.Unchecked;
         public Flush Flush = Flush.Idle;
     }
 
@@ -104,7 +100,7 @@ public sealed class CutSet
         document.Applied -= cuts.Applied;
         foreach (var state in cuts.Targets.Values)
         {
-            _shell.Mesh.CloseMesh(state.Result);
+            Close(state.Result);
         }
         if (cuts.Targets.Values.Any(s => s is CutState.Refused))
         {
@@ -138,8 +134,8 @@ public sealed class CutSet
 
     /// <summary>
     /// Compares every open scene's cuts with their inputs, once its inputs are in the index: at its open, and when
-    /// files change. A result that its inputs no longer give changes the scene, in an entry of its own, "Update Cuts",
-    /// with a line in the console. A result that they give, and whose file is there, is kept as it is.
+    /// files change. Fields that the inputs no longer give change the scene, in an entry of its own, "Update Cuts", with
+    /// a line in the console. Then each result is derived, and one that its file already holds is left to the file.
     /// </summary>
     internal void Reconcile()
     {
@@ -149,22 +145,7 @@ public sealed class CutSet
             {
                 continue;
             }
-            if (cuts.Check == Check.Unchecked)
-            {
-                // At the open, a result whose file the inputs gave is kept, without a cut.
-                foreach (var inputs in plan)
-                {
-                    var e = inputs.Target;
-                    var hash = inputs.Hash();
-                    if (inputs.Cutters.Count > 0 && MeshCutters.SourceOf(e) != null && MeshCutters.RendererMesh(e) is { } result
-                        && hash == MeshCutters.HashOf(e) && OnDisk(result) != null)
-                    {
-                        Change(cuts, e, new CutState.Cut(result, hash));
-                    }
-                }
-                cuts.Check = Check.Checked;
-            }
-            var stale = plan.Select(inputs => (inputs.Target, Ops: FieldOperations(document, cuts, inputs))).Where(s => s.Ops.Count > 0).ToList();
+            var stale = TargetOperations(document, cuts, plan).Where(s => s.Ops.Count > 0).ToList();
             foreach (var (target, _) in stale)
             {
                 _shell.Console.Add(LogLevel.Warning, $"cut: {Label(target)}: the cut is out of date, so the scene changes to cut it again");
@@ -175,7 +156,6 @@ public sealed class CutSet
             }
         }
     }
-
     // A step of an edit, an undo, a redo or a cancel changed the scene. A drag's steps derive once a frame.
     void Applied(SceneDocument document)
     {
@@ -203,12 +183,37 @@ public sealed class CutSet
 
     // The fields that the scene's edit derives, which join its entry: see SceneDocument.Derive.
     List<Operation> FieldOperations(SceneDocument document, SceneCuts cuts) =>
-        Plan(document) is { } plan ? [.. plan.SelectMany(inputs => FieldOperations(document, cuts, inputs))] : [];
+        Plan(document) is { } plan ? [.. TargetOperations(document, cuts, plan).SelectMany(t => t.Ops)] : [];
+
+    // Each target's field operations, in the scene's order. A result belongs to one target: a target whose result
+    // another one owns, as a duplicated wall's does, cuts as for the first time, with a result of its own.
+    List<(SceneEntity Target, List<Operation> Ops)> TargetOperations(SceneDocument document, SceneCuts cuts, IReadOnlyList<CutInputs> plan)
+    {
+        var claimed = new HashSet<string>();
+        var result = new List<(SceneEntity, List<Operation>)>();
+        foreach (var inputs in plan)
+        {
+            var own = ResultOf(inputs.Target) is { } r && !OwnedElsewhere(document, inputs.Target.Id, r) && claimed.Add(r);
+            result.Add((inputs.Target, FieldOperations(document, cuts, inputs, own)));
+        }
+        return result;
+    }
+
+    // Whether a target of another scene, or another target of this one, has the result.
+    bool OwnedElsewhere(SceneDocument document, ulong id, string result) =>
+        _scenes.Any(s => s.Value.Targets.Any(t => t.Value.Result == result && (s.Key != document || t.Key != id)));
+
+    /// <summary>
+    /// The result that a cut target's fields name: what its <c>Mesh_Renderer</c> names while its <c>Cut_Target</c> has a
+    /// source that differs from it. Null for a target that its fields do not say is cut.
+    /// </summary>
+    static string? ResultOf(SceneEntity target) =>
+        MeshCutters.SourceOf(target) is { } source && MeshCutters.RendererMesh(target) is { } mesh && mesh != source ? mesh : null;
 
     // The fields of a target that differ from what its inputs give: its source, the mesh that its renderer names, the
     // hash and its cap slots' materials. A first cut makes a new result, and a target that nothing cuts goes back to its
     // source.
-    List<Operation> FieldOperations(SceneDocument document, SceneCuts cuts, CutInputs inputs)
+    List<Operation> FieldOperations(SceneDocument document, SceneCuts cuts, CutInputs inputs, bool owned)
     {
         var e = inputs.Target;
         var ops = new List<Operation>();
@@ -217,7 +222,6 @@ public sealed class CutSet
             return ops;
         }
         var source = MeshCutters.SourceOf(e);
-        var mesh = MeshCutters.RendererMesh(e);
         if (inputs.Cutters.Count == 0)
         {
             if (source != null)
@@ -236,7 +240,7 @@ public sealed class CutSet
             // A refusal keeps the last good cut, and Derive says why.
             return ops;
         }
-        if (source == null || mesh == null || mesh == source)
+        if (!owned)
         {
             var result = Convert.ToHexStringLower(Guid.NewGuid().ToByteArray());
             Make(document, cuts, inputs, result);
@@ -264,9 +268,9 @@ public sealed class CutSet
     // A first cut's result: a document of the source's mesh, which the host draws from the start, until the derive.
     void Make(SceneDocument document, SceneCuts cuts, CutInputs inputs, string result)
     {
-        if (cuts.Targets.GetValueOrDefault(inputs.Target.Id) is { } old)
+        if (cuts.Targets.GetValueOrDefault(inputs.Target.Id) is { } old && !OwnedElsewhere(document, inputs.Target.Id, old.Result ?? ""))
         {
-            _shell.Mesh.CloseMesh(old.Result);
+            Close(old.Result);
         }
         _shell.Mesh.Meshes.Add(new MeshDocument(ResultPath(document, inputs.Target, result), result, inputs.SourceMesh, saved: false));
         Change(cuts, inputs.Target, new CutState.Made(result));
@@ -276,13 +280,20 @@ public sealed class CutSet
     void Update(SceneDocument document, SceneCuts cuts, CutInputs inputs)
     {
         var e = inputs.Target;
-        if (inputs.Cutters.Count == 0 || MeshCutters.SourceOf(e) == null || MeshCutters.RendererMesh(e) is not { } result)
+        var hash = inputs.Hash();
+        var state = cuts.Targets.GetValueOrDefault(e.Id);
+        if (inputs.Cutters.Count == 0 || ResultOf(e) is not { } result || OwnedElsewhere(document, e.Id, result))
         {
+            // A first cut that its cap slots refuse names no result, and says why.
+            if (inputs.Cutters.Count > 0 && ResultOf(e) == null && MeshCuts.CapSlots(inputs).Reason is { } why)
+            {
+                Close(state?.Result);
+                Change(cuts, e, new CutState.Refused(null, hash, why));
+                return;
+            }
             Drop(cuts, e.Id);
             return;
         }
-        var hash = inputs.Hash();
-        var state = cuts.Targets.GetValueOrDefault(e.Id);
         if (state is CutState.Cut c && c.Result == result && c.Hash == hash
             || state is CutState.Refused r && r.Result == result && r.Hash == hash)
         {
@@ -290,7 +301,7 @@ public sealed class CutSet
         }
         if (state != null && state.Result != result)
         {
-            _shell.Mesh.CloseMesh(state.Result);
+            Close(state.Result);
         }
         switch (MeshCuts.Derive(inputs))
         {
@@ -299,11 +310,15 @@ public sealed class CutSet
                 Change(cuts, e, new CutState.Cut(result, hash));
                 break;
             case CutResult.Refused refused:
+                // The last good cut stays. With none, as after an undo and a redo of a refused first cut, the source draws.
+                if (_shell.Mesh.Meshes.Find(result) == null && !File.Exists(ResultPath(document, e, result)))
+                {
+                    _shell.Mesh.Meshes.Add(new MeshDocument(ResultPath(document, e, result), result, inputs.SourceMesh, saved: false));
+                }
                 Change(cuts, e, new CutState.Refused(result, hash, refused.Reason));
                 break;
         }
     }
-
     // Sets a result's document to a mesh: the open one, or the file's when it holds that mesh, else a new one.
     void Put(SceneDocument document, SceneEntity target, string result, MeshData mesh)
     {
@@ -317,9 +332,9 @@ public sealed class CutSet
             return;
         }
         var path = ResultPath(document, target, result);
+        // A file that holds the cut, as at the scene's open, is what the host draws already, cooked.
         if (File.Exists(path) && MeshDocument.Open(path, result) is ({ } saved, _) && MeshFile.Write(saved.Data) == MeshFile.Write(mesh))
         {
-            meshes.Add(saved);
             return;
         }
         meshes.Add(new MeshDocument(path, result, mesh, saved: false));
@@ -332,12 +347,20 @@ public sealed class CutSet
         {
             return;
         }
-        _shell.Mesh.CloseMesh(state.Result);
+        Close(state.Result);
         var refused = state is CutState.Refused;
         cuts.Targets.Remove(id);
         if (refused)
         {
             ProblemsChanged?.Invoke();
+        }
+    }
+
+    void Close(string? result)
+    {
+        if (result != null)
+        {
+            _shell.Mesh.CloseMesh(result);
         }
     }
 

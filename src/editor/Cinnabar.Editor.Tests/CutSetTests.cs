@@ -177,6 +177,50 @@ public sealed class CutSetTests : IDisposable
     }
 
     [Fact]
+    public void ADuplicatedWallGetsAResultOfItsOwn()
+    {
+        using var shell = NewShell(WallEntity(WallId, "Wall") + Instance(DoorId));
+        var result = Field(Entity(shell, WallId), SceneEdits.MeshRendererId, "mesh")!;
+
+        var (ops, copy) = SceneEdits.Duplicate(shell.Scene!.Scene, WallId);
+        Assert.True(shell.Edit("Duplicate Wall", ops));
+        var copied = Field(Entity(shell, copy), SceneEdits.MeshRendererId, "mesh")!;
+        Assert.NotEqual(result, copied);
+        Assert.Equal(WallMesh, Field(Entity(shell, copy), SceneEdits.CutTargetId, "source"));
+
+        // Moving the copy off the door leaves the first wall's result as it was.
+        Assert.True(shell.Edit("Move Copy", Move(copy, 50)));
+        Assert.Equal(WallMesh, Field(Entity(shell, copy), SceneEdits.MeshRendererId, "mesh"));
+        Assert.Equal(Expected(0), ResultOf(shell, WallId));
+    }
+
+    [Fact]
+    public void ARefusedFirstCutDrawsItsSourceAndSaysWhyAfterUndoAndRedo()
+    {
+        const string OpenMesh = "a0000000000000000000000000000009";
+        var box = Primitives.Block(new Vec3(-0.5, -0.5, -0.5), new Vec3(0.5, 0.5, 0.5));
+        const ulong CutterId = 0x0000000000000005;
+        using var shell = NewShell(WallEntity(WallId, "Wall") +
+            $"entity {CutterId:x16}\nname = \"Open Cutter\"\n" + Pose(100) + $"component 176 Mesh_Cutter\n\tshape = Mesh\n\tmesh = ${OpenMesh}\n", index: false);
+        File.WriteAllText(_temp.Combine("open.mesh"), MeshFile.Write(box.With(faces: box.Faces.RemoveAt(0))));
+        Index(shell, TestAssets.Make(OpenMesh, AssetKind.Mesh, "open.mesh"));
+
+        Assert.True(shell.Edit("Move Cutter", Move(CutterId, 0)));
+        var result = Field(Entity(shell, WallId), SceneEdits.MeshRendererId, "mesh")!;
+        Assert.IsType<CutState.Refused>(shell.Cuts.StateOf(shell.Scene!, WallId));
+        Assert.Contains(shell.ProblemsOf(WallId), p => p.Contains("Open Cutter"));
+        Assert.Equal(MeshFile.Write(Wall), ResultOf(shell, WallId));
+
+        shell.Scene!.Undo();
+        Assert.Null(shell.Cuts.StateOf(shell.Scene, WallId));
+        Assert.Empty(shell.ProblemsOf(WallId));
+        shell.Scene.Redo();
+        Assert.IsType<CutState.Refused>(shell.Cuts.StateOf(shell.Scene, WallId));
+        Assert.Equal(MeshFile.Write(Wall), ResultOf(shell, WallId));
+        Assert.Equal(result, Field(Entity(shell, WallId), SceneEdits.MeshRendererId, "mesh"));
+    }
+
+    [Fact]
     public void ADragDerivesOnceAFrameFromItsNewestStep()
     {
         using var shell = NewShell(WallEntity(WallId, "Wall") + Instance(DoorId));
