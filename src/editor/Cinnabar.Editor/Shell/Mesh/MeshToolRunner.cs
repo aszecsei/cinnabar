@@ -125,23 +125,20 @@ public sealed partial class MeshToolRunner
     /// </summary>
     public bool RunMeshTool(string label, Func<MeshData, IEnumerable<int>, (ToolResult Result, string? Reason)> run, MeshElement? requires = null)
     {
-        string? refused = null;
-        var ran = RunMeshTool(label, (mesh, selected) =>
+        // The tools are pure, so each mesh is asked first: one refusal leaves every mesh as it was.
+        _session.EndOpenEntry();
+        if (CanRunMeshTool(requires))
         {
-            if (refused != null)
+            foreach (var guid in _session.MeshSelection.Guids)
             {
-                return new ToolResult(mesh, _session.MeshElement, [.. selected]);
+                if (_session.FindMeshData(guid) is { } mesh && run(mesh, _session.MeshSelection.Of(guid)).Reason is { } reason)
+                {
+                    _shell.Console.Add(LogLevel.Warning, $"mesh: cannot {label.ToLowerInvariant()}: {reason}");
+                    return false;
+                }
             }
-            var (result, reason) = run(mesh, selected);
-            refused = reason;
-            return reason == null ? result : new ToolResult(mesh, _session.MeshElement, [.. selected]);
-        }, requires);
-        if (refused != null)
-        {
-            _shell.Console.Add(LogLevel.Warning, $"mesh: cannot {label.ToLowerInvariant()}: {refused}");
-            return false;
         }
-        return ran;
+        return RunMeshTool(label, (mesh, selected) => run(mesh, selected).Result, requires);
     }
 
     /// <summary>Acts on the whole of each edited mesh, as Clean and Recalculate Normals do without a selection.</summary>
