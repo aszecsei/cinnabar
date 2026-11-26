@@ -272,6 +272,21 @@ public sealed class DocumentTests : IDisposable
         AssertSame(before, SceneEdits.WorldPose(document.Scene, root)!);
     }
 
+    // A scale that the scene leaves out is 1, as the engine reads it (format.DEFAULT_SCALE), so a child written with
+    // only its offset keeps its parent's scale.
+    [Fact]
+    public void AScaleThatTheSceneLeavesOutIsOne()
+    {
+        var (scene, problems) = SceneFile.Parse("scene 3\n\n" +
+            "entity 0000000000000001\ncomponent 1 Transform\n\tposition = [0, 0, 0]\n\tscale = [2, 3, 4]\n\n" +
+            "entity 0000000000000002\nparent = @0000000000000001\ncomponent 2 Local_Transform\n\toffset = [0, 1, 0]\n\n" +
+            "entity 0000000000000003\ncomponent 1 Transform\n\tposition = [0, 0, 0]\n");
+        Assert.True(scene != null, string.Join("\n", problems));
+
+        Assert.Equal([2.0, 3.0, 4.0], SceneEdits.WorldPose(scene, scene.Find(2)!)!.Scale);
+        Assert.Equal([1.0, 1.0, 1.0], SceneEdits.WorldPose(scene, scene.Find(3)!)!.Scale);
+    }
+
     static void AssertSame(Pose expected, Pose actual)
     {
         for (var i = 0; i < 3; i++)

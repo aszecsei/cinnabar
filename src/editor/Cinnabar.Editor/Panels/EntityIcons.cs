@@ -19,6 +19,7 @@ public static class EntityIcons
         ("Line_Light", "light-area"),
         ("Reflection_Probe", "probe"),
         ("Nav_Mesh_Volume", "nav-path"),
+        ("Mesh_Cutter", "block"),
         ("Volume", "volume"),
         ("Ui_Document", "ui-document"),
         ("Agent", "decision"),

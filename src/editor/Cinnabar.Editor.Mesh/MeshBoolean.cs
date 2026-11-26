@@ -123,7 +123,7 @@ public static class MeshBoolean
         return cutter.With(vertices: cutter.Vertices.Select(toTarget.Apply), faces: faces, sharpEdges: []);
     }
 
-    static (Vec3 Min, Vec3 Max) Bounds(IEnumerable<Vec3> points)
+    internal static (Vec3 Min, Vec3 Max) Bounds(IEnumerable<Vec3> points)
     {
         var (min, max) = (new Vec3(double.MaxValue, double.MaxValue, double.MaxValue), new Vec3(double.MinValue, double.MinValue, double.MinValue));
         foreach (var p in points)
@@ -134,7 +134,7 @@ public static class MeshBoolean
         return (min, max);
     }
 
-    static bool Overlap(Vec3 aMin, Vec3 aMax, Vec3 bMin, Vec3 bMax) =>
+    internal static bool Overlap(Vec3 aMin, Vec3 aMax, Vec3 bMin, Vec3 bMax) =>
         aMin.X <= bMax.X && aMax.X >= bMin.X && aMin.Y <= bMax.Y && aMax.Y >= bMin.Y && aMin.Z <= bMax.Z && aMax.Z >= bMin.Z;
 
     // The target with the cutter's faces after it, as a union of meshes that do not meet is.

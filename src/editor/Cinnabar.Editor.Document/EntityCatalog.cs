@@ -29,6 +29,7 @@ public static class EntityCatalog
     public const string Physics = "Physics";
     public const string Audio = "Audio";
     public const string Navigation = "Navigation and AI";
+    public const string LevelDesign = "Level Design";
     public const string Interface = "UI";
 
     // A quarter turn about x points an entity's +z down, as a ceiling's light shines.
@@ -97,6 +98,9 @@ public static class EntityCatalog
             [Volume("Box"), Component(128, "Nav_Mesh_Volume")]),
         new("agent", "Agent", Navigation, "decision", "A character that walks on the navmesh and thinks with a decision over a blackboard. Choose both in the properties panel.",
             [Component(75, "Character"), Component(134, "Nav_Agent"), Component(130, "Agent")]),
+
+        new("cutter", "Cutter", LevelDesign, "block", "A box that cuts its opening in the meshes it overlaps that have a Cut_Target, as a door's does. Put it in a prefab with its door.",
+            [Component(SceneEdits.MeshCutterId, "Mesh_Cutter")]),
 
         new("uiDocument", "UI Document", Interface, "ui-document", "Shows a UI document on the screen: a menu or a HUD.",
             [Component(112, "Ui_Document")]),

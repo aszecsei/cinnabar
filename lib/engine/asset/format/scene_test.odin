@@ -228,3 +228,53 @@ component 1 T
 	testing.expect_value(t, read.entities[0].components[0].fields[0].value.scene, other)
 	testing.expect_value(t, read.entities[0].components[0].fields[2].value.scene, Guid{})
 }
+
+// testdata/cutters is shared with the editor's SceneFileTests, so the two parsers read the same fields.
+@(private = "file")
+CUTTERS :: #load("testdata/cutters/cutters.scene", string)
+
+@(test)
+cutters_and_targets_parse :: proc(t: ^testing.T) {
+	scene, problems, ok := scene_parse(CUTTERS, context.temp_allocator)
+	testing.expectf(t, ok, "problems: %v", problems)
+	testing.expect_value(t, len(scene.entities), 3)
+	field :: proc(c: Scene_Component, name: string) -> (Scene_Value, bool) {
+		for f in c.fields {
+			if f.name == name {
+				return f.value, true
+			}
+		}
+		return {}, false
+	}
+
+	target := scene.entities[0].components[2]
+	testing.expect_value(t, target.id, SCENE_CUT_TARGET_ID)
+	testing.expect_value(t, target.name, "Cut_Target")
+	layer, _ := field(target, "layer")
+	testing.expect_value(t, layer.floats[0], 2)
+
+	cutter := scene.entities[1].components[1]
+	testing.expect_value(t, cutter.id, SCENE_MESH_CUTTER_ID)
+	testing.expect_value(t, cutter.name, "Mesh_Cutter")
+	testing.expect_value(t, len(cutter.fields), 6)
+	shape, _ := field(cutter, "shape")
+	testing.expect_value(t, shape.kind, Scene_Value_Kind.Name)
+	testing.expect_value(t, shape.text, "Mesh")
+	extents, _ := field(cutter, "extents")
+	testing.expect_value(t, extents.count, 3)
+	testing.expect_value(t, extents.floats[1], 1.15)
+	mesh, _ := field(cutter, "mesh")
+	testing.expect_value(t, mesh.asset, guid_parse("6e2a1d3b0c4f5a71b8d9e0f1a2b3c4d5") or_else {})
+	cap, _ := field(cutter, "cap_material")
+	testing.expect_value(t, cap.asset, guid_parse("7f3b2e4c1d5a6b82c9e0f1a2b3c4d5e6") or_else {})
+	layers, _ := field(cutter, "layers")
+	testing.expect_value(t, layers.floats[0], 4)
+	cuts, _ := field(cutter, "cuts_collision")
+	testing.expect_value(t, cuts.kind, Scene_Value_Kind.Bool)
+	testing.expect_value(t, cuts.ints[0], 0)
+
+	// A cutter that sets no fields has none, so a reader takes DEFAULT_MESH_CUTTER's.
+	bare := scene.entities[2].components[1]
+	testing.expect_value(t, bare.id, SCENE_MESH_CUTTER_ID)
+	testing.expect_value(t, len(bare.fields), 0)
+}

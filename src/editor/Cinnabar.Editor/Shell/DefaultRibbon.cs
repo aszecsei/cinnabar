@@ -129,7 +129,7 @@ static class DefaultRibbon
                         new LargeButton(Add("camera")),
                         new SmallStack([Add("trigger"), Add("collider"), Add("rigidBody")]),
                         new SmallStack([Add("character"), Add("agent"), Add("navigationVolume")]),
-                        new SmallStack([Add("uiDocument")]),
+                        new SmallStack([Add("cutter"), Add("uiDocument")]),
                     ]),
                     new RibbonGroup("AI",
                     [
@@ -245,6 +245,7 @@ static class DefaultRibbon
         EntityCatalog.Physics => "collider",
         EntityCatalog.Audio => "audio",
         EntityCatalog.Navigation => "nav-path",
+        EntityCatalog.LevelDesign => "block",
         _ => "ui-document",
     };
 }

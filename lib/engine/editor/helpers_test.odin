@@ -8,6 +8,7 @@ import "core:testing"
 import "cinnabar:core"
 import "cinnabar:engine/ai"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/cut"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
@@ -49,6 +50,7 @@ helper_setup :: proc(t: ^testing.T) -> ^Helper_Fixture {
 	testing.expect(t, ecs.init(&f.world, &f.platform))
 	ecs.register_engine_components(&f.world.registry)
 	volume.register_components(&f.world.registry)
+	cut.register_components(&f.world.registry)
 	render.register_components(&f.world.registry)
 	scene.register_components(&f.world.registry)
 	nav.register_components(&f.world.registry)
@@ -554,4 +556,37 @@ the_world_view_draws_the_bounds_of_its_scenes :: proc(t: ^testing.T) {
 	handle_world_view(&f.editor.session.view, {})
 	f.editor.session.view.viewports[0].settings.helpers = .All
 	testing.expect_value(t, line_count(f), 0)
+}
+
+@(test)
+a_selected_cutter_draws_its_box_at_its_scale :: proc(t: ^testing.T) {
+	when !debug.DEBUG_DRAW {
+		return
+	}
+	f := helper_setup(t)
+	defer helper_teardown(f)
+	cutter := spawn_with(f, format.DEFAULT_MESH_CUTTER)
+	ecs.get(&f.world, cutter, ecs.Transform).scale = {2, 4, 1}
+	f.editor.session.view.viewports[0].settings.helpers = .Selected
+	testing.expect_value(t, line_count(f), 0)
+
+	// The default extents, 0.5 each way, times the scale: a box of 2 by 4 by 1 m in 12 edges.
+	append(&f.editor.session.view.selection, cutter)
+	testing.expect_value(t, line_count(f), 12)
+	lo, hi := [3]f64{max(f64), max(f64), max(f64)}, [3]f64{min(f64), min(f64), min(f64)}
+	for l in debug.frame_lines(&f.lines) {
+		for p in ([2]ecs.World_Position{l.a, l.b}) {
+			m := ecs.position_to_meters(p)
+			lo, hi =
+				{min(lo.x, m.x), min(lo.y, m.y), min(lo.z, m.z)},
+				{max(hi.x, m.x), max(hi.y, m.y), max(hi.z, m.z)}
+		}
+	}
+	size := hi - lo
+	testing.expectf(
+		t,
+		abs(size.x - 2) < 1e-4 && abs(size.y - 4) < 1e-4 && abs(size.z - 1) < 1e-4,
+		"size %v",
+		size,
+	)
 }

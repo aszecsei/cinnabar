@@ -2,7 +2,8 @@ package asset_format
 
 // The engine components that the cooker reads from a scene's text, by their stable IDs and field names, since it cannot
 // lay out the native components (see docs/content/kinds/nav-meshes.md#input). Their defaults are here, so the registry
-// and the cooker read the same values: lib/engine/ecs, lib/engine/physics and lib/engine/nav register them with these.
+// and the cooker read the same values: lib/engine/ecs, lib/engine/volume, lib/engine/physics, lib/engine/nav and
+// lib/engine/cut register them with these.
 
 // Stable IDs, as the engine registers them (see docs/world/ecs.md#component-registry).
 SCENE_VOLUME_ID :: 42
@@ -11,6 +12,8 @@ SCENE_COLLIDER_ID :: 65
 SCENE_SURFACE_RENDERER_ID :: 51
 SCENE_CHARACTER_ID :: 75
 SCENE_NAV_MESH_VOLUME_ID :: 128
+SCENE_MESH_CUTTER_ID :: 176
+SCENE_CUT_TARGET_ID :: 177
 
 // The rotation and scale of a Transform or a Local_Transform that a scene leaves out.
 DEFAULT_ROTATION :: quaternion128(1)
@@ -171,4 +174,42 @@ Volume :: struct {
 	priority:       f32 `editor:"range=-100,100"`,
 	// The settings' share where the volume is whole, up to 1. 0 means 1.
 	weight:         f32 `editor:"range=0,1"`,
+}
+
+Mesh_Cutter_Shape :: enum u8 {
+	// A box along the entity's axes, extents times its scale.
+	Box,
+	// The mesh asset, a .mesh that the editor edits, at the entity's pose. It must be solid.
+	Mesh,
+}
+
+// Mesh_Cutter is the volume that a cut removes from the meshes that it overlaps (see
+// docs/editor/mesh-editing.md#cutters-and-cut-targets), such as a door's opening in its wall. It cuts an entity whose
+// Cut_Target's layer is in layers and whose Mesh_Renderer names a .mesh, and never the entities of its own prefab
+// instance. The editor does the cut, and the game ignores the component.
+Mesh_Cutter :: struct {
+	shape:          Mesh_Cutter_Shape,
+	// Half the box's size along each of the entity's axes, in meters, times its scale. 0 gives 0.5, a box of 1 m.
+	extents:        [3]f32 `editor:"range=0,100"`,
+	mesh:           Guid `asset:"mesh"`,
+	// The material of the faces that the cut makes, such as a doorway's jambs.
+	cap_material:   Guid `asset:"material"`,
+	// Bit i cuts the targets of layer i. 0 cuts every layer.
+	layers:         u32,
+	// The cut also sets the target's Collider to its result.
+	cuts_collision: bool,
+}
+
+// In meters, for a Mesh_Cutter's extent of 0.
+MESH_CUTTER_DEFAULT_EXTENT :: 0.5
+
+DEFAULT_MESH_CUTTER :: Mesh_Cutter {
+	extents        = MESH_CUTTER_DEFAULT_EXTENT,
+	cuts_collision = true,
+}
+
+// Cut_Target lets Mesh_Cutters cut its entity's mesh (see docs/editor/mesh-editing.md#cutters-and-cut-targets). An
+// entity opts in by having it. A cutter cuts it when its layer is in the cutter's layers.
+Cut_Target :: struct {
+	layer: u8 `editor:"range=0,31"`,
 }

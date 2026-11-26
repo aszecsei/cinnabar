@@ -73,6 +73,7 @@ static class ComponentCatalog
         "Audio" => "audio",
         "Navigation" => "nav-path",
         "AI" => "decision",
+        "Level Design" => "block",
         "Animation" => "animation",
         "UI" => "ui-document",
         "Transform" => "move",

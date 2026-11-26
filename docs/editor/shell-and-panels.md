@@ -48,7 +48,7 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
   | Home | | Scene: Open Scene, Save, Save As, Save All Scenes, Add Scene, Close Scene. Edit: Undo, Redo, Duplicate, Delete, Select All. Add: the Add menu, Empty Entity, Mesh, Camera (see [Add](#add)). Visibility: Hide, Show All, Lock. Prefab: Make Prefab, Open Prefab, Select Prefab Asset, Make Variant, Apply All, Revert All, Unpack, Unpack Completely (see [Prefabs](prefabs.md#editing-an-instance)). |
   | Lighting | Art | Lights: Directional Light, Point Light, Spot Light, and Area Light, a menu of the quad, disk and line lights. Reflections: Reflection Probe, Capture Probe, Capture All Probes (see [Viewport](viewport.md#reflection-probes)). Volumes: Volume, a menu of the kinds of volume. Atmosphere, Sun, Sky and Weather: the atmosphere's commands (see [Atmosphere](#atmosphere)). Panels: Atmosphere, Weather Map. |
   | Environment | Art | Place: Mesh, Particle System, Sprite. New Asset: New Material, New Material Function, New Mesh, New Prefab, New Effect, New Sprite Sheet, New Folder. Panels: Content Browser, Face. |
-  | Gameplay | Design | Place: Camera, Trigger, Static Collider, Rigid Body, Character, Agent, Navigation Volume, UI Document. AI: New Decision, a menu of the four kinds of decision, and New Blackboard. New Asset: New Scene, New Prefab, New UI Document, New Animation Graph, New Cutscene. |
+  | Gameplay | Design | Place: Camera, Trigger, Static Collider, Rigid Body, Character, Agent, Navigation Volume, Cutter, UI Document. AI: New Decision, a menu of the four kinds of decision, and New Blackboard. New Asset: New Scene, New Prefab, New UI Document, New Animation Graph, New Cutscene. |
   | Scripting | Design | Scripts: New Behaviour, New Script. Code: Build Project. Profiler: Capture Frame, Capture Worst Frame, Record Zones (see [Profiler](#profiler)). Panels: Console, Profiler, Resource Monitor. |
   | Audio | Audio | Place: Audio Source, Audio Listener. |
   | Project | | Game Window: Run Game, with Close Game in its menu, and the output mode and the quality of the project and of this machine (see [Viewport](viewport.md#quality)). Release: Export. Project: Open Project. Processes: Restart Host, with Stop Host in its menu, and Restart Cook Daemon (see [Processes and projects](processes-and-projects.md#projects)). |
@@ -122,6 +122,7 @@ The editor adds an entity of a common kind in one step (`EntityCatalog` in `Cinn
   | Physics | Static Collider. Rigid Body, with a `Collider`. Trigger, a `Collider` that is a sensor. Character. |
   | Audio | Audio Source, Audio Listener |
   | Navigation and AI | Navigation Volume, a box volume with a `Nav_Mesh_Volume`. Agent, with a `Character`, a `Nav_Agent` and an `Agent`. |
+  | Level Design | Cutter, a box `Mesh_Cutter` (see [Mesh editing](mesh-editing.md#cutters-and-cut-targets)) |
   | UI | UI Document |
 
   A project's own kinds are its prefabs, which the content browser places (see [Prefabs](prefabs.md#panels-and-the-viewport)).
