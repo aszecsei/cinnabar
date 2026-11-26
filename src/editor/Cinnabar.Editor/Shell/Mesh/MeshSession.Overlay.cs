@@ -48,8 +48,10 @@ public sealed partial class MeshSession
                 }
                 var mesh = drawn.Mesh;
                 var handle = _shell.FindInScene(sceneId)?.Handle ?? 0;
-                var selected = MeshSelection.Of(guid).SelectMany(i => drawn.Map?.ResultsOf(MeshElement, i) ?? [i]).ToList();
-                var hovered = _hover is MeshHover.Element h && h.Item.Guid == guid ? h.Drawn : -1;
+                var selected = MeshSelection.Of(guid).SelectMany(i => drawn.Map?.ResultsOf(MeshElement, i) ?? [i]).Distinct().ToList();
+                // The overlay has one hovered element, so a cut wall's hovered element draws as its first fragment.
+                var hovered = _hover is not MeshHover.Element h || h.Item.Guid != guid ? -1
+                    : drawn.Map is { } map ? map.ResultsOf(MeshElement, h.Item.Index).DefaultIfEmpty(-1).First() : h.Item.Index;
                 var edges = MeshElement == MeshElement.Edges ? selected.Where(e => e < mesh.Edges.Length).Select(e => new Wire.LiveEdge((uint)mesh.Edges[e].A, (uint)mesh.Edges[e].B)).ToArray() : [];
                 var hoveredEdge = MeshElement == MeshElement.Edges && hovered >= 0 && hovered < mesh.Edges.Length ? mesh.Edges[hovered] : (MeshEdge?)null;
                 meshes.Add(new Wire.MeshOverlayMesh(

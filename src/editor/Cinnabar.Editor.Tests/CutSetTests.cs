@@ -437,6 +437,12 @@ public sealed class CutSetTests : IDisposable
         // Beside the hole, a fragment of the front is the source's front face.
         shell.PickAt(At(shell, 1.5, 1.5, -0.125), SelectMode.Replace);
         Assert.Equal(new MeshItem(WallMesh, FaceAt(Wall, -0.125)), Assert.Single(shell.Mesh.MeshSelection.Items));
+        // The overlay is over the result, and the front draws as all of its fragments.
+        var (result, map) = shell.Cuts.MapOf(shell.Scene!, WallId)!.Value;
+        var overlay = Assert.Single(_sent.OfType<Wire.MeshOverlay>().Last().Meshes);
+        Assert.Equal(result, Convert.ToHexStringLower(overlay.Guid));
+        Assert.NotEmpty(map.ResultsOf(MeshElement.Faces, FaceAt(Wall, -0.125)));
+        Assert.Equal(map.ResultsOf(MeshElement.Faces, FaceAt(Wall, -0.125)).Select(f => (uint)f).Order(), overlay.SelectedFaces.Order());
 
         // A jamb that the door made selects nothing, and says what made it.
         var jamb = At(shell, 0.5, 1.5, 0);
@@ -446,6 +452,30 @@ public sealed class CutSetTests : IDisposable
         Assert.True(shell.Mesh.MeshSelection.IsEmpty);
         shell.Mesh.HoverMesh(At(shell, 1.5, 1.5, -0.125));
         Assert.DoesNotContain("made by", shell.Mesh.MeshStatus);
+    }
+
+    [Fact]
+    public void MeshModeOnASavedCutWallSendsItsResultLiveForTheOverlay()
+    {
+        string result;
+        using (var shell = NewShell(WallEntity(WallId, "Wall") + Instance(DoorId)))
+        {
+            result = Field(Entity(shell, WallId), SceneEdits.MeshRendererId, "mesh")!;
+            Assert.True(shell.SaveScene());
+        }
+        var path = Directory.GetFiles(_temp.Combine("level_meshes"), "*.cut.mesh").Single();
+        using var reopened = TestShell.Open(_temp, "level.scene", File.ReadAllText(_temp.Combine("level.scene")));
+        reopened.Host.LinkForTests(_sent.Add);
+        Index(reopened, TestAssets.Make(result, AssetKind.Mesh, Path.GetRelativePath(_temp.Path, path).Replace('\\', '/')));
+        // Its file holds the cut, so the host draws that, and no document is open for it.
+        Assert.Null(reopened.Mesh.Meshes.Find(result));
+        _sent.Clear();
+
+        reopened.OnGameMessage(new EntitySnapshot([new EntityInfo(WallHandle, "Wall", WallId, 1, 0, true, [1, 33, 177])]));
+        reopened.Selection.Select(WallHandle);
+        reopened.Mesh.EnterMeshMode();
+        Assert.Contains(_sent, m => m is Wire.LiveMesh l && Convert.ToHexStringLower(l.Guid) == result);
+        Assert.Equal(result, Convert.ToHexStringLower(Assert.Single(_sent.OfType<Wire.MeshOverlay>().Last().Meshes).Guid));
     }
 
     [Fact]

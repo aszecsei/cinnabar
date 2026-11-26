@@ -15,7 +15,7 @@ namespace Cinnabar.Editor.Shell;
 public abstract record CutState(string? Result, string? Collision)
 {
     /// <summary>A cut named a new result or collision result, which is not derived yet. Its document holds the source until it is.</summary>
-    public sealed record Made(string? Result, string? Collision) : CutState(Result, Collision);
+    public sealed record Made(string Result, string? Collision) : CutState(Result, Collision);
 
     /// <summary>The result is derived from the inputs of the hash, and maps back onto its source by the map.</summary>
     public sealed record Cut(string Result, uint Hash, string? Collision, CutMap Map) : CutState(Result, Collision);
@@ -340,7 +340,7 @@ public sealed class CutSet
         if (!owned || result == null)
         {
             result = NewGuid();
-            Make(document, cuts, inputs, result, null);
+            Make(document, cuts, inputs, result, newResult: true, null);
             ops.Add(new SetField(e.Id, SceneEdits.CutTargetId, "source", SceneValue.AssetRef(inputs.Source)));
             ops.Add(new SetField(e.Id, SceneEdits.MeshRendererId, "mesh", SceneValue.AssetRef(result)));
         }
@@ -373,7 +373,7 @@ public sealed class CutSet
                 if (collision == null)
                 {
                     collision = NewGuid();
-                    Make(document, cuts, inputs, null, collision);
+                    Make(document, cuts, inputs, result, newResult: false, collision);
                 }
                 wanted = collision;
                 break;
@@ -398,12 +398,12 @@ public sealed class CutSet
 
     static string NewGuid() => Convert.ToHexStringLower(Guid.NewGuid().ToByteArray());
 
-    // A new result, or a new collision result: a document of the source's mesh, which the host draws from the start,
-    // until the derive. Its document is added before the field that names it is sent.
-    void Make(SceneDocument document, SceneCuts cuts, CutInputs inputs, string? result, string? collision)
+    // A new result, or a new collision result beside the target's result: a document of the source's mesh, which the
+    // host draws from the start, until the derive. Its document is added before the field that names it is sent.
+    void Make(SceneDocument document, SceneCuts cuts, CutInputs inputs, string result, bool newResult, string? collision)
     {
         var old = cuts.Targets.GetValueOrDefault(inputs.Target.Id);
-        if (result != null)
+        if (newResult)
         {
             if (old?.Result is { } was && !OwnedElsewhere(document, inputs.Target.Id, was))
             {
@@ -420,7 +420,7 @@ public sealed class CutSet
             cuts.Collisions.Add(collision);
             _shell.Mesh.Meshes.Add(new MeshDocument(ResultPath(document, inputs.Target, collision, CollisionSuffix), collision, inputs.SourceMesh, saved: false));
         }
-        Change(cuts, inputs.Target, new CutState.Made(result ?? old?.Result, collision ?? old?.Collision));
+        Change(cuts, inputs.Target, new CutState.Made(result, collision ?? old?.Collision));
     }
 
     // Derives a target's result and its collision result, unless the cut set has them from the same inputs.

@@ -16,11 +16,11 @@ namespace Cinnabar.Editor.Shell;
 /// </summary>
 public sealed partial class MeshSession
 {
-    // What the mouse is over in mesh mode: an element of an edited mesh, with its index in the mesh that draws, or a
-    // face that a cutter made on a cut wall, which cannot be selected.
+    // What the mouse is over in mesh mode: an element of an edited mesh, or a face that a cutter made on a cut wall,
+    // which cannot be selected. An element is the edited mesh's, so it holds while a cut wall's result changes under it.
     abstract record MeshHover
     {
-        public sealed record Element(MeshItem Item, int Drawn) : MeshHover;
+        public sealed record Element(MeshItem Item) : MeshHover;
 
         public sealed record CutFace(string Cutter) : MeshHover;
     }
@@ -68,7 +68,7 @@ public sealed partial class MeshSession
             }
             else if (index is { } i && (map == null ? i : map.SourceOf(MeshElement, i)) is { } source)
             {
-                found = new MeshHover.Element(new MeshItem(guid, source), i);
+                found = new MeshHover.Element(new MeshItem(guid, source));
             }
             if (found == null)
             {

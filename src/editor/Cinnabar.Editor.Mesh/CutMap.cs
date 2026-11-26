@@ -6,14 +6,16 @@ namespace Cinnabar.Editor.Mesh;
 /// Maps a cut's result back to its source, so that mesh mode can draw and pick the result while it edits the source
 /// (see docs/editor/mesh-editing.md#editing-a-cut-wall). A result face is a fragment of a source face, or a face that a
 /// cutter made. A result vertex is a source vertex when it is at the same point, since the cut welds its fragments to
-/// the source's vertices first. A result edge is a source edge, or a fragment of one, when it lies on it.
+/// the source's vertices first. A result edge is a source edge, or a fragment of one, when it lies on it. Each map is
+/// made the first time that it is asked for, since a drag derives a cut every frame and mesh mode reads few of them.
 /// </summary>
 public sealed class CutMap
 {
     readonly int[] _sourceFace;
     readonly IReadOnlyList<string> _cutters;
-    readonly int?[] _vertex;
-    readonly int?[] _edge;
+    readonly Lazy<int?[]> _vertex;
+    readonly Lazy<int?[]> _edge;
+    readonly Lazy<Dictionary<(MeshElement, int), List<int>>> _results;
 
     /// <summary>
     /// A map of a result onto the source it was cut from. <paramref name="sourceFace"/> gives each result face's source
@@ -25,13 +27,40 @@ public sealed class CutMap
         Result = result;
         _sourceFace = sourceFace;
         _cutters = cutters;
-        var points = new Dictionary<Vec3, int>();
-        for (var i = 0; i < source.Vertices.Length; i++)
+        _vertex = new(() =>
         {
-            points.TryAdd(source.Vertices[i], i);
-        }
-        _vertex = [.. result.Vertices.Select(v => points.TryGetValue(v, out var i) ? i : (int?)null)];
-        _edge = [.. result.Edges.Select(e => EdgeOf(source, result, e))];
+            var points = new Dictionary<Vec3, int>();
+            for (var i = 0; i < source.Vertices.Length; i++)
+            {
+                points.TryAdd(source.Vertices[i], i);
+            }
+            return [.. result.Vertices.Select(v => points.TryGetValue(v, out var i) ? i : (int?)null)];
+        });
+        _edge = new(() => [.. result.Edges.Select(Edge)]);
+        _results = new(() =>
+        {
+            var results = new Dictionary<(MeshElement, int), List<int>>();
+            void Add(MeshElement kind, int resultIndex, int? sourceIndex)
+            {
+                if (sourceIndex is { } s)
+                {
+                    (results.TryGetValue((kind, s), out var list) ? list : results[(kind, s)] = []).Add(resultIndex);
+                }
+            }
+            for (var i = 0; i < _sourceFace.Length; i++)
+            {
+                Add(MeshElement.Faces, i, SourceFace(i));
+            }
+            for (var i = 0; i < result.Vertices.Length; i++)
+            {
+                Add(MeshElement.Vertices, i, SourceVertex(i));
+            }
+            for (var i = 0; i < result.Edges.Length; i++)
+            {
+                Add(MeshElement.Edges, i, SourceEdge(i));
+            }
+            return results;
+        });
     }
 
     /// <summary>The source that the map was made from. A newer source is not mapped by it.</summary>
@@ -50,10 +79,10 @@ public sealed class CutMap
             ? _cutters[~_sourceFace[resultFace]] : null;
 
     /// <summary>The source vertex at a result vertex's point, or null for a vertex that the cut made.</summary>
-    public int? SourceVertex(int resultVertex) => resultVertex >= 0 && resultVertex < _vertex.Length ? _vertex[resultVertex] : null;
+    public int? SourceVertex(int resultVertex) => resultVertex >= 0 && resultVertex < _vertex.Value.Length ? _vertex.Value[resultVertex] : null;
 
     /// <summary>The source edge that a result edge is, or lies on, or null for an edge that the cut made.</summary>
-    public int? SourceEdge(int resultEdge) => resultEdge >= 0 && resultEdge < _edge.Length ? _edge[resultEdge] : null;
+    public int? SourceEdge(int resultEdge) => resultEdge >= 0 && resultEdge < _edge.Value.Length ? _edge.Value[resultEdge] : null;
 
     /// <summary>The source index of a result element of a kind, or null for one that the cut made.</summary>
     public int? SourceOf(MeshElement kind, int resultIndex) => kind switch
@@ -63,30 +92,26 @@ public sealed class CutMap
         _ => SourceFace(resultIndex),
     };
 
-    /// <summary>The result elements of a kind that a source element became.</summary>
-    public IEnumerable<int> ResultsOf(MeshElement kind, int sourceIndex)
-    {
-        var count = kind switch
-        {
-            MeshElement.Vertices => _vertex.Length,
-            MeshElement.Edges => _edge.Length,
-            _ => _sourceFace.Length,
-        };
-        return Enumerable.Range(0, count).Where(i => SourceOf(kind, i) == sourceIndex);
-    }
+    /// <summary>The result elements of a kind that a source element became, in the result's order.</summary>
+    public IReadOnlyList<int> ResultsOf(MeshElement kind, int sourceIndex) =>
+        _results.Value.TryGetValue((kind, sourceIndex), out var list) ? list : [];
 
     // The source edge that a result edge lies on: the one between its ends' source vertices, else one whose segment
     // holds both its ends, as a fragment of an edge that the cut split does.
-    static int? EdgeOf(MeshData source, MeshData result, MeshEdge edge)
+    int? Edge(MeshEdge edge)
     {
-        var a = result.Vertices[edge.A];
-        var b = result.Vertices[edge.B];
-        var edges = source.Edges;
+        if (SourceVertex(edge.A) is { } a && SourceVertex(edge.B) is { } b)
+        {
+            return Source.EdgeIndex(a, b) is var i and >= 0 ? i : null;
+        }
+        var p0 = Result.Vertices[edge.A];
+        var p1 = Result.Vertices[edge.B];
+        var edges = Source.Edges;
         for (var i = 0; i < edges.Length; i++)
         {
-            var p = source.Vertices[edges[i].A];
-            var q = source.Vertices[edges[i].B];
-            if (OnSegment(a, p, q) && OnSegment(b, p, q))
+            var p = Source.Vertices[edges[i].A];
+            var q = Source.Vertices[edges[i].B];
+            if (OnSegment(p0, p, q) && OnSegment(p1, p, q))
             {
                 return i;
             }
