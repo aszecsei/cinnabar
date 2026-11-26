@@ -12,7 +12,7 @@ namespace Cinnabar.Editor.Tests;
 
 /// <summary>
 /// The finish of the mesh editing design: Keep Planar, Select Linked, Grow and Shrink, Edit Pivot with Center Pivot
-/// and Pivot to Grid, and Clean's report as a selection.
+/// and Pivot to Grid, Clean's report as a selection, and Bridge and Cap as commands.
 /// </summary>
 public sealed class MeshFinishTests : IDisposable
 {
@@ -147,9 +147,36 @@ public sealed class MeshFinishTests : IDisposable
         using var shell = NewShell(fin);
         shell.Commands.Get(EditorCommands.MeshClean).Execute();
         Assert.Equal(MeshElement.Edges, shell.Mesh.MeshElement);
-        Assert.Single(shell.Mesh.MeshSelection.Items);
-        var edge = MeshFixtures.Mesh(shell).Edges[shell.Mesh.MeshSelection.Items.Single().Index];
-        Assert.Equal(3, MeshFixtures.Mesh(shell).FacesOfEdge(edge).Count);
+        // The edge of three faces, and the fin's three open edges.
+        var mesh = MeshFixtures.Mesh(shell);
+        var counts = shell.Mesh.MeshSelection.Items.Select(i => mesh.FacesOfEdge(mesh.Edges[i.Index]).Count).Order().ToList();
+        Assert.Equal([1, 1, 1, 3], counts);
+        Assert.Single(shell.Console.Lines, l => l.Text.Contains("3 edges are open"));
+    }
+
+    [Fact]
+    public void CleanSelectsTheOpenEdgesAndCapClosesThem()
+    {
+        var top = Enumerable.Range(0, Box.Faces.Length).Single(f => Box.FaceNormal(f) == Vec3.UnitY);
+        using var shell = NewShell(MeshTools.Delete(Box, MeshElement.Faces, [top]));
+        Assert.EndsWith("Open: 4 edges", shell.Mesh.MeshStatus);
+        shell.Commands.Get(EditorCommands.MeshClean).Execute();
+        Assert.Equal(MeshElement.Edges, shell.Mesh.MeshElement);
+        Assert.Equal(MeshFixtures.Mesh(shell).OpenEdges, shell.Mesh.MeshSelection.Of(MeshFixtures.MeshGuid).Order());
+        Assert.Single(shell.Console.Lines, l => l.Text.Contains("4 edges are open"));
+
+        // Bridge refuses one loop with the reason, and Cap closes it.
+        Assert.True(shell.Commands.Get(EditorCommands.MeshBridge).CanExecute);
+        shell.Commands.Get(EditorCommands.MeshBridge).Execute();
+        Assert.Contains(shell.Console.Lines, l => l.Text.Contains("cannot bridge: bridge needs two loops"));
+        Assert.False(MeshFixtures.Mesh(shell).IsSolid);
+        shell.Commands.Get(EditorCommands.MeshCap).Execute();
+        Assert.True(MeshFixtures.Mesh(shell).IsSolid);
+        Assert.Equal(MeshElement.Faces, shell.Mesh.MeshElement);
+        Assert.EndsWith("Solid", shell.Mesh.MeshStatus);
+        // Undo opens it again.
+        shell.Scene!.Undo();
+        Assert.EndsWith("Open: 4 edges", shell.Mesh.MeshStatus);
     }
 
     [Fact]

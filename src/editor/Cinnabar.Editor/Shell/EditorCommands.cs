@@ -92,6 +92,8 @@ static partial class EditorCommands
     public const string MeshDuplicate = "mesh.duplicate";
     public const string MeshCollapse = "mesh.collapse";
     public const string MeshMergeFaces = "mesh.mergeFaces";
+    public const string MeshBridge = "mesh.bridge";
+    public const string MeshCap = "mesh.cap";
     public const string MeshInvert = "mesh.invert";
     public const string MeshRecalculateNormals = "mesh.recalculateNormals";
     public const string MeshNormalAngle = "mesh.normalAngle";

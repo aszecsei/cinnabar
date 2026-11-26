@@ -232,9 +232,10 @@ public static class Primitives
         right.Add(backRight);
         b.Face([frontLeft, frontRight, backRight, backLeft], sharp: true);
         b.Face([backRight, right[^2], left[^2], backLeft], sharp: true);
-        // The left profile faces -x: the loop goes up the stairs and back along the bottom, seen from -x it is clockwise.
-        b.Face([.. left], sharp: true);
-        b.Face([.. Enumerable.Reverse(right)], sharp: true);
+        // The loop goes up the stairs and back along the bottom, which fronts +x, so the left profile takes it reversed
+        // to face -x and the right one as it is.
+        b.Face([.. Enumerable.Reverse(left)], sharp: true);
+        b.Face([.. right], sharp: true);
     }
 
     static void Torus(Builder b, int segments, int sides, double tube)

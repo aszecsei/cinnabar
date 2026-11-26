@@ -105,6 +105,8 @@ public sealed class MainWindow : Window
         shell.Selection.Changed += (_, _) => UpdateWorldStatus();
         shell.ModeChanged += UpdateModeStatus;
         shell.Mesh.MeshModeChanged += UpdateModeStatus;
+        // An edit or an undo changes whether the primary mesh is solid.
+        shell.Mesh.MeshesChanged += UpdateModeStatus;
         _autosave.Tick += (_, _) => shell.Tick(DateTime.UtcNow);
         _autosave.Start();
         // The command line's scene opened before the window could ask about its autosave.

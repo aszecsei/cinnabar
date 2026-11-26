@@ -141,7 +141,8 @@ public static partial class MeshTools
     /// <summary>
     /// Acts on the whole mesh: merges vertices within <see cref="WeldDistance"/>, removes faces with fewer than three
     /// distinct vertices, dissolves a vertex that lies on a straight line between its neighbors in every face around
-    /// it, and removes the vertices no face uses. The problems are the edges with more than two faces.
+    /// it, and removes the vertices no face uses. The problems are the edges with more than two faces,
+    /// and one line for the open edges.
     /// </summary>
     public static (MeshData Mesh, IReadOnlyList<string> Problems) Clean(MeshData mesh)
     {
@@ -216,6 +217,10 @@ public static partial class MeshTools
         var unused = Enumerable.Range(0, welded.Vertices.Length).Where(v => !used.Contains(v)).ToHashSet();
         var result = Compact(welded.With(faces: faces), unused, degenerate);
         var problems = result.Edges.Where(e => result.FacesOfEdge(e).Count > 2).Select(e => $"the edge {e.A} {e.B} has {result.FacesOfEdge(e).Count} faces").ToList();
+        if (result.OpenEdges.Length is var open and > 0)
+        {
+            problems.Add(open == 1 ? "1 edge is open" : $"{open} edges are open");
+        }
         return (result, problems);
     }
 

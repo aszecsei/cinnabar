@@ -80,7 +80,7 @@ public sealed class MeshModeTests : IDisposable
         Assert.True(shell.Mesh.InMeshMode);
         Assert.True(shell.Context.IsActive(MeshSession.MeshContext));
         Assert.Equal(MeshElement.Faces, shell.Mesh.MeshElement);
-        Assert.Equal("Faces: 0 of 1 mesh", shell.Mesh.MeshStatus);
+        Assert.Equal("Faces: 0 of 1 mesh  ·  Solid", shell.Mesh.MeshStatus);
         var document = Assert.Single(shell.Mesh.Meshes.Documents);
         Assert.True(document.IsLive);
         Assert.Equal([MeshFixtures.MeshGuid], shell.Mesh.EditedMeshes.Keys);
@@ -106,7 +106,7 @@ public sealed class MeshModeTests : IDisposable
         // A click in the middle hits the front face.
         shell.PickAt(Center, SelectMode.Replace);
         Assert.Equal([new MeshItem(MeshFixtures.MeshGuid, 2)], shell.Mesh.MeshSelection.Items);
-        Assert.Equal("Faces: 1 of 1 mesh", shell.Mesh.MeshStatus);
+        Assert.Equal("Faces: 1 of 1 mesh  ·  Solid", shell.Mesh.MeshStatus);
         // Vertices: the face's four, and 1 in the viewport is the Vertices command.
         shell.Commands.Get(EditorCommands.MeshVertices).Execute();
         Assert.Equal(MeshElement.Vertices, shell.Mesh.MeshElement);

@@ -62,7 +62,10 @@ public sealed partial class MeshSession
     /// <summary>The mode, the element kind, the sub-selection, the grid or the tool changed.</summary>
     public event Action? MeshModeChanged;
 
-    /// <summary>The status bar's text for the mode: "Faces: 3 of 2 meshes", and what a tool waits for.</summary>
+    /// <summary>
+    /// The status bar's text for the mode: "Faces: 3 of 2 meshes", whether the primary mesh is solid, and what a tool
+    /// waits for.
+    /// </summary>
     public string MeshStatus
     {
         get
@@ -72,6 +75,10 @@ public sealed partial class MeshSession
                 return Tools.ToolPointCount > 0 ? $"{MeshTool}: {Tools.ToolPointCount} points, Enter applies" : "";
             }
             var status = $"{MeshElement}: {MeshSelection.Count} of {_editedMeshes.Count} {(_editedMeshes.Count == 1 ? "mesh" : "meshes")}";
+            if (PrimaryMesh is { } primary)
+            {
+                status += $"  ·  {Solidity(primary)}";
+            }
             if (Tools.HasPendingDistance)
             {
                 status += $"  ·  {Tools.PendingLabel}: drag the gizmo";
@@ -83,6 +90,18 @@ public sealed partial class MeshSession
             return status;
         }
     }
+
+    /// <summary>
+    /// The primary edited mesh: the first mesh of the sub-selection, whose axes the gizmo takes, or with nothing
+    /// selected the first edited mesh. Null when no edited mesh is open.
+    /// </summary>
+    public MeshData? PrimaryMesh =>
+        MeshSelection.Guids.Select(FindMeshData).FirstOrDefault(m => m != null) ?? _editedMeshes.Keys.Select(FindMeshData).FirstOrDefault(m => m != null);
+
+    // "Solid", "Open: 4 edges", or "Not solid" for a closed mesh that is wound inside out or has an edge of three faces.
+    static string Solidity(MeshData mesh) => mesh.IsSolid ? "Solid"
+        : mesh.OpenEdges.Length is var open and > 0 ? $"Open: {open} {(open == 1 ? "edge" : "edges")}"
+        : "Not solid";
 
     /// <summary>Whether the selected entities place mesh files, which Edit Mesh and Tab can edit.</summary>
     public bool CanEditMesh => _shell.CanEditScene && (InMeshMode || MeshEntities(_shell.SelectedSceneEntities).Count > 0);

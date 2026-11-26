@@ -78,6 +78,8 @@ static partial class EditorCommands
         MeshToolCommand(shell, MeshDuplicate, "Duplicate Faces", "copy", shell.Mesh.Tools.DuplicateFaces, "Copy the selected faces in place and select the copies, so a drag moves them.", MeshElement.Faces);
         MeshToolCommand(shell, MeshCollapse, "Collapse", "collapse", shell.Mesh.Tools.Collapse, "Merge the selected vertices into one at their centroid, each edge into its middle, or each face into a point.");
         MeshToolCommand(shell, MeshMergeFaces, "Merge Faces", "mesh", shell.Mesh.Tools.MergeFaces, "Dissolve the edges between selected faces that share a plane into one face.", MeshElement.Faces);
+        MeshToolCommand(shell, MeshBridge, "Bridge", "edge", shell.Mesh.Tools.Bridge, "Join two selected loops of open edges, of the same number of edges, with a strip of quads.", MeshElement.Edges);
+        MeshToolCommand(shell, MeshCap, "Cap", "face", shell.Mesh.Tools.Cap, "Fill a selected planar loop of open edges: one face, or triangles where the loop is concave.", MeshElement.Edges);
         MeshToolCommand(shell, MeshInvert, "Invert", "rotate", shell.Mesh.Tools.InvertFaces, "Turn the selected faces to face the other way, with their textures reading the same.", MeshElement.Faces);
         MeshToolCommand(shell, MeshDetach, "Detach", "scene", () => shell.Mesh.Tools.Detach(keepSource: false), "Move the selected faces into a new mesh file and entity at the same pose.", MeshElement.Faces);
         MeshToolCommand(shell, MeshExtract, "Extract", "copy", () => shell.Mesh.Tools.Detach(keepSource: true), "Copy the selected faces into a new mesh file and entity at the same pose.", MeshElement.Faces);
@@ -100,7 +102,7 @@ static partial class EditorCommands
         });
         commands.Register(new Command(MeshClean, "Clean", () => shell.Mesh.Tools.Clean())
         {
-            Description = "Merge vertices within a tenth of a millimeter, remove degenerate faces and unused vertices, dissolve vertices on straight edges, and report edges with more than two faces.",
+            Description = "Merge vertices within a tenth of a millimeter, remove degenerate faces and unused vertices, dissolve vertices on straight edges, and report and select edges with more than two faces and open edges.",
             Icon = "reset",
             CanExecuteWhen = () => shell.Mesh.CanEditInMeshMode,
         });
