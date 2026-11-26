@@ -93,7 +93,7 @@ public sealed class CutSetTests : IDisposable
         Assert.Equal(WallMesh, Field(wall, SceneEdits.CutTargetId, "source"));
         var result = Field(wall, SceneEdits.MeshRendererId, "mesh")!;
         Assert.NotEqual(WallMesh, result);
-        Assert.NotEqual("", Field(wall, SceneEdits.CutTargetId, "inputs_hash"));
+        Assert.NotEqual(0u, MeshCutters.HashOf(wall));
         Assert.Equal(Expected(0), ResultOf(shell, WallId));
         // The host draws the result before the field that names it arrives.
         var live = _sent.FindIndex(m => m is Wire.LiveMesh l && Convert.ToHexStringLower(l.Guid) == result);
@@ -218,6 +218,38 @@ public sealed class CutSetTests : IDisposable
         Assert.IsType<CutState.Refused>(shell.Cuts.StateOf(shell.Scene, WallId));
         Assert.Equal(MeshFile.Write(Wall), ResultOf(shell, WallId));
         Assert.Equal(result, Field(Entity(shell, WallId), SceneEdits.MeshRendererId, "mesh"));
+    }
+
+    [Fact]
+    public void WallsInPrefabInstancesAreEachCutThroughTheirInstances()
+    {
+        const string RoomPrefab = "d0000000000000000000000000000002";
+        const ulong RoomA = 0x8000000000000001, RoomB = 0x8000000000000002, WallNode = 0x2000000000000002;
+        var room = "scene 4\n\nentity 2000000000000001\nname = \"Room\"\n" + Pose() + "\n" +
+            "entity 2000000000000002\nname = \"Wall\"\nparent = @2000000000000001\ncomponent 2 Local_Transform\n\toffset = [0, 0, 0]\n" +
+            $"component 33 Mesh_Renderer\n\tmesh = ${WallMesh}\ncomponent 177 Cut_Target\n\tlayer = 0\n";
+        var level = $"entity {RoomA:x16}\nname = \"Room A\"\nprefab = ${RoomPrefab}\n" + Pose() + "\n" +
+            $"entity {RoomB:x16}\nname = \"Room B\"\nprefab = ${RoomPrefab}\n" + Pose(10) + "\n" + Instance(DoorId) + Instance(OtherDoorId, 10);
+        using var shell = NewShell(level, index: false);
+        File.WriteAllText(_temp.Combine("room.prefab"), room);
+        Index(shell, TestAssets.Make(RoomPrefab, AssetKind.Prefab, "room.prefab"));
+
+        // The scene opened with doors that its walls lack, so one entry cuts both, as overrides of their instances.
+        Assert.Equal("Update Cuts", Assert.Single(shell.Scene!.History).Label);
+        ulong a = ScenePath.Id(RoomA, WallNode), b = ScenePath.Id(RoomB, WallNode);
+        var (resultA, resultB) = (Field(Entity(shell, a), SceneEdits.MeshRendererId, "mesh"), Field(Entity(shell, b), SceneEdits.MeshRendererId, "mesh"));
+        Assert.NotEqual(WallMesh, resultA);
+        Assert.NotEqual(WallMesh, resultB);
+        Assert.NotEqual(resultA, resultB);
+        Assert.Equal(Expected(0), ResultOf(shell, a));
+        Assert.Equal(Expected(0), ResultOf(shell, b));
+
+        shell.Scene.Undo();
+        Assert.Equal(WallMesh, Field(Entity(shell, a), SceneEdits.MeshRendererId, "mesh"));
+        Assert.Equal(WallMesh, Field(Entity(shell, b), SceneEdits.MeshRendererId, "mesh"));
+        shell.Scene.Redo();
+        Assert.Equal(resultA, Field(Entity(shell, a), SceneEdits.MeshRendererId, "mesh"));
+        Assert.Equal(Expected(0), ResultOf(shell, b));
     }
 
     [Fact]

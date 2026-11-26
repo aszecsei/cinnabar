@@ -16,13 +16,13 @@ public abstract record CutState(string? Result)
     public sealed record Made(string Result) : CutState(Result);
 
     /// <summary>The result is derived from the inputs of the hash.</summary>
-    public sealed record Cut(string Result, string Hash) : CutState(Result);
+    public sealed record Cut(string Result, uint Hash) : CutState(Result);
 
     /// <summary>
     /// The inputs of the hash cannot be cut, for the reason. The result keeps the last good cut, or the source when there
     /// was none. A first cut that is refused before it names a result, for a ninth material, has none.
     /// </summary>
-    public sealed record Refused(string? Result, string Hash, string Reason) : CutState(Result);
+    public sealed record Refused(string? Result, uint Hash, string Reason) : CutState(Result);
 }
 
 /// <summary>
@@ -229,7 +229,7 @@ public sealed class CutSet
                 ops.Add(new SetField(e.Id, SceneEdits.MeshRendererId, "mesh", SceneValue.AssetRef(source)));
                 ops.Add(new SetField(e.Id, SceneEdits.CutTargetId, "source", null));
             }
-            if (MeshCutters.HashOf(e) != "")
+            if (MeshCutters.HashOf(e) != 0)
             {
                 ops.Add(new SetField(e.Id, SceneEdits.CutTargetId, "inputs_hash", null));
             }
@@ -250,7 +250,7 @@ public sealed class CutSet
         var hash = inputs.Hash();
         if (MeshCutters.HashOf(e) != hash)
         {
-            ops.Add(new SetField(e.Id, SceneEdits.CutTargetId, "inputs_hash", SceneValue.String(hash)));
+            ops.Add(new SetField(e.Id, SceneEdits.CutTargetId, "inputs_hash", MeshCutters.HashValue(hash)));
         }
         for (var i = 0; i < slots.Count; i++)
         {
@@ -391,12 +391,12 @@ public sealed class CutSet
         }
         foreach (var entity in expansion.Flat.Entities)
         {
-            if (MeshCutters.TargetLayer(entity) != null && MeshCutters.EditableMesh(entity) is { } mesh && !Known(mesh))
+            if (MeshCutters.TargetLayer(entity) != null && MeshCutters.EditableMesh(entity) is { } mesh && !Ready(mesh))
             {
                 return null;
             }
             if (entity.Components.Find(c => c.Id == SceneEdits.MeshCutterId) is { } cutter
-                && CutterFields.Of(cutter) is { Shape: CutterShape.Mesh, Mesh.Length: > 0 } fields && !Known(fields.Mesh))
+                && CutterFields.Of(cutter) is { Shape: CutterShape.Mesh, Mesh.Length: > 0 } fields && !Ready(fields.Mesh))
             {
                 return null;
             }
@@ -404,7 +404,10 @@ public sealed class CutSet
         return MeshCuts.Plan(expansion, MeshOf);
     }
 
-    bool Known(string guid) => _shell.Mesh.Meshes.Find(guid) != null || _shell.Assets.Find(guid) != null;
+    // Whether a mesh that a cut reads is there to read: open, or in the index. A mesh file that the index has but that
+    // cannot be read is not, so that it does not read as no cutter. A model's mesh is there, and is no target.
+    bool Ready(string guid) =>
+        _shell.Mesh.Meshes.Find(guid) != null || _shell.Assets.Find(guid) != null && (OnDisk(guid) == null || MeshOf(guid) != null);
 
     // A mesh file's mesh: its open document's, else its file's, read again when the file is written. Null for a model's
     // mesh, or one that does not parse.

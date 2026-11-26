@@ -153,10 +153,13 @@ public static class MeshCutters
     public static string? SourceOf(SceneEntity entity) =>
         Asset(entity.Components.Find(c => c.Id == SceneEdits.CutTargetId)?.Fields.Find(f => f.Name == "source")?.Value);
 
-    /// <summary>The <c>Cut_Target</c>'s <c>inputs_hash</c>, or "".</summary>
-    public static string HashOf(SceneEntity entity) =>
+    /// <summary>The <c>Cut_Target</c>'s <c>inputs_hash</c>, or 0.</summary>
+    public static uint HashOf(SceneEntity entity) =>
         entity.Components.Find(c => c.Id == SceneEdits.CutTargetId)?.Fields.Find(f => f.Name == "inputs_hash")?.Value
-            is { Kind: SceneValueKind.String } v ? v.Text : "";
+            is { Kind: SceneValueKind.Number, Numbers.Count: 1 } v && v.Numbers[0].Float is >= 0 and <= uint.MaxValue ? (uint)v.Numbers[0].Float : 0;
+
+    /// <summary>A hash as a field's value.</summary>
+    public static SceneValue HashValue(uint hash) => SceneValue.Of(new SceneNumber(hash, hash));
 
     /// <summary>What an entity's <c>Mesh_Renderer</c> names, or null.</summary>
     public static string? RendererMesh(SceneEntity entity) =>

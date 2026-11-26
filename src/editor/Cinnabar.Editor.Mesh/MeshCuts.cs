@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using Cinnabar.Editor.Document;
@@ -18,29 +19,36 @@ public sealed record CutInputs(SceneEntity Target, string Source, MeshData Sourc
     /// <summary>
     /// The hash of the inputs, which <c>Cut_Target.inputs_hash</c> keeps: the source's and the cutters' meshes as
     /// their files write them, the cutters' fields and their poses relative to the target. GUIDs are not in it, so a
-    /// source changed on disk changes it. Empty while nothing cuts the target.
+    /// source changed on disk changes it. It is 32 bits, which the scene's numbers hold exactly in the game too, since it
+    /// only tells a stale cut from a current one. 0 while nothing cuts the target, which no hash of inputs is.
     /// </summary>
-    public string Hash()
+    public uint Hash()
     {
         if (Cutters.Count == 0)
         {
-            return "";
+            return 0;
         }
         var text = new StringBuilder();
-        text.Append("source\n").Append(MeshFile.Write(SourceMesh));
+        text.Append("source\n").Append(Text(SourceMesh));
         foreach (var c in Cutters)
         {
             var f = c.Fields;
             text.Append("cutter ").Append(f.Shape).Append(' ').Append(f.CapMaterial).Append('\n');
-            text.Append(MeshFile.Write(c.Volume));
+            text.Append(Text(c.Volume));
             var m = MeshPlacement.Between(c.Pose, Pose);
             foreach (var v in (ReadOnlySpan<Vec3>)[m.X, m.Y, m.Z, m.Origin])
             {
                 text.Append(Number(v.X)).Append(' ').Append(Number(v.Y)).Append(' ').Append(Number(v.Z)).Append('\n');
             }
         }
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())).AsSpan(0, 16));
+        var hash = BitConverter.ToUInt32(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())), 0);
+        return hash == 0 ? 1 : hash;
     }
+
+    // A mesh's file text, kept for each snapshot, since every step of every edit hashes the scene's targets again.
+    static readonly ConditionalWeakTable<MeshData, string> Texts = [];
+
+    static string Text(MeshData mesh) => Texts.GetValue(mesh, MeshFile.Write);
 
     // To a tenth of a micrometer, far under the plane tolerance, so noise in the last bit of a double does not count.
     static string Number(double v) => Math.Round(v, 7).ToString("R", CultureInfo.InvariantCulture);

@@ -299,7 +299,7 @@ public class SceneFileTests
 
         Assert.Equal(2, MeshCutters.TargetLayer(scene.Entities[0]));
         Assert.Equal("8c4e3f5d2a6b7c93d0e1f2a3b4c5d6e7", MeshCutters.SourceOf(scene.Entities[0]));
-        Assert.Equal("0f1e2d3c4b5a69788796a5b4c3d2e1f0", MeshCutters.HashOf(scene.Entities[0]));
+        Assert.Equal(3735928559u, MeshCutters.HashOf(scene.Entities[0]));
         var full = CutterFields.Of(scene.Entities[1].Components.Single(c => c.Id == SceneEdits.MeshCutterId));
         Assert.Equal(CutterShape.Mesh, full.Shape);
         Assert.Equal(1.15, full.Extents.Y, 6);

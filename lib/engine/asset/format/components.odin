@@ -215,6 +215,6 @@ Cut_Target :: struct {
 	// The editable .mesh, while cutters cut the entity: its Mesh_Renderer then names the cut, which the editor derives
 	// from this and writes (see docs/editor/mesh-editing.md#cut-meshes). None while nothing cuts it.
 	source:      Guid `asset:"mesh"`,
-	// The hash of the cut's inputs, which the editor checks at the scene's open.
-	inputs_hash: string,
+	// The hash of the cut's inputs, which the editor checks at the scene's open. 0 while nothing cuts the entity.
+	inputs_hash: u32,
 }

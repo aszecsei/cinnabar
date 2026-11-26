@@ -71,6 +71,6 @@ public sealed class MeshCutsTests
         Assert.Equal(hash, Inputs(Level(0, cut: true)).Hash());
         Assert.NotEqual(hash, Inputs(Level(0.25)).Hash());
         Assert.NotEqual(hash, Inputs(Level(0, "\textents = [0.5, 1.1, 0.5]\n")).Hash());
-        Assert.Equal("", Inputs(Level(10)).Hash());
+        Assert.Equal(0u, Inputs(Level(10)).Hash());
     }
 }

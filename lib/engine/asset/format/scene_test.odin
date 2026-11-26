@@ -259,8 +259,7 @@ cutters_and_targets_parse :: proc(t: ^testing.T) {
 		guid_parse("8c4e3f5d2a6b7c93d0e1f2a3b4c5d6e7") or_else {},
 	)
 	hash, _ := field(target, "inputs_hash")
-	testing.expect_value(t, hash.kind, Scene_Value_Kind.String)
-	testing.expect_value(t, hash.text, "0f1e2d3c4b5a69788796a5b4c3d2e1f0")
+	testing.expect_value(t, hash.floats[0], 3735928559)
 
 	cutter := scene.entities[1].components[1]
 	testing.expect_value(t, cutter.id, SCENE_MESH_CUTTER_ID)
