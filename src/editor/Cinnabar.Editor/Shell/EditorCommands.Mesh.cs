@@ -80,6 +80,12 @@ static partial class EditorCommands
         MeshToolCommand(shell, MeshMergeFaces, "Merge Faces", "mesh", shell.Mesh.Tools.MergeFaces, "Dissolve the edges between selected faces that share a plane into one face.", MeshElement.Faces);
         MeshToolCommand(shell, MeshBridge, "Bridge", "edge", shell.Mesh.Tools.Bridge, "Join two selected loops of open edges, of the same number of edges, with a strip of quads.", MeshElement.Edges);
         MeshToolCommand(shell, MeshCap, "Cap", "face", shell.Mesh.Tools.Cap, "Fill a selected planar loop of open edges: one face, or triangles where the loop is concave.", MeshElement.Edges);
+        commands.Register(new Command(MeshCarve, "Carve", () => shell.Mesh.Tools.Carve())
+        {
+            Description = "Subtract each other edited mesh from the primary mesh, and select the faces that the cut makes. The cutters stay as they are.",
+            Icon = "collapse",
+            CanExecuteWhen = () => shell.Mesh.CanEditInMeshMode && shell.Mesh.EditedMeshes.Count >= 2,
+        });
         MeshToolCommand(shell, MeshInvert, "Invert", "rotate", shell.Mesh.Tools.InvertFaces, "Turn the selected faces to face the other way, with their textures reading the same.", MeshElement.Faces);
         MeshToolCommand(shell, MeshDetach, "Detach", "scene", () => shell.Mesh.Tools.Detach(keepSource: false), "Move the selected faces into a new mesh file and entity at the same pose.", MeshElement.Faces);
         MeshToolCommand(shell, MeshExtract, "Extract", "copy", () => shell.Mesh.Tools.Detach(keepSource: true), "Copy the selected faces into a new mesh file and entity at the same pose.", MeshElement.Faces);

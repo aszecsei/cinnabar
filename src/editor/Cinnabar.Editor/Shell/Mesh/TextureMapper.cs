@@ -412,16 +412,25 @@ public sealed class TextureMapper
             ops.Add(new MeshOperation(meshGuid, mesh, after, _session.Meshes));
         }
         var slot = after.Materials.IndexOf(material);
-        if (slot >= 0 && _shell.Scene?.Expanded.Flat.Find(entity) is { } document)
+        if (slot >= 0 && RendererSlotOperation(entity, slot, material) is { } set)
         {
-            var renderer = document.Components.Find(c => c.Id == SceneEdits.MeshRendererId);
-            var field = $"materials.{slot}";
-            if (renderer?.Fields.Find(f => f.Name == field)?.Value is not { Kind: SceneValueKind.Asset } current || current.Asset != material)
-            {
-                ops.Add(new SetField(entity, SceneEdits.MeshRendererId, field, SceneValue.AssetRef(material)));
-            }
+            ops.Add(set);
         }
         return ops;
+    }
+
+    /// <summary>The edit that sets an entity's Mesh_Renderer slot to a material, or null when it draws that already.</summary>
+    internal SetField? RendererSlotOperation(ulong entity, int slot, string material)
+    {
+        if (_shell.Scene?.Expanded.Flat.Find(entity) is not { } document)
+        {
+            return null;
+        }
+        var renderer = document.Components.Find(c => c.Id == SceneEdits.MeshRendererId);
+        var field = $"materials.{slot}";
+        return renderer?.Fields.Find(f => f.Name == field)?.Value is { Kind: SceneValueKind.Asset } current && current.Asset == material
+            ? null
+            : new SetField(entity, SceneEdits.MeshRendererId, field, SceneValue.AssetRef(material));
     }
 
     // The faces a material dropped at a pixel would set: the selected faces when it is over one of them, else the

@@ -266,6 +266,91 @@ public sealed partial class MeshToolRunner
     }
 
     /// <summary>
+    /// Carve (see docs/editor/mesh-editing.md#booleans): subtracts each other edited mesh from the primary mesh, in
+    /// order, as one undo entry, and selects the faces that the cut made. Each cutter's faces take the primary mesh's
+    /// slot for the cutter's first material, by the face-material rules, with the entity's slot set in the same
+    /// entry. The cutters stay as they are. A refusal by any cutter changes nothing.
+    /// </summary>
+    public bool Carve()
+    {
+        _session.EndOpenEntry();
+        if (!_session.CanEditInMeshMode || _shell.Scene == null || _session.PrimaryMeshGuid is not { } guid
+            || _session.FindMeshData(guid) is not { } before || !_session.EditedMeshes.TryGetValue(guid, out var entity))
+        {
+            return false;
+        }
+        var flat = _shell.Scene.Expanded.Flat;
+        if (flat.Find(entity) is not { } targetEntity || SceneEdits.WorldPose(flat, targetEntity) is not { } targetPose)
+        {
+            return false;
+        }
+        var cutters = _session.EditedMeshes.Where(m => m.Key != guid).ToList();
+        if (cutters.Count == 0)
+        {
+            _shell.Console.Add(LogLevel.Info, "mesh: carve needs a second edited mesh to cut with");
+            return false;
+        }
+        var mesh = before;
+        // Which faces of the mesh so far the cuts made, carried through each later cut.
+        var cut = new bool[mesh.Faces.Length];
+        var slots = new Dictionary<int, string>();
+        foreach (var (cutterGuid, cutterId) in cutters)
+        {
+            if (_session.FindMeshData(cutterGuid) is not { } cutter || flat.Find(cutterId) is not { } cutterEntity || SceneEdits.WorldPose(flat, cutterEntity) is not { } cutterPose)
+            {
+                continue;
+            }
+            var material = cutter.Materials.FirstOrDefault(m => m != "") ?? "";
+            var slot = 0;
+            if (material != "")
+            {
+                // The cut faces are new, so every face of the mesh so far keeps its slot.
+                if (MeshTexture.SlotFor(mesh, new HashSet<int>(), material) is not { } free)
+                {
+                    _shell.Console.Add(LogLevel.Warning, $"mesh: cannot carve: a mesh has {MeshData.MaxSlots} materials, and every slot is in use");
+                    return false;
+                }
+                slot = free;
+            }
+            var result = MeshBoolean.Subtract(mesh, targetPose, cutter, cutterPose, slot);
+            if (result.Reason is { } reason)
+            {
+                _shell.Console.Add(LogLevel.Warning, $"mesh: cannot carve: {_session.Meshes.Find(cutterGuid)?.Title ?? cutterGuid}: {reason}");
+                return false;
+            }
+            if (ReferenceEquals(result.Mesh, mesh))
+            {
+                continue;
+            }
+            mesh = material != "" ? result.Mesh.With(materials: result.Mesh.Materials.SetItem(slot, material)) : result.Mesh;
+            cut = [.. result.SourceFace.Select(s => s < 0 || cut[s])];
+            if (material != "")
+            {
+                slots[slot] = material;
+            }
+        }
+        if (ReferenceEquals(mesh, before))
+        {
+            _shell.Console.Add(LogLevel.Info, "mesh: carve changed nothing: no cutter meets the mesh");
+            return false;
+        }
+        List<Operation> ops = [new MeshOperation(guid, before, mesh, _session.Meshes)];
+        foreach (var (slot, material) in slots)
+        {
+            if (mesh.Materials[slot] == material && _session.Texture.RendererSlotOperation(entity, slot, material) is { } set)
+            {
+                ops.Add(set);
+            }
+        }
+        if (!_shell.Edit("Carve", [.. ops]))
+        {
+            return false;
+        }
+        _session.SetMeshSelection(new MeshSelection(MeshElement.Faces, [.. Enumerable.Range(0, cut.Length).Where(i => cut[i]).Select(i => new MeshItem(guid, i))]), switchKind: true);
+        return true;
+    }
+
+    /// <summary>
     /// Detach moves the selected faces into a new mesh asset and entity at the first source's pose, as Extract copies
     /// them. Faces of several meshes go into one, in the first mesh's space.
     /// </summary>

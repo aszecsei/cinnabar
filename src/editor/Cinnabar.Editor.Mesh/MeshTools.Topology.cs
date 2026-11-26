@@ -187,30 +187,7 @@ public static partial class MeshTools
         var faces = mesh.Faces.Select(f => f with { Corners = Dedupe(f.Corners.Select(c => target[c])) }).ToList();
         var sharp = mesh.SharpEdges.Select(e => new MeshEdge(target[e.A], target[e.B])).Where(e => e.A != e.B).Distinct().ToList();
         var welded = mesh.With(faces: faces, sharpEdges: sharp);
-        // Collinear vertices: on a straight line between their neighbors in every face that uses them.
-        var dissolve = new HashSet<int>();
-        for (var v = 0; v < welded.Vertices.Length; v++)
-        {
-            var around = welded.FacesOfVertex(v);
-            if (around.Count == 0)
-            {
-                continue;
-            }
-            var collinear = true;
-            foreach (var f in around)
-            {
-                var corners = welded.Faces[f].Corners;
-                var k = corners.IndexOf(v);
-                var (prev, next) = (welded.Vertices[corners[(k + corners.Length - 1) % corners.Length]], welded.Vertices[corners[(k + 1) % corners.Length]]);
-                var line = (next - prev).Normalized();
-                var off = welded.Vertices[v] - prev;
-                collinear &= corners.Length > 3 && (off - line * Vec3.Dot(off, line)).Length <= WeldDistance;
-            }
-            if (collinear)
-            {
-                dissolve.Add(v);
-            }
-        }
+        var dissolve = Collinear(welded);
         faces = welded.Faces.Select(f => f with { Corners = [.. f.Corners.Where(c => !dissolve.Contains(c))] }).ToList();
         var degenerate = faces.Select((f, i) => (f, i)).Where(p => p.f.Corners.Distinct().Count() < 3).Select(p => p.i).ToHashSet();
         var used = faces.Where((f, i) => !degenerate.Contains(i)).SelectMany(f => f.Corners).ToHashSet();
@@ -222,6 +199,38 @@ public static partial class MeshTools
             problems.Add(open == 1 ? "1 edge is open" : $"{open} edges are open");
         }
         return (result, problems);
+    }
+
+    /// <summary>
+    /// The vertices that lie on a straight line between their neighbors in every face that uses them, each face of
+    /// more than three corners, so that removing them changes no shape. With <paramref name="among"/>, only those.
+    /// </summary>
+    internal static HashSet<int> Collinear(MeshData mesh, Func<int, bool>? among = null)
+    {
+        var dissolve = new HashSet<int>();
+        for (var v = 0; v < mesh.Vertices.Length; v++)
+        {
+            var around = mesh.FacesOfVertex(v);
+            if (around.Count == 0 || (among != null && !among(v)))
+            {
+                continue;
+            }
+            var collinear = true;
+            foreach (var f in around)
+            {
+                var corners = mesh.Faces[f].Corners;
+                var k = corners.IndexOf(v);
+                var (prev, next) = (mesh.Vertices[corners[(k + corners.Length - 1) % corners.Length]], mesh.Vertices[corners[(k + 1) % corners.Length]]);
+                var line = (next - prev).Normalized();
+                var off = mesh.Vertices[v] - prev;
+                collinear &= corners.Length > 3 && (off - line * Vec3.Dot(off, line)).Length <= WeldDistance;
+            }
+            if (collinear)
+            {
+                dissolve.Add(v);
+            }
+        }
+        return dissolve;
     }
 
     /// <summary>
