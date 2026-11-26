@@ -637,12 +637,7 @@ motor :: proc(t: ^testing.T, api: ^physics.Physics_API) {
 		api.step(w, STEP, 1)
 	}
 	v := state(api, w, BOX).angular_velocity
-	testing.expectf(
-		t,
-		abs(v.y) > 1 && abs(v.x) < 0.1 && abs(v.z) < 0.1,
-		"it turns about y: %v",
-		v,
-	)
+	testing.expectf(t, abs(v.y) > 1 && abs(v.x) < 0.1 && abs(v.z) < 0.1, "it turns about y: %v", v)
 }
 
 // meshes: a ray from above hits a ground of two triangles; a dynamic box whose shape is the hull of its corners falls
