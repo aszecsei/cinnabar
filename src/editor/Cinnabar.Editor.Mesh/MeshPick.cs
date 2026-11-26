@@ -33,6 +33,82 @@ public sealed record MeshPlacement(Vec3 Origin, Quat Rotation, Vec3 Scale)
     }
 
     static double Divide(double a, double b) => Math.Abs(b) < 1e-12 ? 0 : a / b;
+
+    /// <summary>
+    /// The map from one entity's mesh space to another's (see docs/editor/mesh-editing.md#booleans): the positions'
+    /// difference is taken in raw units first, so the rest is in doubles near the target's origin, and a
+    /// non-uniform scale on either side composes exactly, as an affine map.
+    /// </summary>
+    public static MeshAffine Between(Pose from, Pose to)
+    {
+        var source = Of(from, to.Position);
+        var target = Of(to, to.Position);
+        var origin = target.ToLocal(source.ToView(Vec3.Zero));
+        var x = target.ToLocal(source.ToView(Vec3.UnitX)) - origin;
+        var y = target.ToLocal(source.ToView(Vec3.UnitY)) - origin;
+        var z = target.ToLocal(source.ToView(Vec3.UnitZ)) - origin;
+        return new MeshAffine(x, y, z, origin);
+    }
+}
+
+/// <summary>
+/// An affine map of positions: the images of the three axes, the columns of its linear part, and the image of the
+/// origin. A negative determinant mirrors, so a mesh moved by it turns inside out unless its faces are reversed.
+/// </summary>
+public readonly record struct MeshAffine(Vec3 X, Vec3 Y, Vec3 Z, Vec3 Origin)
+{
+    public static MeshAffine Identity => new(Vec3.UnitX, Vec3.UnitY, Vec3.UnitZ, Vec3.Zero);
+
+    public Vec3 Apply(Vec3 p) => Origin + X * p.X + Y * p.Y + Z * p.Z;
+
+    public double Determinant => Vec3.Dot(X, Vec3.Cross(Y, Z));
+
+    /// <summary>The map back, or null when this one flattens space, as a zero scale does.</summary>
+    public MeshAffine? Inverse
+    {
+        get
+        {
+            var det = Determinant;
+            if (Math.Abs(det) < 1e-12)
+            {
+                return null;
+            }
+            // The rows of the inverse are the cross products of the columns, over the determinant.
+            var (r0, r1, r2) = (Vec3.Cross(Y, Z) / det, Vec3.Cross(Z, X) / det, Vec3.Cross(X, Y) / det);
+            var (x, y, z) = (new Vec3(r0.X, r1.X, r2.X), new Vec3(r0.Y, r1.Y, r2.Y), new Vec3(r0.Z, r1.Z, r2.Z));
+            var origin = -(x * Origin.X + y * Origin.Y + z * Origin.Z);
+            return new MeshAffine(x, y, z, origin);
+        }
+    }
+
+    /// <summary>
+    /// A face's mapping moved with the face, so every moved position has the UV that it had before the move. Null
+    /// when the map cannot be undone. The axes stay unit, with their stretch in the scale.
+    /// </summary>
+    public Mapping? MoveMapping(Mapping m)
+    {
+        if (Inverse is not { } back)
+        {
+            return null;
+        }
+        // A position p here was back(p) = B p + e there, so p · Bᵀu is its distance along u, less e · u.
+        Vec3 Transposed(Vec3 a) => new(Vec3.Dot(back.X, a), Vec3.Dot(back.Y, a), Vec3.Dot(back.Z, a));
+        var (u, v) = (Transposed(m.UAxis), Transposed(m.VAxis));
+        if (u.Length < 1e-12 || v.Length < 1e-12)
+        {
+            return null;
+        }
+        var (shiftU, shiftV) = m.Turn(Vec3.Dot(back.Origin, m.UAxis) / m.ScaleU, Vec3.Dot(back.Origin, m.VAxis) / m.ScaleV);
+        return m with
+        {
+            UAxis = u / u.Length,
+            VAxis = v / v.Length,
+            ScaleU = m.ScaleU / u.Length,
+            ScaleV = m.ScaleV / v.Length,
+            ShiftU = m.ShiftU + shiftU,
+            ShiftV = m.ShiftV + shiftV,
+        };
+    }
 }
 
 /// <summary>A face that a ray hit: its index, the view-space distance along the ray, and the point, relative to the camera.</summary>

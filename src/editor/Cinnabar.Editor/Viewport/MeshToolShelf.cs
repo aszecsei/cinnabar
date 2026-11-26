@@ -33,7 +33,7 @@ public sealed class MeshToolShelf : Border
         Section("Edit",
             Buttons(EditorCommands.MeshExtrude, EditorCommands.MeshPushPull, EditorCommands.MeshOffset, EditorCommands.MeshBevel,
                 EditorCommands.MeshInset, EditorCommands.MeshOutset, EditorCommands.MeshDuplicate, EditorCommands.MeshInvert,
-                EditorCommands.MeshCollapse, EditorCommands.MeshMergeFaces, EditorCommands.MeshBridge, EditorCommands.MeshCap, EditorCommands.MeshDetach, EditorCommands.MeshExtract,
+                EditorCommands.MeshCollapse, EditorCommands.MeshMergeFaces, EditorCommands.MeshBridge, EditorCommands.MeshCap, EditorCommands.MeshCarve, EditorCommands.MeshDetach, EditorCommands.MeshExtract,
                 EditorCommands.DeleteEntity, EditorCommands.MeshClean),
             Wide(EditorCommands.MeshRecalculateNormals),
             ToolButton.Choice(shell, EditorCommands.MeshBevelSegments),

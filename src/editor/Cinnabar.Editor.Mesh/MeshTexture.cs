@@ -304,19 +304,29 @@ public static class MeshTexture
     public static (MeshData? Mesh, string? Reason) SetMaterial(MeshData mesh, IEnumerable<int> faces, string guid)
     {
         var chosen = faces.ToHashSet();
-        var slot = mesh.Materials.IndexOf(guid);
-        if (slot < 0)
+        if (SlotFor(mesh, chosen, guid) is not { } slot)
         {
-            var used = mesh.Faces.Where((f, i) => !chosen.Contains(i)).Select(f => f.Slot).ToHashSet();
-            slot = Enumerable.Range(0, MeshData.MaxSlots).FirstOrDefault(s => !used.Contains(s), -1);
-            if (slot < 0)
-            {
-                return (null, $"a mesh has {MeshData.MaxSlots} materials, and every slot is in use");
-            }
+            return (null, $"a mesh has {MeshData.MaxSlots} materials, and every slot is in use");
         }
         var materials = mesh.Materials.SetItem(slot, guid);
         var changed = mesh.Faces.Select((f, i) => chosen.Contains(i) && f.Slot != slot ? f with { Slot = slot } : f);
         return (mesh.With(materials: materials, faces: changed), null);
+    }
+
+    /// <summary>
+    /// The slot that faces of a material take: the mesh's slot that names it, else a slot that no face but those uses,
+    /// or null when every slot is in use, so a ninth material is refused.
+    /// </summary>
+    public static int? SlotFor(MeshData mesh, IReadOnlySet<int> faces, string guid)
+    {
+        var slot = mesh.Materials.IndexOf(guid);
+        if (slot >= 0)
+        {
+            return slot;
+        }
+        var used = mesh.Faces.Where((f, i) => !faces.Contains(i)).Select(f => f.Slot).ToHashSet();
+        slot = Enumerable.Range(0, MeshData.MaxSlots).FirstOrDefault(s => !used.Contains(s), -1);
+        return slot < 0 ? null : slot;
     }
 
     /// <summary>The axes with the rotation folded into them, which is exact when the scales agree and keeps the texture's direction otherwise.</summary>

@@ -95,8 +95,11 @@ public sealed partial class MeshSession
     /// The primary edited mesh: the first mesh of the sub-selection, whose axes the gizmo takes, or with nothing
     /// selected the first edited mesh. Null when no edited mesh is open.
     /// </summary>
-    public MeshData? PrimaryMesh =>
-        MeshSelection.Guids.Select(FindMeshData).FirstOrDefault(m => m != null) ?? _editedMeshes.Keys.Select(FindMeshData).FirstOrDefault(m => m != null);
+    public MeshData? PrimaryMesh => PrimaryMeshGuid is { } guid ? FindMeshData(guid) : null;
+
+    /// <summary>The GUID of the <see cref="PrimaryMesh"/>, or null.</summary>
+    public string? PrimaryMeshGuid =>
+        MeshSelection.Guids.FirstOrDefault(g => FindMeshData(g) != null) ?? _editedMeshes.Keys.FirstOrDefault(g => FindMeshData(g) != null);
 
     // "Solid", "Open: 4 edges", or "Not solid" for a closed mesh that is wound inside out or has an edge of three faces.
     static string Solidity(MeshData mesh) => mesh.IsSolid ? "Solid"
