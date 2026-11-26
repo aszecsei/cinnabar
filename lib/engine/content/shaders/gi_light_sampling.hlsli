@@ -7,7 +7,9 @@
 // expectation, so no light is left out and none counts twice. The punctual lights are drawn uniformly from the hit's
 // lists, or each is a candidate once when they are no more than the stream's candidates; the triangles are drawn by
 // their power, then a point uniformly over the triangle, whose chance per area the solid angle's cosines and squared
-// distance turn into the light's. With both, each stream has half the candidates. A pass includes it after
+// distance turn into the light's. The triangles have a quarter of the candidates, at least one, and the punctual
+// lights the rest, at least one: each triangle's candidate costs its distribution's search, and draws by power are
+// close to the light that they give already. A pass includes it after
 // material_lighting.hlsli, whose lights it reads, and ray_scene.hlsli.
 #ifndef GI_LIGHT_SAMPLING_HLSLI
 #define GI_LIGHT_SAMPLING_HLSLI
@@ -125,7 +127,8 @@ Hit_Choice pick_hit_light(uint buffer, uint offset, uint candidates, uint emitte
 		return choice;
 	}
 	uint m = clamp(candidates, 1, MAX_HIT_CANDIDATES);
-	uint me = triangles == 0 ? 0 : (c.total == 0 ? m : max(m / 2, 1));
+	// A quarter of the candidates, at least one, draw triangles.
+	uint me = triangles == 0 ? 0 : max(m / 4, 1);
 	uint mp = c.total == 0 ? 0 : max(m - me, 1);
 	bool every = c.total <= mp;
 	uint n = every ? c.total : mp;

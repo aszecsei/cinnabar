@@ -1,11 +1,18 @@
 package render
 
+import "base:runtime"
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
 import "core:mem/virtual"
+import "core:slice"
+import "core:sync"
 import "core:testing"
 
+import "cinnabar:core"
+import "cinnabar:core/gpu"
+import null "cinnabar:core/gpu/null"
+import "cinnabar:core/jobs"
 import "cinnabar:engine/ecs"
 
 // The pool hands out ranges first fit, and a freed range merges with the free ranges beside it, so the pool is whole
@@ -226,8 +233,8 @@ mirror_triangle_light :: proc(tri: Hit_Mirror_Triangle, y, p, n: [3]f32) -> [3]f
 }
 
 // mirror_estimate is pick_hit_light's estimate without the shadow, as gi_light_sampling.hlsli weighs its streams: each
-// point light once when they are no more than their candidates, or drawn uniformly, and the triangles by their power,
-// then a point uniformly over the triangle.
+// point light once when they are no more than their candidates, or drawn uniformly, and a quarter of the candidates
+// triangles by their power, then a point uniformly over the triangle.
 @(private = "file")
 mirror_estimate :: proc(
 	lights: []Hit_Mirror_Light,
@@ -239,7 +246,7 @@ mirror_estimate :: proc(
 	if len(lights) == 0 && len(triangles) == 0 {
 		return 0
 	}
-	me := len(triangles) == 0 ? 0 : (len(lights) == 0 ? m : max(m / 2, 1))
+	me := len(triangles) == 0 ? 0 : max(m / 4, 1)
 	mp := len(lights) == 0 ? 0 : max(m - me, 1)
 	every := len(lights) <= mp
 	share := every ? f32(1) : f32(len(lights)) / f32(mp)
@@ -391,4 +398,120 @@ the_hits_estimate_is_unbiased :: proc(t: ^testing.T) {
 		}
 		free_all(context.temp_allocator)
 	}
+}
+
+// The emitters' passes run on the compute queue and pass validation: a frame with no listed submesh scans and shades
+// its jobs, a frame with one builds and scans its triangles too, and the frame's hit shading has room for the world
+// probes', the split cascades' and the traced reflections' batches beside the emitters'.
+@(test)
+the_emitters_run_on_the_compute_queue_and_pass_validation :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	testing.expect(t, jobs.init(2))
+	defer jobs.shutdown()
+	testing.expect(t, null.init(nil, {64, 32}))
+	defer null.shutdown()
+	platform := core.Platform_API {
+		frame_allocator             = virtual.arena_allocator(&arena),
+		heap_allocator              = runtime.heap_allocator(),
+		jobs_run                    = jobs.run,
+		jobs_wait                   = jobs.wait,
+		gpu_frame_target            = null.frame_target,
+		gpu_submit                  = null.submit,
+		gpu_upload                  = null.upload,
+		gpu_read_buffer             = null.read_buffer,
+		gpu_create_texture          = null.create_texture,
+		gpu_destroy_texture         = null.destroy_texture,
+		gpu_create_buffer           = null.create_buffer,
+		gpu_destroy_buffer          = null.destroy_buffer,
+		gpu_create_accel            = null.create_accel,
+		gpu_destroy_accel           = null.destroy_accel,
+		gpu_create_compute_pipeline = null.create_compute_pipeline,
+		gpu_destroy_pipeline        = null.destroy_pipeline,
+		gpu_create_sampler          = null.create_sampler,
+		gpu_destroy_sampler         = null.destroy_sampler,
+	}
+	r := new(Renderer)
+	defer free(r)
+	r.platform = &platform
+	r.caps.ray_query = true
+	code := []byte{1}
+	probes := &r.gi.probes
+	for p in ([]^Shader_Pipeline{&r.ray_scene.bin_pipeline, &r.ray_scene.fallback, &probes.reset, &probes.trace, &probes.light, &probes.screen, &probes.update, &r.gi.emitters.pipeline}) {
+		p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
+	}
+	r.ray_scene.accel = platform.gpu_create_accel(
+		{kind = .Top, max_instances = 4, label = "test scene"},
+	)
+	defer ray_scene_destroy(&r.ray_scene, &platform)
+	defer gi_probes_destroy(probes, &platform)
+	defer gi_emitters_destroy(&r.gi.emitters, &platform)
+	instances := platform.gpu_create_buffer(
+		{size = 1024, usage = {.Storage}, label = "instances"},
+		nil,
+	)
+	defer platform.gpu_destroy_buffer(instances)
+
+	lamp := ecs.Entity(4)
+	hit_instances := []Hit_Instance{{}, {mesh = 0, first = 0, count = 1}}
+	hit_submeshes := []Hit_Submesh{{first_primitive = 0, primitive_count = 12, bin = 1}}
+	keys := []Hit_Entry_Key{{entity = lamp, submesh = 0, pipeline = 0, shaded = true}}
+	for frame in 0 ..< 3 {
+		cache: Texture_Cache
+		g := begin(&platform, &cache)
+		f := new(Frame, platform.frame_allocator)
+		f^ = {
+			renderer = r,
+			state    = &r.view,
+			graph    = &g,
+			size     = {64, 32},
+		}
+		f.gi = new(Gi_Frame, platform.frame_allocator)
+		f.gi.settings = {
+			technique = .Split_Cascades,
+			level     = .Low,
+		}
+		sf := new(Scene_Frame, platform.frame_allocator)
+		f.scene_frame = sf
+		sf.view_constants = make([]gpu.Upload, 1, platform.frame_allocator)
+		sf.view_constants[0], _ = platform.gpu_upload(
+			size_of(Frame_Constants),
+			gpu.PASS_CONSTANTS_ALIGN,
+		)
+		sf.instances = import_buffer(&g, instances)
+		sf.hit_instances, _ = platform.gpu_upload(size_of(Hit_Instance) * len(hit_instances), 16)
+		copy(sf.hit_instances.data, slice.to_bytes(hit_instances))
+		sf.hit_submeshes, _ = platform.gpu_upload(size_of(Hit_Submesh) * len(hit_submeshes), 16)
+		copy(sf.hit_submeshes.data, slice.to_bytes(hit_submeshes))
+		sf.hit_instance_count = len(hit_instances)
+		sf.hit_bins = {0, 1}
+		sf.hit_keys = keys
+		testing.expect(t, request_ray_scene(f))
+		f.ray_scene.accel = import_accel(&g, r.ray_scene.accel)
+		if frame == 1 {
+			// The scan found the lamp bright.
+			change_emitter(
+				&r.gi.emitters,
+				Emitter_Scanned{{key = {lamp, 0}, signature = {0, 0, 12}}, f32(4)},
+			)
+		}
+		ef := add_gi_emitter_passes(f)
+		testing.expectf(t, ef != nil, "frame %d: no emitters", frame)
+		if ef == nil {
+			break
+		}
+		testing.expect(t, ef.job_count > 0)
+		testing.expect_value(t, ef.triangles, frame == 0 ? 0 : 12)
+		testing.expect(t, int(f.ray_scene.batches) + 3 <= MAX_HIT_BATCHES)
+		p := add_compute_pass(&g, "hit light", proc(_: ^Pass_Context) {}, nil, queue = .Compute)
+		read(&g, p, ef.samples)
+		read(&g, p, ef.pool)
+		keep_pass(&g, p)
+		testing.expectf(t, execute(&g), "frame %d did not execute", frame)
+		cache_destroy(&cache, &platform)
+		free_all(platform.frame_allocator)
+	}
+	testing.expect_value(t, len(r.gi.emitters.listed), 1)
 }
