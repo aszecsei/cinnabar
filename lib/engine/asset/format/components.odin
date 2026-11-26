@@ -2,7 +2,8 @@ package asset_format
 
 // The engine components that the cooker reads from a scene's text, by their stable IDs and field names, since it cannot
 // lay out the native components (see docs/content/kinds/nav-meshes.md#input). Their defaults are here, so the registry
-// and the cooker read the same values: lib/engine/ecs, lib/engine/physics and lib/engine/nav register them with these.
+// and the cooker read the same values: lib/engine/ecs, lib/engine/volume, lib/engine/physics, lib/engine/nav and
+// lib/engine/cut register them with these.
 
 // Stable IDs, as the engine registers them (see docs/world/ecs.md#component-registry).
 SCENE_VOLUME_ID :: 42

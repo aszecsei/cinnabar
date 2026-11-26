@@ -120,6 +120,20 @@ public sealed class MeshCutterTests
     }
 
     [Fact]
+    public void AVariantsDoorDoesNotCutTheFrameThatTheVariantAdds()
+    {
+        // A variant's root is an instance of the door, so the door's opening is in the variant's instance, with the
+        // frame that the variant adds.
+        const string variantPrefab = "d0000000000000000000000000000003";
+        var variant = Parse("scene 4\n\n" +
+            Instance(0x3000000000000001, DoorPrefab, Pose()) +
+            "entity 3000000000000002\nname = \"Variant Frame\"\nparent = @3000000000000001\n" + Local(1) + Renderer(FrameMesh) + Target(1));
+        var level = Entity(1, "Wall", Pose() + Renderer(WallMesh) + Target(1)) + Instance(0x9000000000000001, variantPrefab, Pose());
+
+        Assert.Equal(["Wall"], Targets(Expand(level, more: new() { [variantPrefab] = variant })));
+    }
+
+    [Fact]
     public void ACutterOutsideAPrefabCutsWhatItMeets()
     {
         var level =

@@ -123,11 +123,22 @@ public static class MeshCutters
     }
 
     // The path of the innermost instance that holds an entity, which its own instance's entities start with: the
-    // instance that it is the root of, or the one that its prefab places it in. Null for an entity of the scene.
-    static IReadOnlyList<ulong>? OwnInstance(Expansion expansion, ulong id) =>
-        expansion.InstanceOf(id) is not { } inst ? null
-        : inst.Prefab != "" ? inst.Path
-        : inst.Path.Take(inst.Path.Count - 1).ToArray();
+    // instance that it is the root of, or the one that its prefab places it in. Null for an entity of the scene. An
+    // instance whose root is no flat entity is a variant's base, whose root is the variant's: the variant is the
+    // instance then, so a frame that the variant adds is the door's own too.
+    static IReadOnlyList<ulong>? OwnInstance(Expansion expansion, ulong id)
+    {
+        if (expansion.InstanceOf(id) is not { } inst)
+        {
+            return null;
+        }
+        var path = inst.Prefab != "" ? inst.Path : inst.Path.Take(inst.Path.Count - 1).ToArray();
+        while (path.Count > 1 && expansion.Flat.Find(ScenePath.Id(path)) == null)
+        {
+            path = path.Take(path.Count - 1).ToArray();
+        }
+        return path;
+    }
 
     static bool StartsWith(IReadOnlyList<ulong> path, IReadOnlyList<ulong> prefix) =>
         path.Count >= prefix.Count && prefix.Select((id, i) => path[i] == id).All(b => b);
