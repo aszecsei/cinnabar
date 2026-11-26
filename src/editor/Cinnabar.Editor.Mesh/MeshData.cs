@@ -200,6 +200,16 @@ public sealed class MeshData
 
     public static Vec3 FaceNormal(ImmutableArray<Vec3> vertices, ImmutableArray<int> corners)
     {
+        var n = NewellVector(vertices, corners);
+        return n.Length < 1e-12 ? Vec3.Zero : n / n.Length;
+    }
+
+    /// <summary>
+    /// A face's Newell vector before it is made unit: along the face's normal, twice its area long for a planar face,
+    /// or zero for a corner the mesh does not have.
+    /// </summary>
+    public static Vec3 NewellVector(ImmutableArray<Vec3> vertices, ImmutableArray<int> corners)
+    {
         double x = 0, y = 0, z = 0;
         for (var i = 0; i < corners.Length; i++)
         {
@@ -214,8 +224,63 @@ public sealed class MeshData
             y += (p.Z - q.Z) * (p.X + q.X);
             z += (p.X - q.X) * (p.Y + q.Y);
         }
-        var n = new Vec3(x, y, z);
-        return n.Length < 1e-12 ? Vec3.Zero : n / n.Length;
+        return new Vec3(x, y, z);
+    }
+
+    /// <summary>
+    /// The volume that the faces enclose, by the divergence theorem over their Newell vectors: positive when the faces
+    /// front out, negative when the mesh is inside out, and meaningless for a mesh that is not closed.
+    /// </summary>
+    public double SignedVolume => Shape.Value.Volume;
+
+    /// <summary>The indices into <see cref="Edges"/> of the open edges: those that the faces go along only once.</summary>
+    public ImmutableArray<int> OpenEdges => Shape.Value.Open;
+
+    /// <summary>
+    /// Whether the mesh has an inside (see docs/editor/mesh-editing.md#the-mesh-model): it has faces, the faces go along
+    /// every edge exactly twice, once each way round, and the volume is positive. An open mesh is still valid.
+    /// </summary>
+    public bool IsSolid => Shape.Value.Solid;
+
+    Lazy<Solidity> Shape => _shape ??= new Lazy<Solidity>(() => new Solidity(this));
+    Lazy<Solidity>? _shape;
+
+    // The open edges, whether every edge is wound once each way, and the volume, from one pass over the half-edges.
+    sealed class Solidity
+    {
+        public ImmutableArray<int> Open { get; }
+        public double Volume { get; }
+        public bool Solid { get; }
+
+        public Solidity(MeshData mesh)
+        {
+            // Each edge's traversals: how often the faces go from its lower vertex to its higher, and back.
+            var ways = new Dictionary<MeshEdge, (int Up, int Down)>();
+            double volume = 0;
+            for (var i = 0; i < mesh.Faces.Length; i++)
+            {
+                var corners = mesh.Faces[i].Corners;
+                if (corners.Any(c => c < 0 || c >= mesh.Vertices.Length))
+                {
+                    continue;
+                }
+                volume += Vec3.Dot(NewellVector(mesh.Vertices, corners), mesh.Vertices[corners[0]]) / 6;
+                for (var k = 0; k < corners.Length; k++)
+                {
+                    var (a, b) = (corners[k], corners[(k + 1) % corners.Length]);
+                    if (a == b)
+                    {
+                        continue;
+                    }
+                    var edge = new MeshEdge(Math.Min(a, b), Math.Max(a, b));
+                    var (up, down) = ways.GetValueOrDefault(edge);
+                    ways[edge] = a < b ? (up + 1, down) : (up, down + 1);
+                }
+            }
+            Volume = volume;
+            Open = [.. ways.Where(w => w.Value.Up + w.Value.Down == 1).Select(w => mesh.EdgeIndex(w.Key.A, w.Key.B)).Order()];
+            Solid = mesh.Faces.Length > 0 && ways.Values.All(w => w is (1, 1)) && volume > 1e-12;
+        }
     }
 
     /// <summary>

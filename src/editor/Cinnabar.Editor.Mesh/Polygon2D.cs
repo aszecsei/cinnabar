@@ -46,6 +46,89 @@ public static class Polygon2D
     }
 
     /// <summary>
+    /// Splits a polygon into triangles, as indices into its points in its winding, as the bake's <c>triangulate</c>
+    /// does (<c>format/mesh_bake.odin</c>): one triangle fan for a convex polygon, else ear clipping in the plane of
+    /// the normal. Null for a polygon that crosses itself. <paramref name="convex"/> says which it was.
+    /// </summary>
+    public static List<(int A, int B, int C)>? Triangulate(IReadOnlyList<Vec3> polygon, Vec3 normal, out bool convex)
+    {
+        var n = polygon.Count;
+        // The bake's basis: perpendicular to the normal, from x, or from y when the normal is nearest x.
+        var axis = Math.Abs(normal.X) > Math.Abs(normal.Y) && Math.Abs(normal.X) > Math.Abs(normal.Z) ? Vec3.UnitY : Vec3.UnitX;
+        var e1 = Vec3.Cross(normal, axis).Normalized();
+        var e2 = Vec3.Cross(normal, e1);
+        var points = polygon.Select(p => (X: Vec3.Dot(p, e1), Y: Vec3.Dot(p, e2))).ToArray();
+        double area = 0;
+        for (var i = 0; i < n; i++)
+        {
+            var (p, q) = (points[i], points[(i + 1) % n]);
+            area += p.X * q.Y - q.X * p.Y;
+        }
+        var turn = area >= 0 ? 1.0 : -1.0;
+        static double Cross2((double X, double Y) a, (double X, double Y) b, (double X, double Y) c) => (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
+        var result = new List<(int, int, int)>();
+        convex = true;
+        for (var i = 0; i < n; i++)
+        {
+            convex &= Cross2(points[(i + n - 1) % n], points[i], points[(i + 1) % n]) * turn >= 0;
+        }
+        if (convex)
+        {
+            for (var i = 1; i < n - 1; i++)
+            {
+                result.Add((0, i, i + 1));
+            }
+            return result;
+        }
+        var remaining = Enumerable.Range(0, n).ToList();
+        while (remaining.Count > 3)
+        {
+            var found = false;
+            for (var i = 0; i < remaining.Count; i++)
+            {
+                var (prev, cur, next) = (remaining[(i + remaining.Count - 1) % remaining.Count], remaining[i], remaining[(i + 1) % remaining.Count]);
+                var (a, b, c) = (points[prev], points[cur], points[next]);
+                if (Cross2(a, b, c) * turn <= 0)
+                {
+                    continue;
+                }
+                var inside = false;
+                foreach (var other in remaining)
+                {
+                    if (other == prev || other == cur || other == next)
+                    {
+                        continue;
+                    }
+                    var p = points[other];
+                    if (p == a || p == b || p == c)
+                    {
+                        continue;
+                    }
+                    if (Cross2(a, b, p) * turn >= 0 && Cross2(b, c, p) * turn >= 0 && Cross2(c, a, p) * turn >= 0)
+                    {
+                        inside = true;
+                        break;
+                    }
+                }
+                if (inside)
+                {
+                    continue;
+                }
+                result.Add((prev, cur, next));
+                remaining.RemoveAt(i);
+                found = true;
+                break;
+            }
+            if (!found)
+            {
+                return null;
+            }
+        }
+        result.Add((remaining[0], remaining[1], remaining[2]));
+        return result;
+    }
+
+    /// <summary>
     /// Whether a point in a polygon's plane is inside it: an even-odd crossing test in the plane's dominant axes, which
     /// takes concave polygons.
     /// </summary>
