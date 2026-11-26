@@ -131,7 +131,7 @@ A suspended agent (`ecs.suspended(w, e, .Navigation)`), such as one that a cutsc
 - **From where the character is:** the next tick reads the character's `Transform` and its `Physics_Character.velocity`. The corridor follows the agent to where it actually is, and its acceleration starts from the velocity that it actually has. An agent that is pushed, or slides along a wall, does not drift off the navmesh: it walks back to its corridor, or asks for a new path from where it is.
 - **Animation:** `Nav_Agent_State.velocity` is the velocity that the agent chose, and `desired` the one that its path asked for. A script or a system can set an Animator's parameter from them, such as a speed from `Navigation.velocity(entity)` ([Animation: Scripts](../animation/design.md#scripts)).
 - **Actions:** the native actions `move_to` and `stop` move an agent from its decision ([Agents: Native actions](agents.md#native-actions)).
-- **The sample:** `samples/mygame`'s doorway scene, which F7 cycles to, has twenty agents on one side of a wall that walk through its doorway, 2 m wide, to the other side, wait for each other, and walk back. `crosser.luau` only sends them, with `Navigation.move_to`.
+- **The sample:** `samples/mygame`'s doorway scene, which F7 cycles to, has twenty agents on one side of a wall that walk through its doorway, about 2 m wide, to the other side, wait for each other, and walk back. The doorway is an instance of `door.prefab`, whose cutter cuts the wall's mesh and its collider ([Mesh editing: Cut meshes](../editor/mesh-editing.md#cut-meshes)), so the navmesh bakes through it. `crosser.luau` only sends them, with `Navigation.move_to`.
 
 ## Determinism
 
