@@ -160,6 +160,12 @@ public sealed partial class MeshSession
         _editedMeshes.Clear();
         foreach (var (entity, guid) in meshes)
         {
+            // Its mesh is derived from its source, so an edit of it would be lost at the next cut.
+            if (MeshCutters.SourceOf(entity) != null)
+            {
+                _shell.Console.Add(LogLevel.Warning, $"mesh: cannot edit {entity.Name}: its mesh is cut by its cutters. Move its cutters off it to edit it.");
+                continue;
+            }
             if (OpenMesh(guid) != null)
             {
                 _editedMeshes[guid] = entity.Id;

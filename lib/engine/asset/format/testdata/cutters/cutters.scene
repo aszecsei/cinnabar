@@ -1,4 +1,4 @@
-# A wall that cutters can cut, a cutter with every field set, and one that sets none, which reads as the defaults. The
+# A wall that cutters have cut, with its source and the hash of what cut it, a cutter with every field set, and one that sets none, which reads as the defaults. The
 # editor's SceneFileTests and asset_format's scene tests both read this file, so the two parsers agree on the fields.
 scene 3
 
@@ -12,6 +12,8 @@ component 33 Mesh_Renderer
 	mesh = $5d1f0c2a9b3e4f60a7c8d9e0f1a2b3c4
 component 177 Cut_Target
 	layer = 2
+	source = $8c4e3f5d2a6b7c93d0e1f2a3b4c5d6e7
+	inputs_hash = "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
 
 entity 3000000000000002
 name = "Opening"

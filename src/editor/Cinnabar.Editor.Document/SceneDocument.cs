@@ -88,6 +88,12 @@ public sealed class SceneDocument
 
     public bool InTransaction => _label != null;
 
+    /// <summary>
+    /// Gives what an edit derives, after each <see cref="Preview(IReadOnlyList{Operation})"/> of an entry: operations that
+    /// join the entry, or none. Undo, redo and a cancel do not call it, since the entry holds what it gave.
+    /// </summary>
+    public Func<IReadOnlyList<Operation>>? Derive { get; set; }
+
     /// <summary>Operations that changed the scene, in order: edits, undo and redo. The host gets them.</summary>
     public event Action<IReadOnlyList<Operation>>? Applied;
 
@@ -166,25 +172,15 @@ public sealed class SceneDocument
         {
             foreach (var given in ops)
             {
-                var op = PrefabEdits.Route(this, given);
-                var cycles = op is BlockOperation or PrefabOperation or PrefabSetOperation ? Cycles() : 0;
-                var inverse = op.Apply(Scene);
-                Invalidate();
-                if (Refusal(cycles) is { } refusal)
+                Take(given, applied);
+            }
+            // What the edit derives, as a cut wall's fields (see docs/editor/mesh-editing.md#cut-meshes), joins the
+            // entry and goes to the host with it. An undo or a cancel replays it, so neither derives.
+            if (applied.Count > 0 && Derive?.Invoke() is { Count: > 0 } derived)
+            {
+                foreach (var op in derived)
                 {
-                    inverse.Apply(Scene);
-                    Invalidate();
-                    throw new InvalidOperationException(refusal);
-                }
-                applied.Add(op);
-                if (Replaced(op) is var at and >= 0)
-                {
-                    _pending[at] = op;
-                }
-                else
-                {
-                    _pending.Add(op);
-                    _pendingInverses.Add(inverse);
+                    Take(op, applied);
                 }
             }
         }
@@ -195,6 +191,31 @@ public sealed class SceneDocument
             {
                 Applied?.Invoke(applied);
             }
+        }
+    }
+
+    // Applies an operation of the open entry, and keeps it with its inverse, or in the place of the one it replaces.
+    void Take(Operation given, List<Operation> applied)
+    {
+        var op = PrefabEdits.Route(this, given);
+        var cycles = op is BlockOperation or PrefabOperation or PrefabSetOperation ? Cycles() : 0;
+        var inverse = op.Apply(Scene);
+        Invalidate();
+        if (Refusal(cycles) is { } refusal)
+        {
+            inverse.Apply(Scene);
+            Invalidate();
+            throw new InvalidOperationException(refusal);
+        }
+        applied.Add(op);
+        if (Replaced(op) is var at and >= 0)
+        {
+            _pending[at] = op;
+        }
+        else
+        {
+            _pending.Add(op);
+            _pendingInverses.Add(inverse);
         }
     }
 

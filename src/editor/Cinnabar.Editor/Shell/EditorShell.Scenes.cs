@@ -153,10 +153,12 @@ public sealed partial class EditorShell
     public void RequestSaveAs() => SaveAsRequested?.Invoke();
 
     /// <summary>What the host could not apply of an entity of the active scene, by scene ID: the latest load's problems and the edits' since.</summary>
-    public IReadOnlyList<string> ProblemsOf(ulong sceneId) => _problems.GetValueOrDefault((ActiveNumber, sceneId)) ?? [];
+    public IReadOnlyList<string> ProblemsOf(ulong sceneId) =>
+        [.. _problems.GetValueOrDefault((ActiveNumber, sceneId)) ?? [], .. Scene != null ? Cuts.ProblemsOf(Scene, sceneId) : []];
 
     /// <summary>What the host could not apply of an entity of any open scene.</summary>
-    public IReadOnlyList<string> ProblemsOf(EntityNode node) => _problems.GetValueOrDefault((node.Scene, node.SceneId)) ?? [];
+    public IReadOnlyList<string> ProblemsOf(EntityNode node) =>
+        [.. _problems.GetValueOrDefault((node.Scene, node.SceneId)) ?? [], .. _scenes.Find(s => s.Number == node.Scene) is { } scene ? Cuts.ProblemsOf(scene, node.SceneId) : []];
 
     /// <summary>
     /// Opens a scene file in place of every open scene, and replaces the host's world with it. A file with an error is
@@ -216,6 +218,7 @@ public sealed partial class EditorShell
         SceneChanged?.Invoke();
         Visibility.Load();
         SendAddedScene(document);
+        Cuts.Reconcile();
         Console.Add(LogLevel.Info, $"scene: opened {document.Path} beside {_scenes.Count - 1} other scenes, {document.Scene.Entities.Count} entities");
         OfferRestore(document);
         return true;
@@ -353,6 +356,7 @@ public sealed partial class EditorShell
             Console.Add(LogLevel.Error, $"scene: cannot save {path ?? old}: {e.Message}");
             return false;
         }
+        Cuts.Derive(document);
         var meshesSaved = Mesh.SaveMeshes();
         var mapsSaved = Landscape.SaveMaps();
         Autosave.Delete(old);
@@ -415,7 +419,7 @@ public sealed partial class EditorShell
     public bool Edit(string label, params Operation[] operations) => Scene != null && Edit(Scene, label, operations);
 
     // Applies operations to an open scene as one undo entry, as Edit does for the active one.
-    bool Edit(SceneDocument document, string label, Operation[] operations)
+    internal bool Edit(SceneDocument document, string label, Operation[] operations)
     {
         if (operations.Length == 0 || CannotEdit(label))
         {
@@ -737,6 +741,7 @@ public sealed partial class EditorShell
         Visibility.Load();
         SendScene();
         FrameScene();
+        Cuts.Reconcile();
     }
 
     // Puts a document in an open one's place, with its number, as a restored autosave takes its file's.
@@ -757,6 +762,7 @@ public sealed partial class EditorShell
         ReportExpansion();
         SceneChanged?.Invoke();
         SendScene();
+        Cuts.Reconcile();
     }
 
     void Subscribe(SceneDocument document, bool keepNumber = false)
@@ -765,6 +771,8 @@ public sealed partial class EditorShell
         {
             document.Number = ++_lastSceneNumber;
         }
+        // The cuts first, so that a result reaches the host before the field that names it.
+        Cuts.Track(document);
         var handlers = ((Action<IReadOnlyList<Operation>>)(ops => SendOperations(document, ops)), (Action)(() => OnDocumentChanged(document)));
         _sceneHandlers[document] = handlers;
         document.Applied += handlers.Item1;
@@ -778,6 +786,7 @@ public sealed partial class EditorShell
             document.Applied -= handlers.Applied;
             document.Changed -= handlers.Changed;
         }
+        Cuts.Untrack(document);
     }
 
     void SendOperations(SceneDocument document, IReadOnlyList<Operation> operations)
@@ -791,6 +800,7 @@ public sealed partial class EditorShell
 
     void OnDocumentChanged(SceneDocument document)
     {
+        Cuts.Derive(document);
         Landscape.Sync();
         SceneChanged?.Invoke();
         SendGizmo();

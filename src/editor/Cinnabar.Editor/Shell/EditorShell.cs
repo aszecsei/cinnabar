@@ -30,6 +30,9 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     public MeshSession Mesh { get; }
     /// <summary>The landscape tools' brushes and the maps they paint (see docs/editor/landscape.md).</summary>
     public LandscapeSession Landscape { get; }
+
+    /// <summary>The cut walls of the open scenes, which their cutters' cuts derive (see docs/editor/mesh-editing.md#cut-meshes).</summary>
+    public CutSet Cuts { get; }
     public ConsoleLog Console { get; } = new();
     public HostSession Host { get; }
     public WorldModel World { get; } = new();
@@ -101,6 +104,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         _previewSlots = new PreviewSlots(PreviewOwners);
         Mesh = new MeshSession(this);
         Landscape = new LandscapeSession(this);
+        Cuts = new CutSet(this, PostToCurrentContext());
+        Cuts.ProblemsChanged += () => ProblemsChanged?.Invoke();
         _gizmo = new GizmoController(label => TryBeginEdit(label, "the gizmo"), SendGizmo);
         Host = new HostSession(options);
         Overrides = new WorldOverrides(this);
@@ -226,6 +231,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Content.AssetCreated += OnAssetCreated;
         Assets.Changed += ExpandArrivedPrefabs;
         Assets.Changed += ReloadChangedPrefabs;
+        // A cut's inputs arrive with the index, and a file that changes on disk can change a cut.
+        Assets.Changed += Cuts.Reconcile;
         Assets.Changed += SendWorldView;
     }
 
