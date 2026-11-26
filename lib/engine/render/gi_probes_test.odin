@@ -253,6 +253,9 @@ the_probes_update_on_the_compute_queue_and_pass_validation :: proc(t: ^testing.T
 		}
 		params := GI_PROBE_PARAMS[.Low]
 		testing.expect_value(t, len(pf.jobs), int(params.budget))
+		// The level's candidates reach the hits' light, and the probes' update count seeds their choices.
+		testing.expect_value(t, pf.hit_light.candidates, params.candidates)
+		testing.expect_value(t, pf.hit_light.seed, r.view.gi.probes.frame)
 		// The first frame resets every probe, which then update finest level first.
 		if frame == 0 {
 			testing.expect_value(t, pf.grid.levels[0].delta, [4]i32{32, 16, 32, 0})
