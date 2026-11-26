@@ -300,7 +300,9 @@ public sealed partial class MeshToolRunner
             {
                 continue;
             }
-            var material = cutter.Materials.FirstOrDefault(m => m != "") ?? "";
+            // The cutter's first material: its mesh's first named slot, or else what its renderer draws in slot 0.
+            var material = cutter.Materials.FirstOrDefault(m => m != "")
+                ?? (cutterEntity.Components.Find(c => c.Id == SceneEdits.MeshRendererId)?.Fields.Find(f => f.Name == "materials.0")?.Value is { Kind: SceneValueKind.Asset } drawn ? drawn.Asset : "");
             var slot = 0;
             if (material != "")
             {

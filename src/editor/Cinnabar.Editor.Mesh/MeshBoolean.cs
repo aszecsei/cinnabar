@@ -441,7 +441,7 @@ public static class MeshBoolean
             return refuse(op == Op.Subtract ? "the cutter contains the target, so nothing is left" : "the meshes do not meet");
         }
 
-        var chains = JoinTJunctions(pieces, vertices);
+        JoinTJunctions(pieces, vertices);
         pieces = Merge(pieces);
 
         var mesh = target.With(vertices: vertices, faces: pieces.Select(p => new MeshFace(p.Slot, [.. p.Corners], p.Mapping)), sharpEdges: []);
@@ -451,7 +451,7 @@ public static class MeshBoolean
         {
             mesh = mesh.With(faces: mesh.Faces.Select(f => f with { Corners = [.. f.Corners.Where(c => !dissolve.Contains(c))] }));
         }
-        mesh = mesh.With(sharpEdges: SharpEdges(target, mesh, chains, dissolve));
+        mesh = mesh.With(sharpEdges: SharpEdges(target, mesh));
         var used = mesh.Faces.SelectMany(f => f.Corners).ToHashSet();
         mesh = MeshTools.Compact(mesh, [.. Enumerable.Range(0, mesh.Vertices.Length).Where(v => !used.Contains(v))], []);
         var cut = Enumerable.Range(0, pieces.Count).Where(i => pieces[i].Source < 0).ToList();
@@ -548,12 +548,11 @@ public static class MeshBoolean
 
     // Puts each vertex that lies on an edge of a piece, between its ends, into that edge, so the pieces meet edge to
     // edge. The vertices are those of the pieces near the cut, but a split plane goes on past the cutter, so a far
-    // piece's edge can take one too. Gives, for each edge that took vertices, the chain along it from its lower vertex.
-    static Dictionary<MeshEdge, List<int>> JoinTJunctions(List<Piece> pieces, ImmutableArray<Vec3>.Builder vertices)
+    // piece's edge can take one too.
+    static void JoinTJunctions(List<Piece> pieces, ImmutableArray<Vec3>.Builder vertices)
     {
         var candidates = pieces.Where(p => !p.Far).SelectMany(p => p.Corners).Distinct().OrderBy(v => vertices[v].X).ToArray();
         var xs = candidates.Select(v => vertices[v].X).ToArray();
-        var chains = new Dictionary<MeshEdge, List<int>>();
         for (var i = 0; i < pieces.Count; i++)
         {
             var corners = pieces[i].Corners;
@@ -600,20 +599,12 @@ public static class MeshBoolean
                 }
                 on.Sort((x, y) => x.T.CompareTo(y.T));
                 result.AddRange(on.Select(o => o.V));
-                var edge = new MeshEdge(Math.Min(a, b), Math.Max(a, b));
-                var along = on.Select(o => o.V).ToList();
-                if (a > b)
-                {
-                    along.Reverse();
-                }
-                chains[edge] = [edge.A, .. along, edge.B];
             }
             if (result.Count != corners.Count)
             {
                 pieces[i] = pieces[i] with { Corners = Dedupe(result) };
             }
         }
-        return chains;
     }
 
     // Merges the fragments of each source face, two at a time, where they share an edge and the union's boundary is
@@ -693,15 +684,30 @@ public static class MeshBoolean
         return loop.Count == boundary.Count ? loop : null;
     }
 
-    // The target's sharp edges in the result: each kept where it is still an edge, or by the parts of it that the
-    // split points left, with the dissolved points taken out again.
-    static List<MeshEdge> SharpEdges(MeshData target, MeshData mesh, Dictionary<MeshEdge, List<int>> chains, HashSet<int> dissolve)
+    // The target's sharp edges in the result: each kept where it is still an edge, or else by the parts of it between
+    // the new vertices that lie along it, where those are edges.
+    static List<MeshEdge> SharpEdges(MeshData target, MeshData mesh)
     {
+        var added = Enumerable.Range(target.Vertices.Length, mesh.Vertices.Length - target.Vertices.Length).Where(v => mesh.FacesOfVertex(v).Count > 0).ToList();
         var sharp = new List<MeshEdge>();
         foreach (var e in target.SharpEdges)
         {
-            var key = new MeshEdge(Math.Min(e.A, e.B), Math.Max(e.A, e.B));
-            var chain = chains.TryGetValue(key, out var c) ? c.Where(v => !dissolve.Contains(v)).ToList() : [key.A, key.B];
+            if (mesh.EdgeIndex(e.A, e.B) >= 0)
+            {
+                sharp.Add(e);
+                continue;
+            }
+            var (pa, pb) = (mesh.Vertices[e.A], mesh.Vertices[e.B]);
+            var d = pb - pa;
+            var lengthSquared = Vec3.Dot(d, d);
+            if (lengthSquared < 1e-18)
+            {
+                continue;
+            }
+            var chain = added
+                .Select(v => (V: v, T: Vec3.Dot(mesh.Vertices[v] - pa, d) / lengthSquared))
+                .Where(x => x.T > 0 && x.T < 1 && (pa + d * x.T - mesh.Vertices[x.V]).Length <= PlaneEpsilon)
+                .OrderBy(x => x.T).Select(x => x.V).Prepend(e.A).Append(e.B).ToList();
             for (var k = 0; k + 1 < chain.Count; k++)
             {
                 if (mesh.EdgeIndex(chain[k], chain[k + 1]) >= 0)

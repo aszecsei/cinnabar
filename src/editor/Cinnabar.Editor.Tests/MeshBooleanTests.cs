@@ -63,6 +63,34 @@ public class MeshBooleanTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void ADoorFlushWithTheFloorHasThreeJambsAndKeepsTheEdgesSharp()
+    {
+        // A door on the grid: its bottom on the wall's bottom, so the opening goes through the bottom face.
+        var cutter = Primitives.Block(new Vec3(1, 0, -0.5), new Vec3(2, 2, 0.75));
+        var result = Subtract(Wall, cutter);
+        AssertSolid(result, 3 - 2 * 0.25);
+        var jambs = CutFaces(result);
+        Assert.Equal(3, jambs.Count);
+        // Every edge between faces at a right angle is sharp, as the block's were, the split edges' parts too.
+        var mesh = result.Mesh;
+        foreach (var e in mesh.Edges)
+        {
+            var beside = mesh.FacesOfEdge(e);
+            if (Vec3.Dot(mesh.FaceNormal(beside[0]), mesh.FaceNormal(beside[1])) < 0.5)
+            {
+                Assert.True(mesh.IsSharp(e.A, e.B), $"{mesh.Vertices[e.A]} to {mesh.Vertices[e.B]} is smooth");
+            }
+        }
+        // A jamb takes the mapping of the cutter face it came from, which faces the other way: its VAxis is mirrored,
+        // as Invert does, so the texture reads the same from inside the opening.
+        foreach (var f in jambs)
+        {
+            var source = Enumerable.Range(0, cutter.Faces.Length).Single(c => Vec3.Dot(cutter.FaceNormal(c), mesh.FaceNormal(f)) < -0.999);
+            Assert.Equal(cutter.Faces[source].Mapping with { VAxis = -cutter.Faces[source].Mapping.VAxis }, mesh.Faces[f].Mapping);
+        }
+    }
+
+    [Fact]
     public void ACutterFaceCoplanarWithTheWallMakesANiche()
     {
         // The cutter's front is the wall's front plane: the niche has a back and four sides, and no face on the front.
