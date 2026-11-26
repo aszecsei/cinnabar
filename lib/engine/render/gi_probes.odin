@@ -111,15 +111,17 @@ Gi_Probes :: struct {
 // Gi_Probe_State is one view's world probes between frames, in Gi_State: their textures and states, which are made for a
 // count of levels, each level's box, and which probes wait for an update.
 Gi_Probe_State :: struct {
-	radiance:    gpu.Texture,
-	irradiance:  gpu.Texture,
-	states:      gpu.Buffer,
-	level_count: u32,
-	spacing:     u32,
-	levels:      [MAX_PROBE_LEVELS]Gi_Probe_Level,
-	schedule:    Probe_Schedule,
+	radiance:       gpu.Texture,
+	irradiance:     gpu.Texture,
+	// The irradiance without the listed emitters\' light, which the hits read (see gi_emitters.odin).
+	irradiance_hit: gpu.Texture,
+	states:         gpu.Buffer,
+	level_count:    u32,
+	spacing:        u32,
+	levels:         [MAX_PROBE_LEVELS]Gi_Probe_Level,
+	schedule:       Probe_Schedule,
 	// Counts the updates, for the rays' rotation.
-	frame:       u32,
+	frame:          u32,
 }
 
 // Probe_Schedule is which probes the next frames update: those that wait since their reset, a bit each, then each
@@ -138,24 +140,26 @@ Probe_Level :: struct {
 
 // Probe_Grid matches Probe_Grid in gi_probes.hlsli.
 Probe_Grid :: struct {
-	levels:         [MAX_PROBE_LEVELS]Probe_Level,
-	rotation:       [3][4]f32,
-	level_count:    u32,
-	radiance:       u32,
-	irradiance:     u32,
-	states:         u32,
-	radiance_out:   u32,
-	irradiance_out: u32,
-	states_out:     u32,
-	sampler_index:  u32,
-	rays:           u32,
-	jobs:           u32,
-	jobs_offset:    u32,
-	job_count:      u32,
-	hysteresis:     f32,
-	bias:           f32,
-	radiance_max:   f32,
-	padding:        u32,
+	levels:             [MAX_PROBE_LEVELS]Probe_Level,
+	rotation:           [3][4]f32,
+	level_count:        u32,
+	radiance:           u32,
+	irradiance:         u32,
+	states:             u32,
+	radiance_out:       u32,
+	irradiance_out:     u32,
+	states_out:         u32,
+	sampler_index:      u32,
+	rays:               u32,
+	jobs:               u32,
+	jobs_offset:        u32,
+	job_count:          u32,
+	hysteresis:         f32,
+	bias:               f32,
+	radiance_max:       f32,
+	irradiance_hit:     u32,
+	irradiance_hit_out: u32,
+	padding:            [3]u32,
 }
 
 // Probe_Push matches Probe_Push in gi_probe_pass.hlsli.
@@ -184,6 +188,9 @@ Probe_Push :: struct {
 	hit_submeshes_offset: u32,
 	emitter_samples:      u32,
 	emitter_count:        u32,
+	emitter_table:        u32,
+	emitter_table_offset: u32,
+	emitter_pool:         u32,
 }
 
 #assert(size_of(Probe_Push) <= 128)
@@ -191,18 +198,19 @@ Probe_Push :: struct {
 // Gi_Probe_Frame is one frame's world probes, in frame memory.
 @(private)
 Gi_Probe_Frame :: struct {
-	grid:       Probe_Grid,
-	upload:     gpu.Upload,
-	jobs:       []u32,
-	radiance:   Texture,
-	irradiance: Texture,
-	states:     Buffer,
-	hits:       Buffer,
-	surfaces:   Buffer,
-	rays:       Buffer,
+	grid:           Probe_Grid,
+	upload:         gpu.Upload,
+	jobs:           []u32,
+	radiance:       Texture,
+	irradiance:     Texture,
+	irradiance_hit: Texture,
+	states:         Buffer,
+	hits:           Buffer,
+	surfaces:       Buffer,
+	rays:           Buffer,
 	// What the probes' hits and the split cascades' are lit by: these probes, their lights, and the global
 	// illumination's lit scene of last frame, which the hits that the screen shows take their light from.
-	hit_light:  Hit_Light_Inputs,
+	hit_light:      Hit_Light_Inputs,
 }
 
 // Hit_Light_Inputs are what lights a batch of hits beside the frame constants (see add_hit_light_passes): the probe grid,
@@ -211,15 +219,16 @@ Gi_Probe_Frame :: struct {
 // before it picks one, and the seed of its choices; and a lit scene of last frame, for the hits that the screen shows.
 @(private)
 Hit_Light_Inputs :: struct {
-	grid:       gpu.Upload,
-	radiance:   Texture,
-	irradiance: Texture,
-	states:     Buffer,
-	light_grid: gpu.Upload,
-	candidates: u32,
-	seed:       u32,
-	emitters:   ^Gi_Emitter_Frame,
-	lit:        History,
+	grid:           gpu.Upload,
+	radiance:       Texture,
+	irradiance:     Texture,
+	irradiance_hit: Texture,
+	states:         Buffer,
+	light_grid:     gpu.Upload,
+	candidates:     u32,
+	seed:           u32,
+	emitters:       ^Gi_Emitter_Frame,
+	lit:            History,
 }
 
 gi_probes_init :: proc(p: ^Gi_Probes) {
@@ -243,8 +252,9 @@ gi_probes_destroy :: proc(p: ^Gi_Probes, platform: ^core.Platform_API) {
 destroy_probe_storage :: proc(p: ^Gi_Probe_State, platform: ^core.Platform_API) {
 	platform.gpu_destroy_texture(p.radiance)
 	platform.gpu_destroy_texture(p.irradiance)
+	platform.gpu_destroy_texture(p.irradiance_hit)
 	platform.gpu_destroy_buffer(p.states)
-	p.radiance, p.irradiance, p.states = {}, {}, {}
+	p.radiance, p.irradiance, p.irradiance_hit, p.states = {}, {}, {}, {}
 }
 
 // sync_gi_probe_pipelines makes the probes' pipelines, with Ray_Query only.
@@ -428,6 +438,15 @@ ensure_probe_storage :: proc(
 			},
 			nil,
 		)
+		p.irradiance_hit = platform.gpu_create_texture(
+			{
+				size = size,
+				format = GI_PROBE_FORMAT,
+				usage = {.Sampled, .Storage},
+				label = "gi probe hit irradiance",
+			},
+			nil,
+		)
 		p.states = platform.gpu_create_buffer(
 			{
 				size = u32(MAX_PROBE_LEVELS * GI_PROBE_COUNT * 4),
@@ -541,6 +560,7 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	pf := new(Gi_Probe_Frame, platform.frame_allocator)
 	pf.radiance = import_texture(g, p.radiance, .Storage)
 	pf.irradiance = import_texture(g, p.irradiance, .Storage)
+	pf.irradiance_hit = import_texture(g, p.irradiance_hit, .Storage)
 	pf.states = import_buffer(g, p.states)
 	pf.hits = import_buffer(g, shared.hits)
 	pf.surfaces = import_buffer(g, shared.surfaces)
@@ -570,36 +590,39 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	copy(jobs_upload.data, ([^]byte)(raw_data(pf.jobs))[:len(pf.jobs) * 4])
 	p.frame += 1
 	grid^ = {
-		levels         = grid.levels,
-		rotation       = probe_rotation(p.frame),
-		level_count    = params.levels,
-		radiance       = gpu.read_index(p.radiance),
-		irradiance     = gpu.read_index(p.irradiance),
-		states         = gpu.read_index(p.states),
-		radiance_out   = gpu.write_index(p.radiance),
-		irradiance_out = gpu.write_index(p.irradiance),
-		states_out     = gpu.write_index(p.states),
-		sampler_index  = gpu.sampler_index(r.post.sampler),
-		rays           = params.rays,
-		jobs           = gpu.read_index(jobs_upload.buffer),
-		jobs_offset    = jobs_upload.offset,
-		job_count      = u32(len(pf.jobs)),
-		hysteresis     = GI_PROBE_HYSTERESIS,
-		bias           = GI_PROBE_BIAS,
-		radiance_max   = params.radiance_max,
+		levels             = grid.levels,
+		rotation           = probe_rotation(p.frame),
+		level_count        = params.levels,
+		radiance           = gpu.read_index(p.radiance),
+		irradiance         = gpu.read_index(p.irradiance),
+		states             = gpu.read_index(p.states),
+		radiance_out       = gpu.write_index(p.radiance),
+		irradiance_out     = gpu.write_index(p.irradiance),
+		irradiance_hit     = gpu.read_index(p.irradiance_hit),
+		irradiance_hit_out = gpu.write_index(p.irradiance_hit),
+		states_out         = gpu.write_index(p.states),
+		sampler_index      = gpu.sampler_index(r.post.sampler),
+		rays               = params.rays,
+		jobs               = gpu.read_index(jobs_upload.buffer),
+		jobs_offset        = jobs_upload.offset,
+		job_count          = u32(len(pf.jobs)),
+		hysteresis         = GI_PROBE_HYSTERESIS,
+		bias               = GI_PROBE_BIAS,
+		radiance_max       = params.radiance_max,
 	}
 	(^Probe_Grid)(raw_data(grid_upload.data))^ = grid^
 	pf.upload = grid_upload
 	pf.hit_light = {
-		grid       = grid_upload,
-		radiance   = pf.radiance,
-		irradiance = pf.irradiance,
-		states     = pf.states,
-		light_grid = light_grid,
-		candidates = params.candidates,
-		seed       = p.frame,
-		emitters   = f.emitters,
-		lit        = lit,
+		grid           = grid_upload,
+		radiance       = pf.radiance,
+		irradiance     = pf.irradiance,
+		irradiance_hit = pf.irradiance_hit,
+		states         = pf.states,
+		light_grid     = light_grid,
+		candidates     = params.candidates,
+		seed           = p.frame,
+		emitters       = f.emitters,
+		lit            = lit,
 	}
 	ray_count := u32(len(pf.jobs)) * params.rays
 
@@ -641,9 +664,14 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 		queue = .Compute,
 	)
 	read(g, pass, pf.rays)
+	read(g, pass, pf.hits)
 	read(g, pass, f.exposure)
+	if hit_emitters(&pf.hit_light) {
+		read(g, pass, f.emitters.pool)
+	}
 	write(g, pass, pf.radiance)
 	write(g, pass, pf.irradiance)
+	write(g, pass, pf.irradiance_hit)
 	write(g, pass, pf.states)
 	return pf
 }
@@ -681,6 +709,7 @@ add_hit_light_passes :: proc(
 	if inputs.radiance != 0 {
 		read(g, pass, inputs.radiance)
 		read(g, pass, inputs.irradiance)
+		read(g, pass, inputs.irradiance_hit)
 		read(g, pass, inputs.states)
 	}
 	write(g, pass, rays)
@@ -734,8 +763,8 @@ hit_light_inputs :: proc(
 	}
 	if f.gi != nil && f.gi.probes != nil {
 		pf := f.gi.probes
-		inputs.grid, inputs.radiance, inputs.irradiance, inputs.states =
-			pf.upload, pf.radiance, pf.irradiance, pf.states
+		inputs.grid, inputs.radiance, inputs.irradiance, inputs.irradiance_hit, inputs.states =
+			pf.upload, pf.radiance, pf.irradiance, pf.irradiance_hit, pf.states
 		return inputs, true
 	}
 	inputs.grid = platform.gpu_upload(size_of(Probe_Grid), 16) or_return
@@ -806,6 +835,9 @@ run_probe_pass :: proc(ctx: ^Pass_Context) {
 	if hit_emitters(inputs) {
 		push.emitter_samples = gpu.read_index(gpu_buffer(g, inputs.emitters.samples))
 		push.emitter_count = inputs.emitters.triangles
+		push.emitter_table = gpu.read_index(inputs.emitters.table.buffer)
+		push.emitter_table_offset = inputs.emitters.table.offset
+		push.emitter_pool = gpu.read_index(gpu_buffer(g, inputs.emitters.pool))
 	}
 	if step.pass == .Update {
 		push.exposure = gpu.read_index(gpu_buffer(g, f.exposure))

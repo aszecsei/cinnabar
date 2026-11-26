@@ -115,9 +115,14 @@ float4 hit_light(Hit_Record hit, uint surfaces, uint ray, Hit_Lights lights, Pro
 		}
 		uint state = lowbias32(lights.seed ^ lowbias32(ray));
 		Hit_Choice choice = pick_hit_light(lights.light_grid, lights.light_grid_offset, lights.candidates, lights.emitters, lights.emitter_count, origin, normal, state);
+		float3 emitted = 0;
 		if (choice.weight > 0) {
-			direct += choice.light * choice.weight * hit_shadow(lights, origin, choice.direction, choice.distance);
+			float3 picked = choice.light * choice.weight * hit_shadow(lights, origin, choice.direction, choice.distance);
+			direct += picked;
+			emitted = choice.emitter ? picked : 0;
 		}
+		// The probes' light without the listed emitters', which the hit sampled itself.
+		grid.irradiance = grid.irradiance_hit;
 		float3 bounce;
 		bool probes = sample_probes(grid, p, normal, normal, false, bounce);
 		if (!probes) {
@@ -130,6 +135,8 @@ float4 hit_light(Hit_Record hit, uint surfaces, uint ray, Hit_Lights lights, Pro
 		float3 specular = hit_specular(s);
 		if (any(specular > 0)) {
 			light += specular * (probes ? bounce : frame_sky_specular(reflect(direction, normal), hit_roughness(s)));
+			// The emitters' light, which the probes' light leaves out, as a surrounding as bright would give.
+			light += specular * emitted / PI;
 		}
 	}
 	return float4(light, hit.t);
