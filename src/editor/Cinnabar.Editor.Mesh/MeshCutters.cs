@@ -79,8 +79,8 @@ public static class MeshCutters
 
     /// <summary>
     /// The entities of an expanded scene that a cutter cuts, in the scene's order. An entity is cut when it has a
-    /// Cut_Target whose layer is in the cutter's mask, its Mesh_Renderer names a mesh that <paramref name="meshOf"/>
-    /// gives, the bounds of the two meet, and it is not in the cutter's own instance. <paramref name="meshOf"/> gives
+    /// Cut_Target whose layer is in the cutter's mask, its editable mesh (<see cref="EditableMesh"/>) is one that
+    /// <paramref name="meshOf"/> gives, the bounds of the two meet, and it is not in the cutter's own instance. <paramref name="meshOf"/> gives
     /// the mesh of a GUID, or null for a model's mesh or a missing one, which cannot be cut.
     /// </summary>
     public static IReadOnlyList<SceneEntity> Targets(Expansion expansion, SceneEntity cutter, Func<string, MeshData?> meshOf)
@@ -102,7 +102,7 @@ public static class MeshCutters
         {
             if (entity.Id == cutter.Id || TargetLayer(entity) is not { } layer || !fields.Cuts(layer)
                 || (own != null && expansion.InstanceOf(entity.Id) is { } inst && StartsWith(inst.Path, own))
-                || MeshOf(entity) is not { } guid || meshOf(guid) is not { Vertices.Length: > 0 } mesh
+                || EditableMesh(entity) is not { } guid || meshOf(guid) is not { Vertices.Length: > 0 } mesh
                 || SceneEdits.WorldPose(flat, entity) is not { } pose)
             {
                 continue;
@@ -143,7 +143,27 @@ public static class MeshCutters
     static bool StartsWith(IReadOnlyList<ulong> path, IReadOnlyList<ulong> prefix) =>
         path.Count >= prefix.Count && prefix.Select((id, i) => path[i] == id).All(b => b);
 
-    static string? MeshOf(SceneEntity entity) =>
-        entity.Components.Find(c => c.Id == SceneEdits.MeshRendererId)?.Fields.Find(f => f.Name == "mesh")?.Value
-            is { Kind: SceneValueKind.Asset, Asset.Length: > 0 } v ? v.Asset : null;
+    /// <summary>
+    /// The mesh that a cut of an entity starts from: its <c>Cut_Target</c>'s source while cutters cut it, else what its
+    /// <c>Mesh_Renderer</c> names. Null for neither.
+    /// </summary>
+    public static string? EditableMesh(SceneEntity entity) => SourceOf(entity) ?? RendererMesh(entity);
+
+    /// <summary>A <c>Cut_Target</c>'s source, which it has while cutters cut it, or null.</summary>
+    public static string? SourceOf(SceneEntity entity) =>
+        Asset(entity.Components.Find(c => c.Id == SceneEdits.CutTargetId)?.Fields.Find(f => f.Name == "source")?.Value);
+
+    /// <summary>The <c>Cut_Target</c>'s <c>inputs_hash</c>, or 0.</summary>
+    public static uint HashOf(SceneEntity entity) =>
+        entity.Components.Find(c => c.Id == SceneEdits.CutTargetId)?.Fields.Find(f => f.Name == "inputs_hash")?.Value
+            is { Kind: SceneValueKind.Number, Numbers.Count: 1 } v && v.Numbers[0].Float is >= 0 and <= uint.MaxValue ? (uint)v.Numbers[0].Float : 0;
+
+    /// <summary>A hash as a field's value.</summary>
+    public static SceneValue HashValue(uint hash) => SceneValue.Of(new SceneNumber(hash, hash));
+
+    /// <summary>What an entity's <c>Mesh_Renderer</c> names, or null.</summary>
+    public static string? RendererMesh(SceneEntity entity) =>
+        Asset(entity.Components.Find(c => c.Id == SceneEdits.MeshRendererId)?.Fields.Find(f => f.Name == "mesh")?.Value);
+
+    static string? Asset(SceneValue? value) => value is { Kind: SceneValueKind.Asset, Asset.Length: > 0 } v ? v.Asset : null;
 }

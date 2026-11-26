@@ -211,5 +211,10 @@ DEFAULT_MESH_CUTTER :: Mesh_Cutter {
 // Cut_Target lets Mesh_Cutters cut its entity's mesh (see docs/editor/mesh-editing.md#cutters-and-cut-targets). An
 // entity opts in by having it. A cutter cuts it when its layer is in the cutter's layers.
 Cut_Target :: struct {
-	layer: u8 `editor:"range=0,31"`,
+	layer:       u8 `editor:"range=0,31"`,
+	// The editable .mesh, while cutters cut the entity: its Mesh_Renderer then names the cut, which the editor derives
+	// from this and writes (see docs/editor/mesh-editing.md#cut-meshes). None while nothing cuts it.
+	source:      Guid `asset:"mesh"`,
+	// The hash of the cut's inputs, which the editor checks at the scene's open. 0 while nothing cuts the entity.
+	inputs_hash: u32,
 }

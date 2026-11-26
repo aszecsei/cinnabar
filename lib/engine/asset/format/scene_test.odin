@@ -252,6 +252,14 @@ cutters_and_targets_parse :: proc(t: ^testing.T) {
 	testing.expect_value(t, target.name, "Cut_Target")
 	layer, _ := field(target, "layer")
 	testing.expect_value(t, layer.floats[0], 2)
+	source, _ := field(target, "source")
+	testing.expect_value(
+		t,
+		source.asset,
+		guid_parse("8c4e3f5d2a6b7c93d0e1f2a3b4c5d6e7") or_else {},
+	)
+	hash, _ := field(target, "inputs_hash")
+	testing.expect_value(t, hash.floats[0], 3735928559)
 
 	cutter := scene.entities[1].components[1]
 	testing.expect_value(t, cutter.id, SCENE_MESH_CUTTER_ID)

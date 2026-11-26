@@ -18,6 +18,12 @@ cutters_read_over_their_defaults :: proc(t: ^testing.T) {
 	target := format.Cut_Target{}
 	read_component(scene_component(&scene.entities[0], format.SCENE_CUT_TARGET_ID), &target)
 	testing.expect_value(t, target.layer, 2)
+	testing.expect_value(
+		t,
+		target.source,
+		format.guid_parse("8c4e3f5d2a6b7c93d0e1f2a3b4c5d6e7") or_else {},
+	)
+	testing.expect_value(t, target.inputs_hash, 3735928559)
 
 	full := format.DEFAULT_MESH_CUTTER
 	read_component(scene_component(&scene.entities[1], format.SCENE_MESH_CUTTER_ID), &full)

@@ -78,6 +78,12 @@ public sealed class MeshSet
 
     public void Clear() => _documents.Clear();
 
+    /// <summary>
+    /// Sets a derived document's data, as a cut wall's (see docs/editor/mesh-editing.md#cut-meshes), with no undo
+    /// entry: its inputs are on the stack, and an undo derives it again.
+    /// </summary>
+    public void Derive(string guid, MeshData data) => Set(guid, data);
+
     internal void Set(string guid, MeshData data)
     {
         var document = _documents.GetValueOrDefault(guid) ?? throw new InvalidOperationException($"no mesh {guid} is open");
