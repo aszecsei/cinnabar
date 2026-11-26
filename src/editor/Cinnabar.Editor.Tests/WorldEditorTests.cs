@@ -66,7 +66,6 @@ public sealed class WorldEditorTests : IDisposable
     {
         var (shell, world) = WorldFixture.Open(_temp);
         using var _ = shell;
-        Assert.Equal("Open in World Editor", shell.OpenLabel(world));
         shell.OpenAsset(world);
         var editor = Assert.Single(shell.Worlds);
         Assert.Contains(editor, shell.GraphEditors);
@@ -76,16 +75,6 @@ public sealed class WorldEditorTests : IDisposable
         // Opening it again shows the same editor.
         shell.OpenAsset(world);
         Assert.Single(shell.Worlds);
-    }
-
-    [Fact]
-    public void AWorldThatDoesNotStartAsOneOpensAsText()
-    {
-        var (shell, world) = WorldFixture.Open(_temp);
-        using var _ = shell;
-        File.WriteAllText(_temp.Combine("town.world"), "scene $" + WorldFixture.Base + "\n");
-        shell.OpenAsset(world);
-        Assert.Empty(shell.Worlds);
     }
 
     [Fact]

@@ -697,9 +697,13 @@ a_changed_blob_restarts_its_sources :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(record.sounds), 1)
 	testing.expect_value(t, len(record.plays), 1)
 
-	time.sleep(20 * time.Millisecond)
 	more := [?]i16{1, 2, 3, 4, 5, 6, 7, 8}
 	write_sound(t, f, SOUND, more[:])
+	// The new blob's modification time is a minute on, so the assets see it changed however fast the test runs.
+	buffer: [32]u8
+	path := fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(SOUND, &buffer))
+	later := time.time_add(time.now(), time.Minute)
+	testing.expect(t, os.change_times(path, later, later) == nil)
 	frame(f)
 	frame(f)
 	testing.expect_value(t, len(record.sounds), 2)

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Cinnabar.Editor.EndToEnd</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Cinnabar.Editor.Content\Cinnabar.Editor.Content.csproj" />
+    <ProjectReference Include="..\Cinnabar.Editor.Document\Cinnabar.Editor.Document.csproj" />
+    <ProjectReference Include="..\Cinnabar.Editor.Link\Cinnabar.Editor.Link.csproj" />
+  </ItemGroup>
+</Project>

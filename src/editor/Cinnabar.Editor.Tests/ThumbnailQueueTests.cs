@@ -79,6 +79,9 @@ public sealed class ThumbnailQueueTests
         var queue = NewQueue();
         queue.Want(Done, _now);
         queue.Want(Script, _now);
+        // Nor a part of a file that has no picture.
+        Assert.Null(queue.PartPath(Script, 7));
+        queue.Want(ContentBrowserModel.PartKey(Script, 7), _now);
         Assert.Empty(_sent);
         Assert.Equal(0, queue.Waiting);
     }
@@ -93,6 +96,9 @@ public sealed class ThumbnailQueueTests
         _index.ThumbnailChanged += pictures.Add;
         queue.Want(A, _now);
         var id = Bakes.Single().Id;
+        // An answer to another request is not this one's.
+        queue.Apply(new CaptureResult(id + 5, CaptureKind.Thumbnail, true, "", "t/a.png", 0, 0, 0, 0, 0, OutputMode.Sdr), _now);
+        Assert.False(_index.Find(A)!.ThumbnailReady);
 
         queue.Apply(new CaptureResult(id, CaptureKind.Thumbnail, true, "", "t/a.png", 0, 0, 0, 0, 0, OutputMode.Sdr), _now);
 
@@ -102,29 +108,22 @@ public sealed class ThumbnailQueueTests
     }
 
     [Fact]
-    public void ThumbnailChangedDoesNotRaiseChanged()
+    public void AStalePathMarksNothingAndAStaleTilesPictureIsTheIndexs()
     {
-        NewQueue();
+        var queue = NewQueue();
         var changes = 0;
         _index.Changed += () => changes++;
+        var stale = _index.Find(A)!;
         // A path that is no longer the asset's says nothing: the asset cooked again while the picture was drawn.
         _index.MarkThumbnailReady(A, "t/old.png");
         Assert.False(_index.Find(A)!.ThumbnailReady);
         _index.MarkThumbnailReady(A, "t/a.png");
         Assert.True(_index.Find(A)!.ThumbnailReady);
         Assert.Equal(0, changes);
-    }
-
-    [Fact]
-    public void PlayPauses()
-    {
-        var queue = NewQueue();
-        _canBake = false;
-        queue.Want(A, _now);
-        Assert.Empty(_sent);
-        _canBake = true;
-        queue.Restart(_now);
-        Assert.Single(Bakes);
+        // A tile that holds the asset as it was finds the picture through the index.
+        Assert.False(stale.ThumbnailReady);
+        Assert.True(_index.PictureOf(stale)!.ThumbnailReady);
+        Assert.Empty(queue.Failures);
     }
 
     [Fact]
@@ -176,17 +175,6 @@ public sealed class ThumbnailQueueTests
     }
 
     [Fact]
-    public void ThePictureOfAStaleTileIsTheIndexs()
-    {
-        var queue = NewQueue();
-        var stale = _index.Find(A)!;
-        _index.MarkThumbnailReady(A, "t/a.png");
-        Assert.False(stale.ThumbnailReady);
-        Assert.True(_index.PictureOf(stale)!.ThumbnailReady);
-        Assert.Empty(queue.Failures);
-    }
-
-    [Fact]
     public void ANodeTileBakesOnlyItsSubtree()
     {
         var files = new HashSet<string>();
@@ -219,18 +207,15 @@ public sealed class ThumbnailQueueTests
     }
 
     [Fact]
-    public void ANodesFileFromAnEarlierRunIsNotDrawnAgain()
+    public void ANodesFileFromAnEarlierRunIsNotDrawnAgainUntilItsPrefabChanges()
     {
         var queue = NewQueue(path => path == "t/c.0000000000000007.png");
         Assert.Equal("t/c.0000000000000007.png", queue.PartPicture(C, 7));
         queue.Want(ContentBrowserModel.PartKey(C, 7), _now);
         Assert.Empty(Bakes);
-    }
 
-    [Fact]
-    public void ANodeOfAChangedPrefabGetsANewFile()
-    {
-        var queue = NewQueue(path => path == "t/c.0000000000000007.png");
+        // A changed prefab's node gets a new file.
+        queue.Unwant(ContentBrowserModel.PartKey(C, 7));
         _index.Apply(new AssetDelta([TestAssets.Make(C, AssetKind.Prefab, "c.prefab", thumbnail: "t/c2.png")], [], [], []));
         Assert.Null(queue.PartPicture(C, 7));
         queue.Want(ContentBrowserModel.PartKey(C, 7), _now);
@@ -252,15 +237,6 @@ public sealed class ThumbnailQueueTests
         queue.Forget(C, 7, _now);
         Assert.Equal(2, Bakes.Count());
         Assert.Null(queue.FailureOf(C, 7));
-    }
-
-    [Fact]
-    public void APartOfAPrefabWithNoPictureAsksForNothing()
-    {
-        var queue = NewQueue(_ => false);
-        Assert.Null(queue.PartPath(Script, 7));
-        queue.Want(ContentBrowserModel.PartKey(Script, 7), _now);
-        Assert.Empty(_sent);
     }
 
     [Fact]
@@ -287,13 +263,4 @@ public sealed class ThumbnailQueueTests
         Assert.Equal(2, Bakes.Count());
     }
 
-    [Fact]
-    public void AnAnswerToAnotherRequestIsIgnored()
-    {
-        var queue = NewQueue();
-        queue.Want(A, _now);
-        var id = Bakes.Single().Id;
-        queue.Apply(new CaptureResult(id + 5, CaptureKind.Thumbnail, true, "", "t/a.png", 0, 0, 0, 0, 0, OutputMode.Sdr), _now);
-        Assert.False(_index.Find(A)!.ThumbnailReady);
-    }
 }

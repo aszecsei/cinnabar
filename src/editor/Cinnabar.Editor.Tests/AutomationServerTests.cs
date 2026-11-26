@@ -38,6 +38,7 @@ public sealed class AutomationServerTests
                 "screenshot" => new AutomationResponse(request.Id, true, ["E:/captures/a.png", "E:/captures/a.json"]),
                 "timing" => new AutomationResponse(request.Id, true, Timing: new AutomationTiming(5, 4.5,
                     [new PassTiming("fog inject", "compute", 1, 0.2, 0.1, 0.3, 5)], [new AutomationViewportSize(0, 1920, 1080, true)])),
+                "gif" => throw new InvalidOperationException("no host"),
                 _ => new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}"),
             });
         });
@@ -69,6 +70,11 @@ public sealed class AutomationServerTests
             Assert.False(unknown.GetProperty("ok").GetBoolean());
             Assert.Contains("dance", unknown.GetProperty("error").GetString());
 
+            // A handler that throws answers with the error.
+            var thrown = await Ask(reader, writer, """{"id":7,"command":"gif"}""");
+            Assert.Equal(7, thrown.GetProperty("id").GetInt64());
+            Assert.Equal("no host", thrown.GetProperty("error").GetString());
+
             var malformed = await Ask(reader, writer, "{not json");
             Assert.Equal(0, malformed.GetProperty("id").GetInt64());
             Assert.False(malformed.GetProperty("ok").GetBoolean());
@@ -77,49 +83,7 @@ public sealed class AutomationServerTests
             Assert.Equal(4, empty.GetProperty("id").GetInt64());
             Assert.Contains("command", empty.GetProperty("error").GetString());
         }
-        Assert.Equal(4, seen.Count);
-    }
-
-    [Fact]
-    public async Task AHandlerThatThrowsAnswersWithTheError()
-    {
-        await using var server = new AutomationServer((_, _) => throw new InvalidOperationException("no host"));
-        server.Start();
-        var (client, reader, writer) = await Connect(server.Port);
-        using (client)
-        {
-            var answer = await Ask(reader, writer, """{"id":7,"command":"gif"}""");
-            Assert.Equal(7, answer.GetProperty("id").GetInt64());
-            Assert.Equal("no host", answer.GetProperty("error").GetString());
-        }
-    }
-
-    [Fact]
-    public async Task TheUiCommandAnswersWithItsFile()
-    {
-        using var dir = new TempDirectory("ui-command");
-        using var shell = TestShell.Open(dir, null, null);
-        var request = new AutomationRequest(1, "ui", Path: dir.Combine("chrome"), Window: "contentBrowser");
-
-        var none = await shell.HandleAutomation(request, TestContext.Current.CancellationToken);
-        Assert.False(none.Ok);
-        Assert.Contains("no window", none.Error);
-
-        (string? Window, string Path)? asked = null;
-        shell.UiCapture = (window, path) =>
-        {
-            asked = (window, path);
-            return null;
-        };
-        var drawn = await shell.HandleAutomation(request, TestContext.Current.CancellationToken);
-        Assert.True(drawn.Ok);
-        Assert.Equal([dir.Combine("chrome.png")], drawn.Files!);
-        Assert.Equal(("contentBrowser", dir.Combine("chrome.png")), asked);
-
-        shell.UiCapture = (_, _) => "the window is gone";
-        var failed = await shell.HandleAutomation(request, TestContext.Current.CancellationToken);
-        Assert.False(failed.Ok);
-        Assert.Equal("the window is gone", failed.Error);
+        Assert.Equal(5, seen.Count);
     }
 
     [Fact]

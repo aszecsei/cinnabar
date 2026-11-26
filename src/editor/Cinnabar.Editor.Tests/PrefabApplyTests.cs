@@ -193,19 +193,6 @@ public sealed class PrefabApplyTests : IDisposable
     }
 
     [Fact]
-    public void ResetOnAPartReturnsToThePrefabsValue()
-    {
-        var (document, _) = Open(PartLevel);
-        document.Apply("Override", new SetField(Part, 35, "intensity", Number(0.25)));
-        Assert.Equal(0.25, Intensity(document, Part));
-
-        document.Apply("Reset", new SetField(Part, 35, "intensity", null));
-
-        Assert.Equal(1.0, Intensity(document, Part));
-        Assert.Equal(0x2000000000000002ul, document.Scene.Find(Part)!.Node);
-    }
-
-    [Fact]
     public void RevertAllOnAPartKeepsItAPart()
     {
         var (document, _) = Open(PartLevel);

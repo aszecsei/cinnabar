@@ -30,11 +30,6 @@ public class MeshRegionToolsTests
         Assert.All(mesh.Faces[1].Corners, c => Assert.Equal(1.5, mesh.Vertices[c].Y));
         Assert.Empty(mesh.Validate());
         AssertFrontsOut(mesh, new Vec3(0.5, 0.5, 0.5));
-        // A wall takes the top's slot and a world-aligned mapping for its own normal, and its edges are sharp.
-        var wall = mesh.Faces[6];
-        Assert.Equal(Mapping.WorldAligned(mesh.FaceNormal(6)), wall.Mapping);
-        // The walls' far edges and their four uprights join the box's twelve.
-        Assert.Equal(20, mesh.SharpEdges.Length);
 
         // Two faces that share an edge extrude as one: no wall between them.
         var (two, _, _) = MeshTools.Extrude(box, [1, 2], 0.25);

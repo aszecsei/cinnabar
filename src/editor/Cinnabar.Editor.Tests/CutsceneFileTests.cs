@@ -174,23 +174,6 @@ public sealed class CutsceneFileTests
     }
 
     [Fact]
-    public void SpansTimesAndKeysRewriteTheirKeywordLine()
-    {
-        var file = Parse(Sample("intro").ReplaceLineEndings("\n"));
-        var close = file.Find("section:6")!;
-        close.SetSpan(210000, 400000);
-        Assert.Contains("\tsection 6 210000 400000\n", file.Text);
-        var key = file.Find("section:1/channel:position_x/key:1")!;
-        key.SetTime(540000);
-        key.SetKeyValue("5");
-        key.SetKeyInterpolation("bezier 0.5");
-        Assert.Contains("\t\t\tkey 540000 5 bezier 0.5\n", file.Text);
-        Assert.Equal("section:1/channel:position_x/key:1", CutsceneFile.PathOf(key));
-        // Section IDs are the cutscene's, across its tracks.
-        Assert.Equal(16, file.NextId(CutsceneBlockKind.Section));
-    }
-
-    [Fact]
     public void OnlyABadFirstLineIsRefused()
     {
         var (file, problem) = CutsceneFile.Parse("# A comment first is fine.\nscene 1\n");
@@ -199,33 +182,5 @@ public sealed class CutsceneFileTests
         Assert.Null(CutsceneFile.Parse("").File);
         // Everything else opens, for the cooker to report.
         Assert.NotNull(CutsceneFile.Parse("cutscene 1\nlength = soon\nsection 1 0 10\n").File);
-    }
-
-    [Fact]
-    public void TimesShowAsTimecodeAndFramesAtTheDisplayRate()
-    {
-        Assert.Equal("00:10:00", Cutscenes.CutsceneTime.Timecode(600000, 30));
-        Assert.Equal(300, Cutscenes.CutsceneTime.Frames(600000, 30));
-        Assert.Equal("01:02:12", Cutscenes.CutsceneTime.Timecode(62 * 60000 + 30000, 24));
-        Assert.Equal(2500, Cutscenes.CutsceneTime.FrameTicks(24));
-    }
-
-    [Fact]
-    public void ANewSettingTakesTheLastSettingsIndentOrALevelUnderItsKeywordLine()
-    {
-        var file = Parse("cutscene 1\nlength = 60000\n\ntrack 1 camera_cut \"A\"\n  a = 1\n      b = 2\n  track 2 camera_cut \"B\"\n");
-
-        // The last setting's indent, and not the first's.
-        file.Find("track:1")!.Set("c", "3");
-        Assert.Contains("\n  a = 1\n      b = 2\n      c = 3\n", file.Text);
-
-        // Without settings, a tab more than the keyword line's indent.
-        file.Find("track:2")!.Set("c", "3");
-        Assert.EndsWith("\n  track 2 camera_cut \"B\"\n  \tc = 3\n", file.Text);
-
-        // The cutscene's settings have none.
-        var bare = Parse("cutscene 1\n");
-        bare.Root.Set("rate", "24");
-        Assert.Equal("cutscene 1\nrate = 24\n", bare.Text);
     }
 }

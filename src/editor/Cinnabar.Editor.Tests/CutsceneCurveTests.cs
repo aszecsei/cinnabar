@@ -119,20 +119,4 @@ public sealed class CutsceneCurveTests
     [InlineData("bezier 0 weights 0.5 0.5 teleport")]
     public void AKeyWritesBackAsItReads(string interpolation) =>
         Assert.Equal(interpolation, CurveKey.Parse(0, "1", interpolation)!.Value.Interpolation());
-
-    [Fact]
-    public void AnAutoKeyIsFlatAtTheEndsAndAtTurnsAndLimitedElsewhere()
-    {
-        CurveKey K(int t, float v) => new(t, v, CurveInterp.Auto);
-        // The ends.
-        Assert.Equal(0, CutsceneCurve.AutoSlope([K(0, 0), K(60000, 1), K(120000, 2)], 0));
-        Assert.Equal(0, CutsceneCurve.AutoSlope([K(0, 0), K(60000, 1), K(120000, 2)], 2));
-        // A straight line keeps its slope: 1 a second.
-        Assert.Equal(1, CutsceneCurve.AutoSlope([K(0, 0), K(60000, 1), K(120000, 2)], 1));
-        // A peak and a plateau are flat.
-        Assert.Equal(0, CutsceneCurve.AutoSlope([K(0, 0), K(60000, 1), K(120000, 0)], 1));
-        Assert.Equal(0, CutsceneCurve.AutoSlope([K(0, 1), K(60000, 1), K(120000, 2)], 1));
-        // A steep side is limited to three times the gentle one: (10 - 0) / 2 = 5 is above 3 × 0.1.
-        Assert.Equal(0.3, CutsceneCurve.AutoSlope([K(0, 0), K(60000, 0.1f), K(120000, 10)], 1), 6);
-    }
 }

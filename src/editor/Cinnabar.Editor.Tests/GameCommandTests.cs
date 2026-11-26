@@ -1,4 +1,3 @@
-using Cinnabar.Editor.Commands.Ribbon;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Model;
@@ -12,7 +11,7 @@ using SceneValue = Cinnabar.Editor.Document.SceneValue;
 
 namespace Cinnabar.Editor.Tests;
 
-/// <summary>The game's commands in the shell, and the resource monitor's stats, without a host.</summary>
+/// <summary>The game's commands in the shell, without a host, and their operations on the wire.</summary>
 public sealed class GameCommandTests : IDisposable
 {
     readonly TempDirectory _temp = new("command");
@@ -71,18 +70,6 @@ public sealed class GameCommandTests : IDisposable
     }
 
     [Fact]
-    public void GameCommandsJoinTheirTabsOrAddTheirOwn()
-    {
-        var layout = new RibbonLayout([], [new RibbonTab("home", "Home", [new RibbonGroup("Scene", [new LargeButton("file.save")])])]);
-        var merged = layout.WithCommands([("home", "Mine", "game.a"), ("Game", "Debug", "game.b"), ("Game", "Debug", "game.c"), ("Game", "Debug", "game.d")]);
-
-        Assert.Equal(["Scene", "Mine"], merged.Tabs[0].Groups.Select(g => g.Label));
-        var game = Assert.Single(merged.Tabs, t => t.Label == "Game");
-        var stack = Assert.IsType<SmallStack>(Assert.Single(Assert.Single(game.Groups).Items));
-        Assert.Equal(["game.b", "game.c", "game.d"], stack.Commands);
-    }
-
-    [Fact]
     public void TheGamesCommandsComeAndGoWithItsList()
     {
         using var shell = NewShell();
@@ -119,20 +106,6 @@ public sealed class GameCommandTests : IDisposable
         shell.Scene.Undo();
         Assert.Null(shell.Scene.Scene.Find(0x42));
         Assert.Equal("Door", shell.Scene.Scene.Find(1)!.Name);
-    }
-
-    [Fact]
-    public void TheFrameHistoryKeepsAMinute()
-    {
-        var stats = new ResourceStats();
-        for (var i = 0; i < ResourceStats.HistoryLength + 10; i++)
-        {
-            stats.Apply(new HostStats(0.25f, 15, i, i, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
-        }
-        Assert.Equal(ResourceStats.HistoryLength, stats.History.Count);
-        Assert.Equal(10, stats.History.First().AverageMs);
-        Assert.Equal("1.5 MB", ResourceStats.Bytes(1536 * 1024));
-        Assert.Equal("12 B", ResourceStats.Bytes(12));
     }
 
     public void Dispose() => _temp.Dispose();

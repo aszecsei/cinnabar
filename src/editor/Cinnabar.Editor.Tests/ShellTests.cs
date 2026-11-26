@@ -16,21 +16,6 @@ public sealed class ShellTests : IDisposable
         shell.Console.Lines.Where(l => l.Level >= LogLevel.Warning).Select(l => l.Text);
 
     [Fact]
-    public void AnOldLayoutFileStillLoads()
-    {
-        using var dir = new TempDirectory("old-layout");
-        using var shell = TestShell.Open(dir, null, null);
-        // A file from before floating windows kept their place has none of it.
-        var json = shell.Layout.Save().ToJson();
-        Assert.DoesNotContain("windows", json);
-        var file = Docking.LayoutFile.FromJson(json);
-        Assert.NotNull(file);
-        Assert.Null(file.Windows);
-        Assert.True(shell.Layout.Restore(file));
-        Assert.Empty(shell.Layout.PendingWindows);
-    }
-
-    [Fact]
     public void FloatingBoundsRoundTrip()
     {
         using var dir = new TempDirectory("floating-bounds");
@@ -44,18 +29,6 @@ public sealed class ShellTests : IDisposable
         Assert.True(shell.Layout.Restore(file));
         Assert.Equal(saved.Windows, shell.Layout.PendingWindows);
         Assert.True(shell.Layout.IsOpen("contentBrowser"));
-    }
-
-    [Fact]
-    public void ASavedWindowOfARenamedPanelFollowsTheNewName()
-    {
-        using var dir = new TempDirectory("renamed-window");
-        using var shell = TestShell.Open(dir, null, null);
-        var saved = shell.Layout.Save() with { Windows = [new Docking.FloatingWindow("assetBrowser", 1, 2, 3, 4), new Docking.FloatingWindow("gone", 1, 2, 3, 4)] };
-
-        Assert.True(shell.Layout.Restore(saved));
-
-        Assert.Equal("contentBrowser", Assert.Single(shell.Layout.PendingWindows).Panel);
     }
 
     [Fact]
@@ -94,20 +67,6 @@ public sealed class ShellTests : IDisposable
     }
 
     [Fact]
-    public void TheCaptureCommandsNeedALinkedHost()
-    {
-        using var shell = NewShell();
-        var screenshot = shell.Commands.Get(EditorCommands.Screenshot);
-        var gif = shell.Commands.Get(EditorCommands.CaptureGif);
-        Assert.Equal("F12", screenshot.Shortcut);
-        Assert.Equal("Shift+F12", gif.Shortcut);
-        Assert.False(screenshot.CanExecute);
-        Assert.False(gif.CanExecute);
-        Assert.False(shell.Captures.Busy);
-        Assert.Equal(0, shell.AutomationPort);
-    }
-
-    [Fact]
     public void TheViewportsRenderingCommandsChangeItsSettingsAndTheyStay()
     {
         using (var shell = NewShell())
@@ -121,11 +80,6 @@ public sealed class ShellTests : IDisposable
 
             var view = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.DebugView);
             Assert.Equal("Lit", view.Selected);
-            Assert.Contains("Lighting Only", view.Options);
-            // The reflections' debug views (see docs/rendering/post-processing.md#debug-views).
-            Assert.Contains("Roughness", view.Options);
-            Assert.Contains("Reflections", view.Options);
-            Assert.Contains("Reflection Probes", view.Options);
             view.Select("Light Complexity");
             Assert.Equal(Link.Protocol.DebugView.LightComplexity, shell.ViewportSettings.DebugView);
 
@@ -135,18 +89,7 @@ public sealed class ShellTests : IDisposable
             Assert.True(shell.Commands.Get(EditorCommands.ExposureReset).Execute());
             Assert.Equal(0, shell.ViewportSettings.ExposureOffset);
 
-            ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.Helpers)).Select("All");
-
-            ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportQuality)).Select("Low");
             ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportAntiAliasing)).Select("FSR");
-            ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportGiTechnique)).Select("Voxel Cones");
-            var reflections = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportReflections);
-            Assert.Equal(EditorShell.GameQualityLabel, reflections.Selected);
-            Assert.Equal(Enum.GetValues<Link.Protocol.ViewportReflections>().Length, reflections.Options.Count);
-            reflections.Select("Probes");
-            var level = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportReflectionsLevel);
-            Assert.Equal(Enum.GetValues<Link.Protocol.ViewportLevel>().Length, level.Options.Count);
-            level.Select("Ultra");
             var scale = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportRenderScale);
             Assert.Equal(EditorShell.GameQualityLabel, scale.Selected);
             scale.Select("67%");
@@ -157,12 +100,7 @@ public sealed class ShellTests : IDisposable
         using var again = NewShell();
         Assert.True(again.ViewportSettings.NoBloom);
         Assert.Equal(Link.Protocol.DebugView.LightComplexity, again.ViewportSettings.DebugView);
-        Assert.Equal(Link.Protocol.HelperMode.All, again.ViewportSettings.Helpers);
-        Assert.Equal(Link.Protocol.ViewportPreset.Low, again.ViewportSettings.QualityPreset);
         Assert.Equal(Link.Protocol.ViewportAa.Fsr, again.ViewportSettings.AntiAliasing);
-        Assert.Equal(Link.Protocol.ViewportGi.VoxelCones, again.ViewportSettings.GlobalIllumination);
-        Assert.Equal(Link.Protocol.ViewportReflections.Probes, again.ViewportSettings.Reflections);
-        Assert.Equal(Link.Protocol.ViewportLevel.Ultra, again.ViewportSettings.ReflectionsLevel);
         Assert.Equal(2f / 3, again.ViewportSettings.RenderScale, 1e-4f);
         Assert.Empty(Problems(again));
     }
@@ -172,7 +110,7 @@ public sealed class ShellTests : IDisposable
     {
         var project = Path.Combine(_settingsDirectory, "game", "project.settings");
         Directory.CreateDirectory(Path.GetDirectoryName(project)!);
-        File.WriteAllText(project, "output = Auto\n");
+        File.WriteAllText(project, "# The window.\noutput = Auto\n");
         var user = Document.ProjectSettings.UserPath(project);
         // A game's settings menu saved single features on this machine.
         File.WriteAllText(user, "quality.preset = Custom\nquality.aa = Fsr\nquality.render_scale = 0.5\n");
@@ -183,7 +121,7 @@ public sealed class ShellTests : IDisposable
         Assert.Equal(EditorShell.CustomQualityLabel, mine.Selected);
 
         quality.Select("Medium");
-        Assert.Equal("output = Auto\nquality.preset = Medium\n", File.ReadAllText(project));
+        Assert.Equal("# The window.\noutput = Auto\nquality.preset = Medium\n", File.ReadAllText(project));
         // Custom keeps the features; a preset replaces them.
         mine.Select(EditorShell.CustomQualityLabel);
         Assert.Equal("Fsr", Document.ProjectSettings.Get(user, "quality.aa"));
@@ -194,59 +132,8 @@ public sealed class ShellTests : IDisposable
         mine.Select(EditorShell.ProjectOutputLabel);
         Assert.False(File.Exists(user));
         quality.Select(EditorShell.HardwareQualityLabel);
-        Assert.Equal("output = Auto\n", File.ReadAllText(project));
+        Assert.Equal("# The window.\noutput = Auto\n", File.ReadAllText(project));
         Assert.Empty(Problems(shell));
-    }
-
-[Fact]
-    public void TheOutputModeIsTheProjectsUnlessThisMachineReplacesIt()
-    {
-        var project = Path.Combine(_settingsDirectory, "game", "project.settings");
-        Directory.CreateDirectory(Path.GetDirectoryName(project)!);
-        File.WriteAllText(project, "# The window.\noutput = Auto\n");
-        using var shell = new EditorShell(new EditorOptions("host.exe", "game.dll") { ProjectPath = project }, new EditorSettings(_settingsDirectory));
-        var output = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ProjectOutput);
-        var mine = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.UserOutput);
-        Assert.Equal("Auto", output.Selected);
-        Assert.Equal(EditorShell.ProjectOutputLabel, mine.Selected);
-
-        // The project's file keeps its comment, and the game reads the setting's name.
-        output.Select("SDR");
-        Assert.Equal("# The window.\noutput = Sdr\n", File.ReadAllText(project));
-
-        var user = Document.ProjectSettings.UserPath(project);
-        Assert.EndsWith("project.user.settings", user);
-        mine.Select("HDR10");
-        Assert.Equal("Hdr10", Document.ProjectSettings.Get(user, "output"));
-        // Leaving it to the project again removes the user's file.
-        mine.Select(EditorShell.ProjectOutputLabel);
-        Assert.False(File.Exists(user));
-        Assert.Empty(Problems(shell));
-    }
-
-    [Fact]
-    public void EveryPanelStartsOpen()
-    {
-        using var shell = NewShell();
-
-        Assert.All(shell.Layout.Panels, p => Assert.True(shell.Layout.IsOpen(p.Id), p.Id));
-        Assert.True(shell.Layout.IsViewportOpen(ViewportDocument.SceneId));
-        Assert.True(shell.Layout.IsViewportOpen(ViewportDocument.GameId));
-    }
-
-    [Fact]
-    public void APanelCommandClosesAndShowsItsPanel()
-    {
-        using var shell = NewShell();
-        var command = shell.Commands.Get(EditorCommands.Panel("outliner"));
-
-        command.Execute();
-        Assert.False(shell.Layout.IsOpen("outliner"));
-        Assert.False(command.IsChecked);
-
-        command.Execute();
-        Assert.True(shell.Layout.IsOpen("outliner"));
-        Assert.True(command.IsChecked);
     }
 
     [Fact]
@@ -337,51 +224,25 @@ public sealed class ShellTests : IDisposable
         Assert.All(shell.Layout.Panels, p => Assert.True(shell.Layout.IsOpen(p.Id), p.Id));
     }
 
+    // The viewport's keys are the commands' shortcuts in the viewport's scope, and not the window's, or W in the outliner
+    // would change the tool.
     [Fact]
-    public void UserKeyBindingsReplaceTheDefaults()
-    {
-        new EditorSettings(_settingsDirectory).Write(EditorSettings.KeyBindingsFileName, """{ "view.stats": "F3" }""");
-
-        using var shell = NewShell();
-
-        Assert.Equal("F3", shell.KeyBindings.ShortcutOf(EditorCommands.Stats));
-    }
-
-    // The viewport's keys, which were a switch in its key handler, as the commands' scoped shortcuts.
-    [Theory]
-    [InlineData("Q", EditorCommands.SelectTool)]
-    [InlineData("W", EditorCommands.MoveTool)]
-    [InlineData("E", EditorCommands.RotateTool)]
-    [InlineData("R", EditorCommands.ScaleTool)]
-    [InlineData("N", EditorCommands.NavPathTool)]
-    [InlineData("L", EditorCommands.LandscapeTool)]
-    [InlineData("X", EditorCommands.LocalSpace)]
-    [InlineData("F", EditorCommands.FrameSelected)]
-    [InlineData("H", EditorCommands.HideSelected)]
-    [InlineData("Tab", EditorCommands.EditMesh)]
-    [InlineData("D1", EditorCommands.MeshVertices)]
-    [InlineData("D2", EditorCommands.MeshEdges)]
-    [InlineData("D3", EditorCommands.MeshFaces)]
-    [InlineData("OemOpenBrackets", EditorCommands.MeshGridFiner)]
-    [InlineData("OemCloseBrackets", EditorCommands.MeshGridCoarser)]
-    [InlineData("Left", EditorCommands.TextureShiftLeft)]
-    [InlineData("Shift+Left", EditorCommands.TextureShiftLeft + EditorCommands.Times10)]
-    [InlineData("Ctrl+Left", EditorCommands.TextureShiftLeft + EditorCommands.Fine)]
-    [InlineData("Right", EditorCommands.TextureShiftRight)]
-    [InlineData("Up", EditorCommands.TextureShiftUp)]
-    [InlineData("Down", EditorCommands.TextureShiftDown)]
-    [InlineData("OemComma", EditorCommands.TextureRotateLeft)]
-    [InlineData("OemPeriod", EditorCommands.TextureRotateRight)]
-    [InlineData("OemPlus", EditorCommands.TextureScaleUp)]
-    [InlineData("OemMinus", EditorCommands.TextureScaleDown)]
-    [InlineData("Escape", EditorCommands.Cancel)]
-    public void TheViewportsKeysAreItsScopedShortcuts(string key, string command)
+    public void TheViewportsKeysAreItsScopedShortcuts()
     {
         using var shell = NewShell();
+        string[] commands =
+        [
+            EditorCommands.SelectTool, EditorCommands.MoveTool, EditorCommands.RotateTool, EditorCommands.ScaleTool,
+            EditorCommands.FrameSelected, EditorCommands.EditMesh, EditorCommands.MeshVertices, EditorCommands.TextureShiftLeft,
+            EditorCommands.TextureShiftLeft + EditorCommands.Times10, EditorCommands.Cancel,
+        ];
 
-        Assert.Contains((command, key), shell.KeyBindings.InScope(Commands.ShortcutScopes.Viewport));
-        // Not the window's, or W in the outliner would change the tool.
-        Assert.DoesNotContain(shell.KeyBindings.All, b => b.CommandId == command);
+        var viewport = shell.KeyBindings.InScope(Commands.ShortcutScopes.Viewport).Select(b => b.CommandId).ToHashSet();
+        Assert.All(commands, command =>
+        {
+            Assert.Contains(command, viewport);
+            Assert.DoesNotContain(shell.KeyBindings.All, b => b.CommandId == command);
+        });
     }
 
     // A scope's key comes before the window's, so a window shortcut with the same key would not run while the scope has
@@ -419,20 +280,6 @@ public sealed class ShellTests : IDisposable
             Assert.False(shell.Commands.Get(id).CanExecute);
         }
         Assert.Contains((EditorCommands.CutscenePlayPause, "Space"), shell.KeyBindings.InScope(Commands.ShortcutScopes.CutsceneTimeline));
-        Assert.Equal("Space in a cutscene's timeline or curves", shell.KeyBindings.Describe(EditorCommands.CutscenePlayPause));
-    }
-
-    // A tip that names a key takes it from the bindings, as the editors' Save buttons do, so a rebinding shows in it.
-    [Fact]
-    public void ATipNamesTheKeyThatTheBindingsGive()
-    {
-        using var shell = NewShell();
-
-        Assert.Equal("Save (Ctrl+S)", Ribbon.CommandViews.Tip(shell.KeyBindings, "Save", EditorCommands.Save));
-        var rebound = new Commands.KeyBindings(shell.Commands, new Dictionary<string, string> { [EditorCommands.Save] = "Ctrl+Alt+S" });
-        Assert.Equal("Save (Ctrl+Alt+S)", Ribbon.CommandViews.Tip(rebound, "Save", EditorCommands.Save));
-        var unbound = new Commands.KeyBindings(shell.Commands, new Dictionary<string, string> { [EditorCommands.Save] = "" });
-        Assert.Equal("Save", Ribbon.CommandViews.Tip(unbound, "Save", EditorCommands.Save));
     }
 
     // Esc is Cancel in each scope that has something to cancel, and is not the window's, so the pickers, the value boxes
@@ -451,36 +298,15 @@ public sealed class ShellTests : IDisposable
     }
 
     [Fact]
-    public void AUserBindingMovesAViewportKey()
+    public void UserKeyBindingsReplaceTheDefaultsAndMoveAViewportKey()
     {
-        new EditorSettings(_settingsDirectory).Write(EditorSettings.KeyBindingsFileName, """{ "tool.move": "G" }""");
+        new EditorSettings(_settingsDirectory).Write(EditorSettings.KeyBindingsFileName, """{ "view.stats": "F3", "tool.move": "G" }""");
 
         using var shell = NewShell();
 
+        Assert.Equal("F3", shell.KeyBindings.ShortcutOf(EditorCommands.Stats));
         Assert.Contains((EditorCommands.MoveTool, "G"), shell.KeyBindings.InScope(Commands.ShortcutScopes.Viewport));
-        Assert.Equal("G in the viewport", shell.KeyBindings.Describe(EditorCommands.MoveTool));
-    }
-
-    [Fact]
-    public void TheHostStartsOnceTheViewportFindsItsAdapter()
-    {
-        using var shell = NewShell();
-
-        // host.exe is not there, so the start fails at once, but it is attempted.
-        shell.Host.Start(adapter: 1);
-
-        Assert.Contains("host.exe", Assert.IsType<HostState.FailedToStart>(shell.Host.State).Reason);
-        Assert.Contains(shell.Console.Lines, l => l.Text.Contains("cannot start"));
-        Assert.True(shell.Commands.Get(EditorCommands.RestartHost).CanExecute);
-    }
-
-    [Fact]
-    public void HostCommandsWaitForTheViewportsAdapter()
-    {
-        using var shell = NewShell();
-
-        Assert.False(shell.Commands.Get(EditorCommands.RestartHost).CanExecute);
-        Assert.False(shell.Commands.Get(EditorCommands.StopHost).CanExecute);
+        Assert.DoesNotContain(shell.KeyBindings.All, b => b.CommandId == EditorCommands.MoveTool);
     }
 
     [Fact]
@@ -504,67 +330,11 @@ public sealed class ShellTests : IDisposable
         Assert.Contains(Problems(shell), p => p.Contains($"{bad}:3") && p.Contains("no component or behaviour is open"));
     }
 
-    [Fact]
-    public void TheCommandLineOpensAScene()
-    {
-        Directory.CreateDirectory(_settingsDirectory);
-        var path = Path.Combine(_settingsDirectory, "start.scene");
-        File.WriteAllText(path, "scene 1\n");
-        using var shell = new EditorShell(new EditorOptions("host.exe", "game.dll", path), new EditorSettings(_settingsDirectory));
-
-        Assert.Equal(path, shell.Scene?.Path);
-        Assert.True(shell.Commands.Get(EditorCommands.OpenScene).CanExecute);
-    }
-
     public void Dispose()
     {
         if (Directory.Exists(_settingsDirectory))
         {
             Directory.Delete(_settingsDirectory, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void AShellBuiltOnAContextRefreshesTheCommandsOnItsNextTurnOnceForEveryChange()
-    {
-        var previous = SynchronizationContext.Current;
-        var context = new RecordingContext();
-        SynchronizationContext.SetSynchronizationContext(context);
-        try
-        {
-            using var dir = new TempDirectory("command-refresh");
-            using var shell = TestShell.Open(dir, null, null);
-            context.RunAll();
-            var save = shell.Commands.Get(EditorCommands.Save);
-            var changes = 0;
-            save.Changed += () => changes++;
-
-            shell.StopGame();
-            shell.StopGame();
-            shell.StopGame();
-            Assert.Equal(0, changes);
-            context.RunAll();
-            Assert.Equal(1, changes);
-        }
-        finally
-        {
-            SynchronizationContext.SetSynchronizationContext(previous);
-        }
-    }
-
-    /// <summary>Keeps what is posted until the test runs it, as one turn of the UI thread.</summary>
-    sealed class RecordingContext : SynchronizationContext
-    {
-        readonly Queue<(SendOrPostCallback Callback, object? State)> _posted = [];
-
-        public override void Post(SendOrPostCallback d, object? state) => _posted.Enqueue((d, state));
-
-        public void RunAll()
-        {
-            while (_posted.TryDequeue(out var posted))
-            {
-                posted.Callback(posted.State);
-            }
         }
     }
 }

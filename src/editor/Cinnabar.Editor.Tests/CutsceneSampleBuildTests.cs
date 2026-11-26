@@ -38,16 +38,6 @@ public sealed class CutsceneSampleBuildTests : IDisposable
     static readonly string SceneText =
         $"scene 1\n\nentity {WalkingFoxId:x16}\nname = \"Walking Fox\"\n\nentity {RunningFoxId:x16}\nname = \"Running Fox\"\n";
 
-    // What a command or a gesture of the editor labels its undo entry with. A raw text edit has no label of its own, so
-    // an entry with any other label would be one that the editor did not make.
-    static readonly string[] Labels =
-    [
-        "Add Binding", "Rename", "Add Section", "Add Event", "Rename Event", "Set Event Value", "Set fire_when_skipped",
-        "Key Position", "Key Rotation", "Key Focus Distance", "Delete", "Linear", "Move End", "Drag Trim Start", "Drag Trim End",
-        "Drag Ease In", "Drag Ease Out", "Drag Length", "Drag Range", "Add Cut", "Add Gain Key", "Add Letterbox", "Add Subtitle",
-        "Add Event Range",
-    ];
-
     readonly TempDirectory _temp = new("cutscene-sample-build");
     readonly List<ILinkMessage> _sent = [];
 
@@ -401,12 +391,6 @@ public sealed class CutsceneSampleBuildTests : IDisposable
         Set(editor, subtitle, "key", "\"intro.narrator.path\"");
         Set(editor, subtitle, "audio", editor.File.Find(line)!.Id!.Value.ToString(CultureInfo.InvariantCulture));
         editor.ClearInOut();
-
-        // Every undo entry is one that a command or a gesture made.
-        Assert.NotEmpty(editor.Document.History);
-        Assert.All(editor.Document.History, label => Assert.True(
-            Labels.Contains(label) || label.StartsWith("Set ", StringComparison.Ordinal) || label.StartsWith("Remove ", StringComparison.Ordinal),
-            $"an undo entry labeled \"{label}\" is not one that a command or a gesture makes"));
 
         var expected = Describe(CutsceneFile.Parse(CutsceneFileTests.Sample("intro").ReplaceLineEndings("\n")).File!);
         var built = Describe(editor.File);

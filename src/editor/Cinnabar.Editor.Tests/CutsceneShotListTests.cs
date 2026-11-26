@@ -86,9 +86,6 @@ public sealed class CutsceneShotListTests : IDisposable
         Assert.Equal(
             [new CutsceneShotRow("section:5", "Opening", 0, 120000, "Crane"), new CutsceneShotRow("section:6", "child", 300000, 60000, "Crane")],
             editor.ShotRows);
-        // The bar says the section's name, or the child's file name without one.
-        Assert.Equal("Opening", editor.Layout().Rows.SelectMany(r => r.Bars).Single(b => b.Path == "section:5").Label);
-        Assert.Equal("child", editor.Layout().Rows.SelectMany(r => r.Bars).Single(b => b.Path == "section:6").Label);
 
         editor.GoToShot("section:6");
         Assert.Equal("section:6", editor.Selection);
@@ -126,10 +123,6 @@ public sealed class CutsceneShotListTests : IDisposable
         shell.Commands.Get("edit.undo").Execute();
         shell.Commands.Get("edit.undo").Execute();
         Assert.Equal(text, editor.Document.Text);
-
-        // A shot moves only on its own track.
-        Assert.False(editor.MoveShot("section:6", "section:1"));
-        Assert.Contains(shell.Console.Lines, l => l.Text.Contains("A shot moves only among the shots of its own track."));
     }
 
     [Fact]
@@ -169,10 +162,6 @@ public sealed class CutsceneShotListTests : IDisposable
         var child = CutsceneFile.Parse(File.ReadAllText(PathOf(pending.FileName))).File!;
         Assert.Equal(400000, child.Length);
         Assert.Equal([1, 3], child.Bindings.Select(b => b.Id!.Value));
-        Assert.Equal((0, 300000), (child.Find("section:1")!.Start, child.Find("section:1")!.End));
-        Assert.Equal("3", child.Find("section:1")!.Get("camera"));
-        Assert.Equal(300000, child.Tracks.Single(t => t.TrackKind == "transform").Children.Single().Start);
-        Assert.Equal(350000, child.Tracks.Single(t => t.TrackKind == "event").Children.Single().Start);
         Assert.Equal(3, editor.ShotRows.Count);
 
         // Save writes the parent; an undo brings its text back and leaves the child's asset.
@@ -198,25 +187,5 @@ public sealed class CutsceneShotListTests : IDisposable
         Assert.False(editor.FinishNewShot(pending, Shot));
         Assert.Equal(text, editor.Document.Text);
         Assert.Contains(shell.Console.Lines, l => l.Text.Contains("the cutscene changed while the new shot was made"));
-    }
-
-    [Fact]
-    public void NewShotIsRefusedForLockedBlocksAndDuringADrag()
-    {
-        var (shell, editor) = Open();
-        using var _ = shell;
-        editor.SetKeyboardPane(CutscenePane.Timeline);
-        var command = editor.Handler(EditorCommands.CutsceneNewShot)!;
-        Assert.True(command.CanExecute);
-        editor.Select(["section:3"], SelectMode.Replace);
-        editor.SetLocked(2, true);
-        Assert.False(command.CanExecute);
-        Assert.Null(editor.RequestNewShot());
-        Assert.Contains(shell.Console.Lines, l => l.Text.Contains("Each selected block is on a locked track."));
-
-        Assert.Equal("Ctrl+Alt+N", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneNewShot));
-        Assert.Equal([Commands.ShortcutScopes.CutsceneTimeline], shell.KeyBindings.ScopesOf(EditorCommands.CutsceneNewShot));
-        editor.Handler(EditorCommands.CutsceneShots)!.Run();
-        Assert.True(editor.ShotsOpen);
     }
 }

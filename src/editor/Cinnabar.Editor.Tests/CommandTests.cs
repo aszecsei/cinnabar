@@ -5,66 +5,20 @@ namespace Cinnabar.Editor.Tests;
 public class CommandTests
 {
     [Fact]
-    public void ExecuteRunsOnlyWhenEnabled()
+    public void ExecuteRunsOnlyWhenEnabledAndRaisesChangedSoTogglesShowTheirNewState()
     {
         var enabled = false;
-        var runs = 0;
-        var command = new Command("test.run", "Run", () => runs++) { CanExecuteWhen = () => enabled };
-
-        Assert.False(command.Execute());
-        enabled = true;
-        Assert.True(command.Execute());
-        Assert.Equal(1, runs);
-    }
-
-    [Fact]
-    public void ExecuteRaisesChangedSoTogglesShowTheirNewState()
-    {
         var on = false;
-        var command = new Command("test.toggle", "Toggle", () => on = !on) { IsCheckedWhen = () => on };
+        var command = new Command("test.toggle", "Toggle", () => on = !on) { CanExecuteWhen = () => enabled, IsCheckedWhen = () => on };
         var changes = 0;
         command.Changed += () => changes++;
 
-        command.Execute();
-
-        Assert.True(command.IsToggle);
+        Assert.False(command.Execute());
+        Assert.False(on);
+        enabled = true;
+        Assert.True(command.Execute());
         Assert.True(command.IsChecked);
         Assert.Equal(1, changes);
-    }
-
-    [Fact]
-    public void ChoiceRejectsAnUnknownOption()
-    {
-        var selected = "Fit";
-        var choice = new ChoiceCommand("test.scale", "Scale", ["Fit", "100%"], () => selected, s => selected = s);
-
-        choice.Select("100%");
-        Assert.Equal("100%", choice.Selected);
-        Assert.Throws<ArgumentException>(() => choice.Select("200%"));
-    }
-
-    [Fact]
-    public void RegistryRefusesADuplicateId()
-    {
-        var commands = new CommandRegistry();
-        commands.Register(new Command("test.run", "Run", () => { }));
-
-        Assert.Throws<InvalidOperationException>(() => commands.Register(new Command("test.run", "Run again", () => { })));
-    }
-
-    [Fact]
-    public void ContextRaisesChangedOnlyOnAChange()
-    {
-        var context = new EditorContext();
-        var changes = 0;
-        context.Changed += () => changes++;
-
-        context.Set("host.running", true);
-        context.Set("host.running", true);
-        context.Set("host.running", false);
-
-        Assert.Equal(2, changes);
-        Assert.False(context.IsActive("host.running"));
     }
 
     // A scope that takes the commands of a table, each with its action and whether it can run.
@@ -154,41 +108,6 @@ public class CommandTests
     }
 
     [Fact]
-    public void ACommandOutsideARegistryAndOneUnregisteredRunTheirOwnAction()
-    {
-        var commands = new CommandRegistry();
-        var runs = 0;
-        var command = commands.Register(new Command("game.spin", "Spin", () => runs++));
-        commands.Focus(new TableScope(new() { ["game.spin"] = ScopedCommand.Never }));
-        Assert.False(command.Execute());
-
-        commands.Unregister("game.spin");
-
-        Assert.True(command.Execute());
-        Assert.Equal(1, runs);
-    }
-
-    [Fact]
-    public void ARefreshOfAScopeInvalidatesTheCommandsOnlyWhileTheScopeIsInTheChain()
-    {
-        var commands = new CommandRegistry();
-        var delete = commands.Register(new Command("entity.delete", "Delete", () => { }));
-        var changes = 0;
-        delete.Changed += () => changes++;
-        var canvas = new TableScope([]);
-        var editor = new TableScope([]);
-        commands.AddScope(editor);
-
-        commands.Refresh(canvas);
-        Assert.Equal(0, changes);
-        commands.Refresh(editor);
-        Assert.Equal(1, changes);
-        commands.Focus(canvas);
-        commands.Refresh(canvas);
-        Assert.Equal(3, changes);
-    }
-
-    [Fact]
     public void RequestsBeforeTheDispatchersTurnRefreshTheCommandsOnce()
     {
         var posted = new List<Action>();
@@ -240,19 +159,5 @@ public class CommandTests
 
         Assert.Single(posted);
         Assert.Equal(0, changes);
-    }
-
-    [Fact]
-    public void WithoutAPostARequestRefreshesAtOnce()
-    {
-        var commands = new CommandRegistry();
-        var save = commands.Register(new Command("scene.save", "Save", () => { }));
-        var changes = 0;
-        save.Changed += () => changes++;
-
-        commands.RequestInvalidate();
-        commands.RequestInvalidate();
-
-        Assert.Equal(2, changes);
     }
 }

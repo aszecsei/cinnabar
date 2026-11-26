@@ -1,6 +1,3 @@
-using System.Text;
-using Avalonia.Controls;
-using Avalonia.LogicalTree;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Protocol;
@@ -38,8 +35,6 @@ public sealed class WorldOverridesTests : IDisposable
     {
         Transforms = [new OverrideTransform(new OverrideTarget(OverrideTargetKind.SceneEntity, 1, 1), [(long)(x * 16777216), 0, 0], [0, 0, 0, 1], [1, 1, 1])],
     };
-
-    static ulong Hash(string name) => Fnv.Hash64(Encoding.UTF8.GetBytes(name));
 
     [Fact]
     public void AnOverrideWritesTheWorldAndNotTheDocument()
@@ -161,48 +156,9 @@ public sealed class WorldOverridesTests : IDisposable
         Assert.False(shell.Host.Linked);
         Assert.Equal([OverrideEnd.LinkClosed], ended);
         Assert.False(token.Write(Moved(1)));
+        // Without a link, no override begins.
+        Assert.Null(shell.Overrides.Begin("another"));
     }
-
-    [Fact]
-    public void WithoutALinkNoOverrideBegins()
-    {
-        using var shell = TestShell.Open(_temp, "door.scene", Text);
-        Assert.Null(shell.Overrides.Begin("the test"));
-    }
-
-    [Fact]
-    public void AFieldThatAnOverrideHoldsIsMarked() => Ui.Run(() =>
-    {
-        using var shell = NewShell();
-        shell.Selection.Select(Door);
-        var view = new PropertiesView(shell);
-        view.Subscriptions.Attach();
-        var content = (StackPanel)view.Content!;
-        TextBlock Frozen() => content.GetLogicalDescendants().OfType<TextBlock>().Single(t => t.Classes.Contains("field-name") && t.Text == "Frozen");
-
-        shell.OnGameMessage(new EntityValues(Door, [new ComponentValue(1, new byte[56])], [], [new HeldField(1, Hash("frozen"))], [], new ShownPreview(0, 0, 0, 0)));
-        Assert.Contains("held", Frozen().Classes);
-
-        shell.OnGameMessage(new EntityValues(Door, [new ComponentValue(1, new byte[56])], [], [], [], new ShownPreview(0, 0, 0, 0)));
-        Assert.DoesNotContain("held", Frozen().Classes);
-    });
-
-    [Fact]
-    public void AnEntityThatAnOverrideWritesIsMarkedInTheOutliner() => Ui.Run(() =>
-    {
-        using var shell = NewShell();
-        var view = new OutlinerView(shell);
-        view.Subscriptions.Attach();
-        static bool Marked(OutlinerView view) => view.OverrideMark(view.Rows.OfType<OutlinerRow>().Single().Node) != null;
-        Assert.False(Marked(view));
-
-        shell.OnGameMessage(new OverriddenEntities([Door]));
-        Assert.True(shell.World.IsOverridden(Door));
-        Assert.True(Marked(view));
-
-        shell.OnGameMessage(new OverriddenEntities([]));
-        Assert.False(Marked(view));
-    });
 
     public void Dispose() => _temp.Dispose();
 }

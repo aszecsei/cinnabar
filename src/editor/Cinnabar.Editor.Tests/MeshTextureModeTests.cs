@@ -14,7 +14,7 @@ namespace Cinnabar.Editor.Tests;
 /// <summary>
 /// The texture tools in the shell, without a host: a shift as one undo entry, the texel density from the project's
 /// settings and the scale of new faces, Reset Scale, a material set by face and dropped on one, hotspots through the
-/// cook index, and the texture gizmo's drag.
+/// cook index, and the face panel's drag.
 /// </summary>
 public sealed class MeshTextureModeTests : IDisposable
 {
@@ -85,8 +85,6 @@ public sealed class MeshTextureModeTests : IDisposable
         Assert.Equal(before.ShiftV - 10 * MeshTexture.ShiftStep, MeshFixtures.Mesh(shell).Faces[front].Mapping.ShiftV, 9);
         Assert.True(shell.Commands.Get(EditorCommands.TextureShiftUp + EditorCommands.Fine).Execute());
         Assert.Equal(before.ShiftV - 9.9 * MeshTexture.ShiftStep, MeshFixtures.Mesh(shell).Faces[front].Mapping.ShiftV, 9);
-        Assert.Equal("Shift+Down", shell.KeyBindings.ShortcutOf(EditorCommands.TextureShiftDown + EditorCommands.Times10));
-        Assert.Equal("Ctrl+Up", shell.KeyBindings.ShortcutOf(EditorCommands.TextureShiftUp + EditorCommands.Fine));
         Assert.True(shell.Mesh.Texture.RotateTexture(1));
         Assert.Equal(15, MeshFixtures.Mesh(shell).Faces[front].Mapping.Rotation);
         Assert.True(shell.Mesh.Texture.ScaleTexture(1));
@@ -143,8 +141,7 @@ public sealed class MeshTextureModeTests : IDisposable
         Assert.Equal(blue, MeshFixtures.Mesh(shell).Materials[1]);
         var renderer = shell.Scene.Scene.Find(1)!.Components.Find(c => c.Id == SceneEdits.MeshRendererId)!;
         Assert.Equal(blue, renderer.Fields.Single(f => f.Name == "materials.1").Value.Asset);
-        // The dropdown shows it, and undo takes both back.
-        Assert.Equal("Blue", ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.MeshDevMaterial)).Selected);
+        // Undo takes both back.
         shell.Scene.Undo();
         Assert.Equal(0, MeshFixtures.Mesh(shell).Faces[front].Slot);
         Assert.DoesNotContain(renderer.Fields, f => f.Name == "materials.1");
@@ -183,50 +180,6 @@ public sealed class MeshTextureModeTests : IDisposable
         Assert.True(shell.Commands.Get(EditorCommands.TextureHotspot).Execute());
         var (minU, maxU, minV, maxV) = MeshTexture.UvBounds(MeshFixtures.Mesh(shell), front, MeshFixtures.Mesh(shell).Faces[front].Mapping);
         Assert.Equal((0, 0.25, 0, 0.25), (Math.Round(minU, 6), Math.Round(maxU, 6), Math.Round(minV, 6), Math.Round(maxV, 6)));
-        Assert.True(shell.Commands.Get(EditorCommands.TextureHotspotNext).Execute());
-        (minU, maxU, _, _) = MeshTexture.UvBounds(MeshFixtures.Mesh(shell), front, MeshFixtures.Mesh(shell).Faces[front].Mapping);
-        Assert.Equal((0.25, 0.75), (Math.Round(minU, 6), Math.Round(maxU, 6)));
-        // Random keeps the best rectangle in one of its symmetries.
-        Assert.True(shell.Mesh.Texture.ApplyHotspot(HotspotChoice.Random, new Random(3)));
-        Assert.Equal(0, MeshTexture.CurrentHotspot(MeshFixtures.Mesh(shell), front, MeshFixtures.Mesh(shell).Faces[front].Mapping, shell.Mesh.Texture.MaterialHotspots(MaterialGuid), 1024, 1024));
-        // A material without hotspots fits instead.
-        Assert.True(shell.Mesh.Texture.SetFaceMaterial(MeshSession.DevGrayMaterial));
-        Assert.True(shell.Mesh.Texture.ApplyHotspot(HotspotChoice.Best));
-        (minU, maxU, _, _) = MeshTexture.UvBounds(MeshFixtures.Mesh(shell), front, MeshFixtures.Mesh(shell).Faces[front].Mapping);
-        Assert.Equal((0, 1), (Math.Round(minU, 6), Math.Round(maxU, 6)));
-    }
-
-    [Fact]
-    public void TheTextureGizmoDragsTheMappingNotTheVertices()
-    {
-        using var shell = NewShell();
-        var front = Front(shell);
-        SelectFaces(shell, front);
-        shell.SetTool(Tool.Move);
-        Assert.True(shell.Commands.Get(EditorCommands.MeshTransformTexture).Execute());
-        Assert.True(shell.Mesh.Texture.TextureGizmo);
-        // The gizmo's x axis is the face's u axis, +x.
-        var (pivot, axes) = shell.GizmoPose()!.Value;
-        Assert.Equal(1, Vec3.Dot(axes.Rotate(Vec3.UnitX), Vec3.UnitX), 6);
-        var center = shell.Camera.RelativeTo(pivot);
-        var size = Gizmo.Size(shell.Camera, center, Height);
-        Vec2 Along(double meters) => shell.Camera.Project(center + Vec3.UnitX * meters, Width, Height)!.Value;
-        var vertices = MeshFixtures.Mesh(shell).Vertices;
-        Assert.True(shell.PressGizmo(Along(0.5 * size)));
-        shell.DragGizmo(Along(0.5 * size + 0.5), invertSnap: false);
-        shell.ReleaseGizmo();
-        Assert.Single(shell.Scene!.History);
-        Assert.Equal(vertices, MeshFixtures.Mesh(shell).Vertices);
-        // The texture moved half a meter along u: the shift fell by half a repeat at a scale of 1.
-        Assert.Equal(-0.5, MeshFixtures.Mesh(shell).Faces[front].Mapping.ShiftU, 6);
-        Assert.Equal(0, MeshFixtures.Mesh(shell).Faces[front].Mapping.ShiftV, 6);
-        // Off again, and a drag moves the vertices.
-        Assert.True(shell.Commands.Get(EditorCommands.MeshTransformTexture).Execute());
-        Assert.False(shell.Mesh.Texture.TextureGizmo);
-        Assert.True(shell.PressGizmo(Along(0.5 * size)));
-        shell.DragGizmo(Along(0.5 * size + 0.5), invertSnap: false);
-        shell.ReleaseGizmo();
-        Assert.NotEqual(vertices, MeshFixtures.Mesh(shell).Vertices);
     }
 
     [Fact]

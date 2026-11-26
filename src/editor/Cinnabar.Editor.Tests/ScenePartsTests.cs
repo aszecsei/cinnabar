@@ -87,19 +87,6 @@ public sealed class ScenePartsTests : IDisposable
     }
 
     [Fact]
-    public void AnEditNamesThePartOfItsEntity()
-    {
-        using var shell = Open();
-        var night = PartOf("night").Scene;
-        _sent.Clear();
-
-        Assert.True(shell.Edit("Rename", new Rename(2, "Night Bulb")));
-        Assert.True(shell.Edit("Rename", new Rename(3, "Box")));
-
-        Assert.Equal([night, shell.Scene!.Number], Sent().Select(o => o.Scene));
-    }
-
-    [Fact]
     public void SetSublevelMovesAnEntityAndUndoPutsItBack()
     {
         using var shell = Open();

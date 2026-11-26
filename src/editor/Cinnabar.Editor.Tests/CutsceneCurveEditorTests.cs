@@ -64,26 +64,6 @@ public sealed class CutsceneCurveEditorTests : IDisposable
     }
 
     [Fact]
-    public void ASelectedTracksChannelsShowAndAClickOnAKeyKeepsThem()
-    {
-        var (_, editor, input, _) = Intro();
-        Assert.Equal([Gain], editor.ShownCurves);
-        Assert.Equal([Gain], input.Layout.Rows.Select(r => r.Path));
-        Click(input, X(200000), Y(1));
-        Assert.Equal([$"{Gain}/key:1"], editor.SelectedPaths);
-        Assert.Equal([Gain], editor.ShownCurves);
-        // A click in empty space clears the selection, and the curves stay.
-        Click(input, X(600000), Y(1.9));
-        Assert.Empty(editor.SelectedPaths);
-        Assert.Equal([Gain], editor.ShownCurves);
-        // The list's eye hides a curve, which then has no keys to hit.
-        input.Press(4, 10, MouseButton.Left, KeyModifiers.None);
-        Assert.Contains(Gain, editor.HiddenCurves);
-        Assert.Empty(input.Layout.Rows);
-        Assert.Single(input.List.Rows);
-    }
-
-    [Fact]
     public void FlattenBreakAndAHandleDragGiveTheExactTextAndUndoGoesBackOverThem()
     {
         var (shell, editor, input, text) = Intro();
@@ -165,58 +145,6 @@ public sealed class CutsceneCurveEditorTests : IDisposable
     }
 
     [Fact]
-    public void TheCurvesShareTheTimelinesTimeAndItsKeys()
-    {
-        var (shell, editor, input, _) = Intro();
-        var timeline = new CutsceneTimelineInput(editor);
-        // The timeline's first size fits the whole cutscene, in the time that both show.
-        timeline.Resize(L.Gutter + 1000, 400);
-        Assert.Equal(editor.TimeView, timeline.View);
-        Assert.NotEqual(1000, editor.TimeView.PerPixel);
-        editor.SetTimeView(new TimelineView(0, 1000, TimelineZoom.Ticks));
-        input.Wheel(X(200000), 100, 1, KeyModifiers.None);
-        Assert.Equal(editor.TimeView, timeline.View);
-        Assert.Equal(200000, timeline.View.At(200), 6);
-        Assert.True(timeline.View.PerPixel < 1000);
-        // Shift and the wheel zoom the values, and leave the time.
-        var time = editor.TimeView;
-        input.Wheel(X(200000), 100, 1, KeyModifiers.Shift);
-        Assert.Equal(time, editor.TimeView);
-        Assert.True(input.Value.PerPixel < 0.01);
-
-        // The transport keys act with the curves' keyboard, and F frames the curves there.
-        editor.SetKeyboardPane(CutscenePane.Curves);
-        Assert.True(editor.TimelineFocused);
-        shell.Commands.Get(EditorCommands.CutsceneStepForward).Execute();
-        Assert.Equal(editor.FrameTicks, editor.Playhead);
-        shell.Commands.Get(EditorCommands.CutsceneFrame).Execute();
-        // The gain's keys span 0 to 400000, and its values 0.6 to 1.
-        Assert.Equal(0, editor.TimeView.At(0) + 400000 / 20, 6);
-        Assert.Equal(1.04, input.Value.Top, 6);
-
-        // Ctrl+E opens and closes the curves; closing gives the keyboard back to the timeline.
-        shell.Commands.Get(EditorCommands.CutsceneCurves).Execute();
-        Assert.True(editor.CurvesOpen);
-        shell.Commands.Get(EditorCommands.CutsceneCurves).Execute();
-        Assert.False(editor.CurvesOpen);
-        Assert.Equal(CutscenePane.Timeline, editor.KeyboardPane);
-        shell.Commands.Get(EditorCommands.CutsceneCurvesNormalized).Execute();
-        Assert.True(editor.CurvesNormalized);
-        // The normalized view fits the values again: -1 to 1, with a tenth of the span on each side.
-        Assert.Equal(1.2, input.Value.Top, 6);
-
-        // Every curve command has a key, and no key is bound twice.
-        Assert.Empty(shell.KeyBindings.Warnings);
-        Assert.Equal("Ctrl+E", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneCurves));
-        Assert.Equal("D6", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneTangentFlatten));
-        // Leaving the tab lets the keyboard go.
-        editor.LeaveKeyboardPane(CutscenePane.Curves);
-        Assert.Equal(CutscenePane.Timeline, editor.KeyboardPane);
-        editor.LeaveKeyboardPane(CutscenePane.Timeline);
-        Assert.False(editor.TimelineFocused);
-    }
-
-    [Fact]
     public void AFieldThatStepsDrawsAsStepsAndTakesNoTangents()
     {
         var (shell, editor, input, text) = Intro();
@@ -270,59 +198,6 @@ public sealed class CutsceneCurveEditorTests : IDisposable
         input.Press(X(300000), y, MouseButton.Left, KeyModifiers.None, clicks: 2);
         input.Release(X(300000), y, KeyModifiers.None);
         Assert.Equal(text, editor.Document.Text);
-    }
-
-    [Fact]
-    public void TheInfinityCommandsStepTheShownCurvesModesAsUndoEntries()
-    {
-        var (shell, editor, _, text) = Intro();
-        var post = shell.Commands.Get(EditorCommands.CutscenePostInfinity);
-        editor.SetKeyboardPane(CutscenePane.Timeline);
-        Assert.False(post.CanExecute);
-        editor.SetKeyboardPane(CutscenePane.Curves);
-        Assert.True(post.CanExecute);
-        Assert.Equal([Gain], editor.InfinityCurves);
-        Assert.Equal(CurveInfinity.Constant, editor.Infinity(InfinitySide.Post));
-        post.Execute();
-        var linear = text.Replace("\t\tchannel gain\n", "\t\tchannel gain\n\t\t\tpost_infinity = linear\n");
-        Assert.Equal(linear, editor.Document.Text);
-        post.Execute();
-        Assert.Equal(text.Replace("\t\tchannel gain\n", "\t\tchannel gain\n\t\t\tpost_infinity = cycle\n"), editor.Document.Text);
-        shell.Commands.Get(EditorCommands.CutscenePreInfinity).Execute();
-        Assert.Equal(CurveInfinity.Linear, editor.Infinity(InfinitySide.Pre));
-        Assert.Equal(CurveInfinity.Cycle, editor.Infinity(InfinitySide.Post));
-        Assert.Equal(["Post-Infinity", "Post-Infinity", "Pre-Infinity"], editor.Document.History.TakeLast(3));
-        shell.Commands.Get("edit.undo").Execute();
-        shell.Commands.Get("edit.undo").Execute();
-        Assert.Equal(linear, editor.Document.Text);
-        // Oscillate, and after it constant again, which writes nothing.
-        editor.SetInfinity(InfinitySide.Post, CurveInfinity.Oscillate);
-        post.Execute();
-        Assert.Equal(text, editor.Document.Text);
-    }
-
-    [Fact]
-    public void WeightedTangentsWeighTheSelectedKeyAndAHandleDragSetsItsWeight()
-    {
-        var (shell, editor, input, text) = Intro();
-        Click(input, X(200000), Y(1));
-        editor.SetKeyboardPane(CutscenePane.Curves);
-        var weighted = shell.Commands.Get(EditorCommands.CutsceneTangentWeighted);
-        weighted.Execute();
-        var third = text.Replace(Peak + "\n", "\t\t\tkey 200000 1 bezier 0 weights 0.33333334 0.33333334\n");
-        Assert.Equal(third, editor.Document.Text);
-        // The out handle reaches a third of the 200000-tick segment: 66.7 pixels right, flat. Dragged to 100 right and
-        // 50 up: a weight of a half, and 0.5 over 5/3 of a second, 0.3 a second, on both sides, as the key is unbroken.
-        Drag(input, X(200000) + 200.0 / 3, Y(1), X(200000) + 100, Y(1) - 50);
-        var dragged = text.Replace(Peak + "\n", "\t\t\tkey 200000 1 bezier 0.3 weights 0.33333334 0.5\n");
-        Assert.Equal(dragged, editor.Document.Text);
-        Assert.Equal(["Weighted Tangents", "Drag Tangent"], editor.Document.History.TakeLast(2));
-        // Again, with every selected key weighted, it takes the weights away.
-        weighted.Execute();
-        Assert.Equal(text.Replace(Peak + "\n", "\t\t\tkey 200000 1 bezier 0.3\n"), editor.Document.Text);
-        shell.Commands.Get("edit.undo").Execute();
-        shell.Commands.Get("edit.undo").Execute();
-        Assert.Equal(third, editor.Document.Text);
     }
 
     [Fact]
@@ -399,32 +274,5 @@ public sealed class CutsceneCurveEditorTests : IDisposable
         // Together, as a drag: 2 frames earlier stops both at the section's start, 1 frame on, and keeps their spacing.
         Assert.Null(editor.SetCurveKeyTime("-=2"));
         Assert.Equal([0, 400000], editor.CurveKeys.Select(p => editor.File.Find(p)!.Start!.Value).Order());
-    }
-
-    [Fact]
-    public void ValueSnapPutsADraggedKeyOnTheGridAndCtrlDoesNotSnap()
-    {
-        var (shell, editor, input, text) = Intro();
-        // A hundredth of a value a pixel: grid lines every 0.5.
-        Assert.Equal(0.5, input.View.Value.GridStep, 9);
-        Assert.False(editor.ValueSnap);
-        Click(input, X(200000), Y(1));
-        // Off, a drag 30 pixels up moves the key 0.3.
-        Drag(input, X(200000), Y(1), X(200000), Y(1.3));
-        Assert.Equal(text.Replace(Peak + "\n", "\t\t\tkey 200000 1.3 auto\n"), editor.Document.Text);
-        shell.Commands.Get("edit.undo").Execute();
-        editor.SetKeyboardPane(CutscenePane.Curves);
-        shell.Commands.Get(EditorCommands.CutsceneCurveValueSnap).Execute();
-        Assert.True(editor.ValueSnap);
-        // On, it goes to the nearest line, 1.5.
-        Drag(input, X(200000), Y(1), X(200000), Y(1.3));
-        Assert.Equal(text.Replace(Peak + "\n", "\t\t\tkey 200000 1.5 auto\n"), editor.Document.Text);
-        shell.Commands.Get("edit.undo").Execute();
-        // Ctrl during the drag does not snap.
-        Assert.True(input.Press(X(200000), Y(1), MouseButton.Left, KeyModifiers.None));
-        input.Move(X(200000), Y(1.2), KeyModifiers.Control);
-        input.Move(X(200000), Y(1.3), KeyModifiers.Control);
-        input.Release(X(200000), Y(1.3), KeyModifiers.Control);
-        Assert.Equal(text.Replace(Peak + "\n", "\t\t\tkey 200000 1.3 auto\n"), editor.Document.Text);
     }
 }

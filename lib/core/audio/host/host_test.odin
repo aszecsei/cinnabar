@@ -81,9 +81,11 @@ file_modified_changes_with_a_replacement :: proc(t: ^testing.T) {
 	testing.expect(t, before != 0)
 	file_close(file)
 
-	time.sleep(20 * time.Millisecond)
 	testing.expect(t, os.write_entire_file(temporary, "new contents") == nil)
 	testing.expect_value(t, os.rename(temporary, path), nil)
+	// The replacement's time is set a minute on, so the test does not wait for the file system's clock to move.
+	later := time.time_add(time.now(), time.Minute)
+	testing.expect(t, os.change_times(path, later, later) == nil)
 
 	file = file_open(name)
 	defer file_close(file)

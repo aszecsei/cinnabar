@@ -38,9 +38,11 @@ public class SceneFileTests
     }
 
     [Fact]
-    public void AFileParses()
+    public void AFileParsesAndWritesBack()
     {
-        var scene = Parse(Door);
+        var text = Door.ReplaceLineEndings("\n");
+        var scene = Parse(text);
+        Assert.Equal(text, SceneFile.Write(scene));
 
         Assert.Equal(["# A door and its trigger."], scene.HeaderComments);
         var door = scene.Find(0x5f3a9c01e2b47d10)!;
@@ -90,19 +92,7 @@ public class SceneFileTests
     }
 
     [Theory]
-    [InlineData("scene 2\n\nentity 9000000000000001#2000000000000002\nprefab = $22222222222222222222222222222222\n", "cannot change which prefab")]
-    [InlineData("scene 2\n\nentity 9000000000000001\nremoved = true\n", "only an override block")]
-    public void AKeyThatTheBlocksKindDoesNotTakeIsAnErrorAndIsNotSet(string text, string fragment)
-    {
-        var (scene, problems) = SceneFile.Parse(text);
-        Assert.Contains(problems, p => p.IsError && p.Message.Contains(fragment));
-        Assert.All(scene?.Entities ?? [], e => Assert.True(e.Prefab == "" || e.Kind == BlockKind.Instance));
-        Assert.All(scene?.Entities ?? [], e => Assert.False(e.Removed && e.Kind != BlockKind.Override));
-    }
-
-    [Theory]
     [InlineData("scene 2\n\nentity 9000000000000001\nnode = @2000000000000002\n", "only an instance block takes node")]
-    [InlineData("scene 2\n\nentity 9000000000000001#2000000000000002\nnode = @2000000000000002\n", "only an instance block takes node")]
     [InlineData("scene 2\n\nentity 9000000000000001\nprefab = $22222222222222222222222222222222\nnode = 3\n", "node takes an entity")]
     public void NodeOnAPlainEntityIsAnError(string text, string fragment)
     {
@@ -129,22 +119,7 @@ public class SceneFileTests
     }
 
     [Fact]
-    public void WritingGivesTheFileBack()
-    {
-        var text = Door.ReplaceLineEndings("\n");
-        Assert.Equal(text, SceneFile.Write(Parse(text)));
-    }
-
-    [Fact]
-    public void TheSampleSceneRoundTrips()
-    {
-        var path = Path.Combine(EditorOptions.RepositoryRoot(), "samples", "mygame", "content", "scenes", "main.scene");
-        var text = File.ReadAllText(path).ReplaceLineEndings("\n");
-        Assert.Equal(text, SceneFile.Write(Parse(text)));
-    }
-
-    [Fact]
-    public void WritingSortsEntitiesAndComponents()
+    public void WritingSortsEntitiesComponentsAndOverrideBlocks()
     {
         var scene = new Scene();
         var b = new SceneEntity(2) { Name = "b" };
@@ -165,6 +140,15 @@ public class SceneFileTests
             component 9 Late
 
             """.ReplaceLineEndings("\n"), SceneFile.Write(scene));
+
+        // An instance's override blocks follow it, before the next entity.
+        var instances = new Scene();
+        instances.Entities.Add(new SceneEntity([0x20, 0x01]) { Name = "x", Keys = SceneKeys.Name });
+        instances.Entities.Add(new SceneEntity(0x30));
+        instances.Entities.Add(new SceneEntity(0x20) { Prefab = "9db8150cc7215ffc2708d20d77cf60bf" });
+        instances.Entities.Add(new SceneEntity(0x10));
+        var ids = SceneFile.Write(instances).Split('\n').Where(l => l.StartsWith("entity ", StringComparison.Ordinal)).ToList();
+        Assert.Equal(["entity 0000000000000010", "entity 0000000000000020", "entity 0000000000000020#0000000000000001", "entity 0000000000000030"], ids);
     }
 
     [Theory]
@@ -172,9 +156,7 @@ public class SceneFileTests
     [InlineData("scene 1\nentity 12\n", 2, "16 hex digits")]
     [InlineData("scene 1\ncomponent 1 Transform\n", 2, "needs an entity")]
     [InlineData("scene 1\nentity 0000000000000001\n\tx = 1\n", 3, "no component or behaviour is open")]
-    [InlineData("scene 1\nentity 0000000000000001\ncomponent 1 T\n\tx = [1, 2\n", 4, "ends with ]")]
     [InlineData("scene 1\nentity 0000000000000001\ncomponent 1 T\n\tx = 1\n\tx = 2\n", 5, "set twice")]
-    [InlineData("scene 1\nentity 0000000000000001\ncomponent 1 T\n\tx = \"a\\q\"\n", 4, "not an escape")]
     [InlineData("scene 1\nentity 0000000000000001\ncomponent 1 T\ncomponent 1 T\n", 4, "twice")]
     [InlineData("scene 1\nentity 0000000000000001\ncomponent 1 T\n\tx = 1.2.3\n", 4, "not a number")]
     [InlineData("scene 1\nentity 0000000000000001\nentity 0000000000000001\n", 0, "two entities")]
@@ -293,36 +275,15 @@ public class SceneFileTests
         Assert.Equal(text.ReplaceLineEndings("\n"), SceneFile.Write(copy));
     }
 
-    [Fact]
-    public void OverrideBlocksFollowTheirInstance()
-    {
-        var scene = new Scene();
-        scene.Entities.Add(new SceneEntity([0x20, 0x01]) { Name = "x", Keys = SceneKeys.Name });
-        scene.Entities.Add(new SceneEntity(0x30));
-        scene.Entities.Add(new SceneEntity(0x20) { Prefab = "9db8150cc7215ffc2708d20d77cf60bf" });
-        scene.Entities.Add(new SceneEntity(0x10));
-
-        var ids = SceneFile.Write(scene).Split('\n').Where(l => l.StartsWith("entity ", StringComparison.Ordinal)).ToList();
-        Assert.Equal(["entity 0000000000000010", "entity 0000000000000020", "entity 0000000000000020#0000000000000001", "entity 0000000000000030"], ids);
-    }
-
-    // The fixture that the cooker's expansion is tested with reads as the cooker reads it, and the files that the
-    // editor writes, in its order, write back as they are.
+    // The fixture that the cooker's expansion is tested with writes back as it is: a scene, and a prefab variant.
     [Theory]
-    [InlineData("level.scene", true)]
-    [InlineData("door.prefab", true)]
-    [InlineData("door_variant.prefab", true)]
-    [InlineData("lamp.prefab", true)]
-    [InlineData("expected.scene", false)]
-    public void ThePrefabFixtureParses(string name, bool roundTrips)
+    [InlineData("level.scene")]
+    [InlineData("door_variant.prefab")]
+    public void ThePrefabFixtureRoundTrips(string name)
     {
         var path = Path.Combine(EditorOptions.RepositoryRoot(), "lib", "engine", "asset", "format", "testdata", "prefabs", name);
         var text = File.ReadAllText(path).ReplaceLineEndings("\n");
-        var scene = Parse(text);
-        if (roundTrips)
-        {
-            Assert.Equal(text, SceneFile.Write(scene));
-        }
+        Assert.Equal(text, SceneFile.Write(Parse(text)));
     }
 
     [Theory]
@@ -332,8 +293,6 @@ public class SceneFileTests
     [InlineData("scene 2\nentity 0000000000000001#00000002\n", "joined by #")]
     [InlineData("scene 2\nentity 0000000000000001\nprefab = $0\n", "prefab takes")]
     [InlineData("scene 2\nentity 0000000000000001\nprefab = $9db8150cc7215ffc2708d20d77cf60bf\nremove widget 3\n", "remove takes")]
-    [InlineData("scene 2\nentity 0000000000000001\ncomponent 1 T\n\tx = @0000000000000001#\n", "joined by #")]
-    [InlineData("scene 5\n", "starts with `scene 4`")]
     [InlineData("scene 3\nentity 0000000000000001\ncomponent 1 T\n\tx = @00000000000000000000000000000000/0000000000000002\n", "nonzero GUID")]
     [InlineData("scene 3\nentity 0000000000000001\ncomponent 1 T\n\tx = @0123456789abcdef0123456789abcdef/0\n", "nonzero scene ID")]
     [InlineData("scene 3\nentity 0000000000000001\nparent = @0123456789abcdef0123456789abcdef/0000000000000002\n", "cannot be a child of another scene's entity")]

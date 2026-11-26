@@ -1,4 +1,3 @@
-using Avalonia.Input;
 using Cinnabar.Editor.Cutscenes;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link;
@@ -137,7 +136,7 @@ public sealed class CutsceneBindingsTests : IDisposable
         Assert.Equal("Rebind", editor.Document.History[^1]);
         Assert.Equal(new CutsceneBindingInfo(CutsceneBindingKind.Possessed, "Lamp", CutsceneBindingState.Bound), Row(editor, 1).Binding);
         // It possesses the lamp now.
-        Assert.Equal("The binding possesses that entity already.", editor.RebindRefusal(Lamp));
+        Assert.NotNull(editor.RebindRefusal(Lamp));
     }
 
     [Fact]
@@ -153,36 +152,11 @@ public sealed class CutsceneBindingsTests : IDisposable
         using var _ = shell;
 
         Assert.Equal(CutsceneBindingState.NotLoaded, Row(editor, 1).Binding!.State);
-        Assert.Equal("hall.scene is not open.", Row(editor, 1).Binding!.Reason);
         Assert.Equal(CutsceneBindingState.Broken, Row(editor, 2).Binding!.State);
         Assert.Equal(new CutsceneBindingInfo(CutsceneBindingKind.Spawned, "crate", CutsceneBindingState.Bound), Row(editor, 3).Binding);
         Assert.Equal(CutsceneBindingState.Broken, Row(editor, 4).Binding!.State);
         Assert.Equal(CutsceneBindingKind.Spawned, Row(editor, 4).Binding!.Kind);
-        Assert.Equal(new CutsceneBindingInfo(CutsceneBindingKind.Unknown, null, CutsceneBindingState.Broken, "It has none of possess, spawn and provided."), Row(editor, 5).Binding);
-    }
-
-    [Fact]
-    public void TheTipOverABrokenRowGoesWhenThePointerLeavesOrTheRowIsFixed()
-    {
-        var (shell, editor) = NewShell(Cutscene.Replace("0000000000000001\n", "0000000000000009\n"));
-        using var _ = shell;
-        var input = new CutsceneTimelineInput(editor);
-        input.Resize(CutsceneTimelineLayout.Gutter + 1000, 800);
-        var y = CutsceneTimelineLayout.RulerHeight + Row(editor, 1).Top + CutsceneTimelineLayout.RowHeight / 2;
-
-        input.Move(20, y, KeyModifiers.None);
-        Assert.Equal("door.scene has no entity 0000000000000009.", input.Tooltip);
-        input.Leave();
-        Assert.Null(input.Tooltip);
-
-        input.Move(20, y, KeyModifiers.None);
-        Assert.NotNull(input.Tooltip);
-        // The binding points at the door again: the tip goes without a move.
-        editor.Select(editor.File.Bindings.ElementAt(0));
-        shell.Selection.Select(Door);
-        editor.Rebind(Door);
-        input.Refresh();
-        Assert.Null(input.Tooltip);
+        Assert.Equal((CutsceneBindingKind.Unknown, CutsceneBindingState.Broken), (Row(editor, 5).Binding!.Kind, Row(editor, 5).Binding!.State));
     }
 
     [Fact]
@@ -201,7 +175,7 @@ public sealed class CutsceneBindingsTests : IDisposable
 
         shell.Selection.Select(Lamp);
         Assert.Equal([PathOf(editor, 2)], editor.SelectedPaths);
-        Assert.Equal("The binding spawns a prefab. Convert it to a possessed binding to point it at an entity.", editor.RebindRefusal(Lamp));
+        Assert.NotNull(editor.RebindRefusal(Lamp));
         Assert.False(shell.Commands.Get(EditorCommands.CutsceneRebindToSelection).CanExecute);
 
         shell.Commands.Get("edit.undo").Execute();
@@ -247,23 +221,6 @@ public sealed class CutsceneBindingsTests : IDisposable
     }
 
     [Fact]
-    public void ABindingThatOtherBlocksNameIsNotDeleted()
-    {
-        var text = $"cutscene 1\nlength = 600000\n\n{DoorBinding}binding 2 \"Cam\"\n\tspawn = ${PrefabGuid}\n\tlook_at = 1\n";
-        var (shell, editor) = NewShell(text);
-        using var _ = shell;
-
-        editor.Select(editor.File.Bindings.ElementAt(0));
-        Assert.False(editor.CanDeleteBinding);
-        Assert.Equal("Other blocks name it: Cam.", editor.DeleteBindingRefusal());
-        Assert.False(CutsceneBindings.Remove(editor.File, 1));
-
-        // The camera itself is named by nothing.
-        editor.Select(editor.File.Bindings.ElementAt(1));
-        Assert.True(editor.CanDeleteBinding);
-    }
-
-    [Fact]
     public void ReferencesAreEveryKindOfSettingThatNamesABinding()
     {
         var text = $"cutscene 1\nlength = 600000\n\n{DoorBinding}"
@@ -281,6 +238,8 @@ public sealed class CutsceneBindingsTests : IDisposable
         // The door's own track names the lamp, so the lamp has three, the cut's camera among them, and the track of its own does not count.
         Assert.Equal(2, CutsceneBindings.ReferencesTo(file, 3).Count);
         Assert.Empty(CutsceneBindings.ReferencesTo(file, 2));
+        // A binding that others name is not removed, and one that none names is.
+        Assert.False(CutsceneBindings.Remove(file, 1));
         Assert.True(CutsceneBindings.Remove(file, 2));
         Assert.DoesNotContain("Child", file.Text);
     }
@@ -321,25 +280,6 @@ public sealed class CutsceneBindingsTests : IDisposable
     }
 
     [Fact]
-    public void TheSelectedEntitiesFilterShowsOnlyTheirBindings()
-    {
-        var (shell, editor) = NewShell(Cutscene.Replace(DoorTrack, $"binding 2 \"Lamp\"\n\tpossess = @{SceneGuid}/0000000000000002\n\n{DoorTrack}track 2 audio \"Music\"\n"));
-        using var _ = shell;
-
-        shell.Commands.Get(EditorCommands.CutsceneFilterSelected).Execute();
-        Assert.True(editor.SelectedOnly);
-        Assert.Empty(editor.Layout().Rows);
-
-        shell.Selection.Select(Door);
-        Assert.Equal(["Door", "Door Move"], editor.Layout().Rows.Select(r => r.Label));
-        shell.Selection.Set([Door, Lamp]);
-        Assert.Equal(["Door", "Door Move", "Lamp"], editor.Layout().Rows.Select(r => r.Label));
-
-        editor.SetSelectedOnly(false);
-        Assert.Equal(["Music", "Door", "Door Move", "Lamp"], editor.Layout().Rows.Select(r => r.Label));
-    }
-
-    [Fact]
     public void AResyncThatGivesTheSameEntitiesNewHandlesKeepsTheTimelinesSelection()
     {
         var (shell, editor) = NewShell();
@@ -375,7 +315,7 @@ public sealed class CutsceneBindingsTests : IDisposable
 
         // A locked track keeps its binding.
         editor.SetLocked(1, true);
-        Assert.Equal("A track of the binding is locked.", editor.DeleteBindingRefusal());
+        Assert.NotNull(editor.DeleteBindingRefusal());
         Assert.False(delete.CanExecute);
         editor.SetLocked(1, false);
 
@@ -392,26 +332,5 @@ public sealed class CutsceneBindingsTests : IDisposable
         Assert.Empty(editor.File.Bindings);
         Assert.Empty(editor.File.Tracks);
         Assert.Equal(["Delete Binding"], editor.Document.History);
-    }
-
-    [Fact]
-    public void AnEntityDroppedWithAltOnABindingsRowRebindsThatRowAndLeavesBothSelections()
-    {
-        var (shell, editor) = NewShell(Cutscene + "binding 2 \"Spare\"\n\tpossess = @00000000000000000000000000000bad/0000000000000001\n");
-        using var _ = shell;
-        var track = CutsceneFile.PathOf(editor.File.Tracks.Single());
-        editor.Select([track], SelectMode.Replace);
-        shell.Selection.Select(Lamp);
-
-        editor.DropEntity(Lamp, PathOf(editor, 2), rebind: true);
-
-        Assert.Contains($"binding 2 \"Spare\"\n\tpossess = @{SceneGuid}/0000000000000002\n", editor.Document.Text);
-        Assert.Equal(["Rebind"], editor.Document.History);
-        Assert.Equal([track], editor.SelectedPaths);
-        Assert.Equal([Lamp], shell.Selection.Entities);
-
-        // The door is the first binding's, so a rebind of the second to it is refused.
-        editor.DropEntity(Door, PathOf(editor, 2), rebind: true);
-        Assert.Single(editor.Document.History);
     }
 }

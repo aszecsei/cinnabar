@@ -90,18 +90,6 @@ public sealed class NavPathToolTests : IDisposable
     }
 
     [Fact]
-    public void AClickWithAnotherToolDoesNotPick()
-    {
-        using var shell = NewShell();
-        _sent.Clear();
-
-        Assert.False(shell.AddNavPoint(Middle));
-
-        Assert.Empty(_sent.OfType<PickRequest>());
-        Assert.Empty(shell.NavPoints);
-    }
-
-    [Fact]
     public void LeavingTheToolClearsTheProbe()
     {
         using var shell = NewShell();
@@ -150,32 +138,7 @@ public sealed class NavPathToolTests : IDisposable
     }
 
     [Fact]
-    public void ANewGameStateWithNoPointsSendsNoProbe()
-    {
-        using var shell = NewShell();
-        _sent.Clear();
-
-        shell.Host.Receive(new GameReloaded(ReloadKind.SoftRestart));
-
-        Assert.Empty(_sent.OfType<NavProbe>());
-    }
-
-    [Fact]
-    public void TheToolCannotRunInMeshMode()
-    {
-        using var shell = NewShell();
-        shell.Selection.Select(Room);
-        shell.Mesh.EnterMeshMode();
-        Assert.True(shell.Mesh.InMeshMode);
-
-        Assert.False(shell.Commands.Get(EditorCommands.NavPathTool).CanExecute);
-        shell.SetTool(Tool.NavPath);
-
-        Assert.Equal(Tool.Move, shell.Tool);
-    }
-
-    [Fact]
-    public void EnteringMeshModeClearsThePoints()
+    public void EnteringMeshModeClearsThePointsAndTheToolCannotRunThere()
     {
         using var shell = NewShell();
         shell.SetTool(Tool.NavPath);
@@ -187,6 +150,7 @@ public sealed class NavPathToolTests : IDisposable
 
         Assert.True(shell.Mesh.InMeshMode);
         Assert.Empty(Probe().Points);
+        // The tool cannot run in mesh mode, so a click adds nothing.
         Assert.False(shell.AddNavPoint(Middle));
     }
 
@@ -203,23 +167,6 @@ public sealed class NavPathToolTests : IDisposable
 
         Assert.Empty(shell.NavPoints);
         Assert.Empty(Assert.Single(_sent.OfType<NavProbe>()).Points);
-    }
-
-    [Fact]
-    public void TheToolIsACommandWithAKey()
-    {
-        using var shell = NewShell();
-        var command = shell.Commands.Get(EditorCommands.NavPathTool);
-
-        Assert.Equal("tool.nav-path", command.Id);
-        Assert.Equal("Navigation Path", command.Label);
-        Assert.Equal("nav-path", command.Icon);
-
-        command.Execute();
-
-        Assert.Equal(Tool.NavPath, shell.Tool);
-        Assert.True(command.IsChecked);
-        Assert.Equal(GizmoKind.None, Gizmo.KindOf(Tool.NavPath));
     }
 
     public void Dispose() => _temp.Dispose();

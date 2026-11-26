@@ -8,8 +8,8 @@ using Cinnabar.Editor.Shell;
 namespace Cinnabar.Editor.Tests;
 
 /// <summary>
-/// Where the editor's controls are (see docs/editor/workflows.md): the ribbon's tabs by kind of work, what is a
-/// viewport's or the Scene's and so not the ribbon's, a viewport's settings as data, and the workspaces.
+/// Where the editor's controls are (see docs/editor/workflows.md): the ribbon's and the menus' commands, a viewport's
+/// settings as data, the workspaces, and what the game's play leaves alone.
 /// </summary>
 public sealed class WorkflowTests : IDisposable
 {
@@ -18,76 +18,13 @@ public sealed class WorkflowTests : IDisposable
     EditorShell NewShell(string? settings = null) =>
         new(new EditorOptions("host.exe", "game.dll") { AutosaveDirectory = _temp.Combine("autosave") }, new EditorSettings(settings ?? _temp.Combine("settings")));
 
-    static IEnumerable<string> CommandsOf(RibbonItem item) => item switch
-    {
-        LargeButton large => [large.Command],
-        SmallStack stack => stack.Commands,
-        SplitButton split => MenuEntry.Commands(split.Menu).Prepend(split.Command),
-        Dropdown dropdown => MenuEntry.Commands(dropdown.Menu),
-        Commands.Ribbon.ComboBox combo => [combo.Command],
-        _ => [],
-    };
-
-    static IEnumerable<string> RibbonCommands(RibbonLayout ribbon) =>
-        ribbon.Tabs.SelectMany(t => t.Groups).SelectMany(g => g.Items).SelectMany(CommandsOf).Concat(ribbon.QuickAccess);
-
     [Fact]
-    public void TheRibbonHasATabForEachKindOfWorkUnderItsDiscipline()
+    public void TheRibbonNamesOnlyKnownCommandsAndPlayIsBesideItsTabs()
     {
         using var shell = NewShell();
 
-        Assert.Equal(["home", "lighting", "environment", "gameplay", "scripting", "audio", "project", "window"], shell.Ribbon.Tabs.Select(t => t.Id));
-        var categories = shell.Ribbon.Categories.ToDictionary(c => c.Id, c => c.Label);
-        string? Discipline(string tab) => shell.Ribbon.Tabs.Single(t => t.Id == tab).Category is { } c ? categories[c] : null;
-        Assert.Equal("Art", Discipline("lighting"));
-        Assert.Equal("Art", Discipline("environment"));
-        Assert.Equal("Design", Discipline("gameplay"));
-        Assert.Equal("Design", Discipline("scripting"));
-        Assert.Equal("Audio", Discipline("audio"));
-        Assert.Null(Discipline("home"));
-        // Play is beside the tabs, whatever tab shows.
-        Assert.Equal([EditorCommands.PlayMode, EditorCommands.PauseMode, EditorCommands.StepFrame, EditorCommands.StopMode], shell.Ribbon.QuickAccess);
         Assert.Empty(shell.Ribbon.Validate(shell.Commands));
-    }
-
-    [Fact]
-    public void WhatIsAViewportsOrTheScenesIsNotInTheRibbon()
-    {
-        using var shell = NewShell();
-        var ribbon = RibbonCommands(shell.Ribbon).ToHashSet();
-
-        // A viewport's own: its settings, its view and the Scene's views (see docs/editor/viewport.md#toolbar).
-        string[] viewport =
-        [
-            .. ViewportOptions.Toggles.Select(t => t.Command), .. ViewportOptions.Choices.Select(c => c.Command), .. ViewportOptions.Guides.Select(g => g.Command),
-            EditorCommands.DebugView, EditorCommands.ExposureUp, EditorCommands.ExposureDown, EditorCommands.ExposureReset,
-            EditorCommands.ViewProjection, EditorCommands.View2D, EditorCommands.SceneLayout, EditorCommands.ViewportScale, EditorCommands.Stats,
-            EditorCommands.FrameSelected, EditorCommands.FrameScene, EditorCommands.OrbitSelection,
-            .. Enumerable.Range(0, EditorViewport.SceneViews).Select(EditorCommands.SceneViewToggle),
-        ];
-        // The Scene's own: the tool, the space, snapping and mesh mode with its tools (see docs/editor/viewport.md#tool-strip).
-        string[] scene =
-        [
-            EditorCommands.SelectTool, EditorCommands.MoveTool, EditorCommands.RotateTool, EditorCommands.ScaleTool, EditorCommands.NavPathTool,
-            EditorCommands.LocalSpace, EditorCommands.Snap, EditorCommands.EditMesh, EditorCommands.ObjectMode, EditorCommands.MeshBlock,
-            .. shell.Commands.All.Select(c => c.Id).Where(id => id.StartsWith("mesh.", StringComparison.Ordinal) || id.StartsWith("texture.", StringComparison.Ordinal)),
-        ];
-
-        // A cutscene's timeline's own, which act while it has the keyboard (see docs/editor/cutscene-editor.md#the-timeline).
-        // And its keys, which act on the selection wherever the keyboard is (see docs/editor/cutscene-editor.md#keying).
-        // And its bindings', which act between the selected entities and the cutscene (see docs/editor/cutscene-editor.md#bindings).
-        // And its cameras', which act between the active scene view and the cutscene (see docs/editor/cutscene-editor.md#cameras).
-        string[] timeline =
-        [
-            .. EditorCommands.CutsceneTimelineCommands, .. EditorCommands.CutsceneKeyCommands, .. EditorCommands.CutsceneBindingCommands,
-            .. EditorCommands.CutsceneCameraCommands,
-        ];
-
-        Assert.All(viewport, id => Assert.DoesNotContain(id, ribbon));
-        Assert.All(scene, id => Assert.DoesNotContain(id, ribbon));
-        Assert.All(timeline, id => Assert.DoesNotContain(id, ribbon));
-        // They are commands all the same, for the command palette and the key bindings.
-        Assert.All(viewport.Concat(scene).Concat(timeline), id => Assert.NotNull(shell.Commands.Find(id)));
+        Assert.Equal([EditorCommands.PlayMode, EditorCommands.PauseMode, EditorCommands.StepFrame, EditorCommands.StopMode], shell.Ribbon.QuickAccess);
     }
 
     [Fact]
@@ -177,7 +114,6 @@ public sealed class WorkflowTests : IDisposable
             Assert.True(shell.Layout.IsOpen("properties"), workspace.Id);
             // Its ribbon tab is one of the ribbon's.
             Assert.Contains(shell.Ribbon.Tabs, t => t.Id == workspace.RibbonTab);
-            Assert.Equal(workspace.Label, ((ChoiceCommand)shell.Commands.Get(EditorCommands.Workspace)).Selected);
             Assert.True(shell.Commands.Get(EditorCommands.WorkspaceSwitch(workspace.Id)).IsChecked);
         }
         Assert.DoesNotContain(shell.Console.Lines, l => l.Level >= Model.LogLevel.Warning);

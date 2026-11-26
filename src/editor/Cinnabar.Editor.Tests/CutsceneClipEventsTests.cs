@@ -7,8 +7,8 @@ using Welcome = Cinnabar.Editor.Link.Cook.Welcome;
 namespace Cinnabar.Editor.Tests;
 
 /// <summary>
-/// What a section shows of its clip from outside the cutscene (see docs/editor/cutscene-editor.md#waveforms and #clip-events):
-/// a sound's peak file from the index, and an animation clip's events from its binding's Animator's graph.
+/// What a section shows of its clip from outside the cutscene (see docs/editor/cutscene-editor.md#clip-events): an
+/// animation clip's events from its binding's Animator's graph.
 /// </summary>
 public sealed class CutsceneClipEventsTests : IDisposable
 {
@@ -60,18 +60,18 @@ public sealed class CutsceneClipEventsTests : IDisposable
 
     public void Dispose() => _temp.Dispose();
 
-    (EditorShell Shell, CutsceneEditor Editor) NewShell(string peaks)
+    (EditorShell Shell, CutsceneEditor Editor) NewShell()
     {
         var shell = TestShell.Open(_temp, "fox.scene", SceneText);
         File.WriteAllText(_temp.Combine("fox.cutscene"), Cutscene.ReplaceLineEndings("\n"));
         File.WriteAllText(_temp.Combine("guard.prefab"), PrefabText);
         File.WriteAllText(_temp.Combine("fox.animation_graph"), GraphText);
         shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], [], []));
-        shell.Assets.Apply(Snapshot(peaks));
+        shell.Assets.Apply(Snapshot());
         return (shell, shell.OpenCutscene(shell.Assets.Find(CutsceneGuid)!)!);
     }
 
-    static AssetSnapshot Snapshot(string peaks) => new(
+    static AssetSnapshot Snapshot() => new(
     [
         TestAssets.Make(SceneGuid, AssetKind.Scene, "fox.scene"),
         TestAssets.Make(CutsceneGuid, AssetKind.Cutscene, "fox.cutscene"),
@@ -79,7 +79,7 @@ public sealed class CutsceneClipEventsTests : IDisposable
         TestAssets.Make(GraphGuid, AssetKind.AnimationGraph, "fox.animation_graph"),
         TestAssets.Make(Walk, AssetKind.Animation, "models/fox/Fox.gltf", parent: "dddddddddddddddddddddddddddddddd", subasset: "Walk", length: 60000),
         TestAssets.Make(Run, AssetKind.Animation, "models/fox/Fox.gltf", parent: "dddddddddddddddddddddddddddddddd", subasset: "Run", length: 60000),
-        TestAssets.Make(Hum, AssetKind.Audio, "audio/hum.wav", length: 120000, peaks: peaks),
+        TestAssets.Make(Hum, AssetKind.Audio, "audio/hum.wav", length: 120000),
     ], []);
 
     static CutsceneTimelineItem BarOf(CutsceneEditor editor, string track) => editor.Layout().Rows.First(r => r.Path == track).Bars.Single();
@@ -87,7 +87,7 @@ public sealed class CutsceneClipEventsTests : IDisposable
     [Fact]
     public void AnAnimationSectionShowsItsBindingsGraphEvents()
     {
-        var (_, editor) = NewShell("");
+        var (_, editor) = NewShell();
 
         // A possessed entity's Animator, from the open scene, and a spawned prefab's root's.
         Assert.Equal([new CutsceneClipEvent(7200, "footstep \"right\""), new CutsceneClipEvent(36600, "footstep \"left\"")], BarOf(editor, "track:1").Events);
@@ -106,22 +106,5 @@ public sealed class CutsceneClipEventsTests : IDisposable
         File.WriteAllText(path, GraphText.Replace("0.61 footstep", "0.5 footstep"));
         File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(1));
         Assert.Equal(30000, BarOf(editor, "track:1").Events[1].Tick);
-    }
-
-    [Fact]
-    public void ASoundsBarHasItsPeakFileOnceTheIndexHasIt()
-    {
-        var (shell, editor) = NewShell("");
-        Assert.Null(BarOf(editor, "track:4").Peaks);
-
-        var peaks = _temp.Combine("cache", "peaks", $"{Hum}.0123456789abcdef.peaks");
-        var rebuilt = 0;
-        editor.Changed += () => rebuilt++;
-        shell.Assets.Apply(Snapshot(peaks));
-        Assert.True(rebuilt > 0);
-        Assert.Equal(peaks, BarOf(editor, "track:4").Peaks);
-        Assert.Equal(1, BarOf(editor, "track:4").Gain.At(0));
-        // An animation's bar has none.
-        Assert.Null(BarOf(editor, "track:1").Peaks);
     }
 }

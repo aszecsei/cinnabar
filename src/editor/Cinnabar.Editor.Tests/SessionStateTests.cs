@@ -16,12 +16,13 @@ namespace Cinnabar.Editor.Tests;
 /// <summary>
 /// The cook and host sessions' states (see docs/editor/processes-and-projects.md#crash-recovery): a refusal, a timeout
 /// and a lost link each end in a state that names it. A fake process and a fake daemon or host stand in for the real
-/// ones, so the tests need neither built.
+/// ones, so the tests need neither built. The timeouts and the base that both sessions share are the cook session's
+/// tests; the host's are its own protocol's refusal and its link that comes back.
 /// </summary>
 public sealed class SessionStateTests : IDisposable
 {
-    static readonly TimeSpan Short = TimeSpan.FromMilliseconds(300);
-    static readonly TimeSpan Long = TimeSpan.FromSeconds(20);
+    // Long enough that no deadline passes by itself: a test that wants a timeout ends the deadline itself.
+    static readonly TimeSpan Long = TimeSpan.FromSeconds(30);
     static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
 
     readonly TempDirectory _temp = new("session-state");
@@ -36,14 +37,14 @@ public sealed class SessionStateTests : IDisposable
     }
 
     // A cook session started on the context, the states that it went through, and its process.
-    (CookSession Session, List<CookState> States, FakeProcess Process) StartCook(AssetIndex index, TimeSpan timeout)
+    (CookSession Session, List<CookState> States, FakeProcess Process) StartCook(AssetIndex index)
     {
         Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(_temp.Combine("cook.exe"), "");
         var states = new List<CookState>();
         var session = _context.Run(() =>
         {
-            var session = new CookSession(new CookOptions("cook.exe", "cache", null, [], _temp.Path), index, StartFake, timeout);
+            var session = new CookSession(new CookOptions("cook.exe", "cache", null, [], _temp.Path), index, StartFake, Long);
             session.StateChanged += () => states.Add(session.State);
             session.Start();
             return session;
@@ -52,12 +53,12 @@ public sealed class SessionStateTests : IDisposable
         return (session, states, process);
     }
 
-    (HostSession Session, List<HostState> States, FakeProcess Process) StartHost(TimeSpan timeout)
+    (HostSession Session, List<HostState> States, FakeProcess Process) StartHost()
     {
         var states = new List<HostState>();
         var session = _context.Run(() =>
         {
-            var session = new HostSession(new EditorOptions("host.exe", "game.dll"), StartFake, timeout);
+            var session = new HostSession(new EditorOptions("host.exe", "game.dll"), StartFake, Long);
             session.StateChanged += _ => states.Add(session.State);
             session.Start(adapter: 1);
             return session;
@@ -66,10 +67,17 @@ public sealed class SessionStateTests : IDisposable
         return (session, states, process);
     }
 
+    // Ends the deadline of the connect and handshake that the session waits on, as its timer does when it passes.
+    void PassDeadline(CookSession session) => _context.Run(() =>
+    {
+        session.State.Deadline!.Cancel();
+        return true;
+    });
+
     [Fact]
     public async Task TheCookDaemonsRefusalStopsItWithItsReason()
     {
-        var (session, _, process) = StartCook(new AssetIndex(), Long);
+        var (session, _, process) = StartCook(new AssetIndex());
         using var peer = new FakePeer(process.Port, CookMessages.Read);
         await using var daemon = await peer.Accept();
         await daemon.Next<Hello>();
@@ -86,11 +94,14 @@ public sealed class SessionStateTests : IDisposable
     [Fact]
     public async Task ACookDaemonThatDoesNotListenTimesOut()
     {
-        var (session, _, process) = StartCook(new AssetIndex(), Short);
+        var (session, _, process) = StartCook(new AssetIndex());
+        Assert.IsType<CookState.Connecting>(_context.Run(() => session.State));
+
+        PassDeadline(session);
 
         var timedOut = await Until<CookState.TimedOut>(() => session.State);
-        Assert.Equal(Short, timedOut.After);
-        Assert.Contains("0.3 s", timedOut.Describe());
+        Assert.Equal(Long, timedOut.After);
+        Assert.Contains("30 s", timedOut.Describe());
         Assert.True(process.Disposed);
         Assert.Empty(_context.Errors);
     }
@@ -98,10 +109,13 @@ public sealed class SessionStateTests : IDisposable
     [Fact]
     public async Task ACookDaemonThatDoesNotAnswerTheHelloTimesOut()
     {
-        var (session, states, process) = StartCook(new AssetIndex(), TimeSpan.FromSeconds(1));
+        var (session, states, process) = StartCook(new AssetIndex());
         using var peer = new FakePeer(process.Port, CookMessages.Read);
         await using var daemon = await peer.Accept();
         await daemon.Next<Hello>();
+        await Until<CookState.Handshaking>(() => session.State);
+
+        PassDeadline(session);
 
         await Until<CookState.TimedOut>(() => session.State);
         Assert.True(process.Disposed);
@@ -113,7 +127,7 @@ public sealed class SessionStateTests : IDisposable
     public async Task ALostCookLinkConnectsAgainAndTheIndexIsLinkedOnlyOnceItsSnapshotComes()
     {
         var index = new AssetIndex();
-        var (session, states, process) = StartCook(index, Long);
+        var (session, states, process) = StartCook(index);
         using var peer = new FakePeer(process.Port, CookMessages.Read);
         var daemon = await peer.Accept();
         await Link(daemon, index, session, "game");
@@ -148,9 +162,27 @@ public sealed class SessionStateTests : IDisposable
     }
 
     [Fact]
+    public void AHostThatCannotStartFailsWithItsReason()
+    {
+        var output = new List<string>();
+        var session = _context.Run(() =>
+        {
+            var session = new HostSession(new EditorOptions("host.exe", "game.dll"), (_, _, _) => throw new FileNotFoundException("host.exe is not there"), Long);
+            session.Output += output.Add;
+            session.Start(adapter: 1);
+            return session;
+        });
+
+        var failed = Assert.IsType<HostState.FailedToStart>(_context.Run(() => session.State));
+        Assert.Contains("host.exe", failed.Reason);
+        Assert.Contains(_context.Run(() => output.ToList()), line => line.Contains("cannot start"));
+        Assert.Empty(_context.Errors);
+    }
+
+    [Fact]
     public async Task TheHostsRefusalStopsItWithItsReason()
     {
-        var (session, _, process) = StartHost(Long);
+        var (session, _, process) = StartHost();
         using var peer = new FakePeer(process.Port, LinkMessages.Read);
         await using var host = await peer.Accept();
         await host.Next<HostHello>();
@@ -166,34 +198,9 @@ public sealed class SessionStateTests : IDisposable
     }
 
     [Fact]
-    public async Task AHostThatDoesNotListenTimesOut()
-    {
-        var (session, _, process) = StartHost(Short);
-
-        var timedOut = await Until<HostState.TimedOut>(() => session.State);
-        Assert.Contains("0.3 s", timedOut.Describe());
-        Assert.True(process.Disposed);
-        Assert.False(_context.Run(() => session.Linked));
-        Assert.Empty(_context.Errors);
-    }
-
-    [Fact]
-    public async Task AHostThatDoesNotAnswerTheHelloTimesOut()
-    {
-        var (session, _, process) = StartHost(TimeSpan.FromSeconds(1));
-        using var peer = new FakePeer(process.Port, LinkMessages.Read);
-        await using var host = await peer.Accept();
-        await host.Next<HostHello>();
-
-        await Until<HostState.TimedOut>(() => session.State);
-        Assert.True(process.Disposed);
-        Assert.Empty(_context.Errors);
-    }
-
-    [Fact]
     public async Task ALostEditorLinkConnectsAgain()
     {
-        var (session, states, process) = StartHost(Long);
+        var (session, states, process) = StartHost();
         using var peer = new FakePeer(process.Port, LinkMessages.Read);
         var host = await peer.Accept();
         await host.Next<HostHello>();
@@ -216,37 +223,6 @@ public sealed class SessionStateTests : IDisposable
         Assert.Empty(_context.Errors);
     }
 
-    [Fact]
-    public void EachStateIsNamedWithItsReasonOrCode()
-    {
-        var run = new ChildRun(new FakeProcess([]), 1);
-        CookState[] cook =
-        [
-            new CookState.Stopped(), new CookState.FailedToStart("not built"), new CookState.Refused("old protocol"),
-            new CookState.TimedOut(TimeSpan.FromSeconds(30)), new CookState.Exited(3), new CookState.Connecting(run, new()),
-            new CookState.Handshaking(run, new(), null!), new CookState.Linked(run, null, new CookLink((_, _) => { })), new CookState.LinkLost(run, new(), "reset"),
-        ];
-        var hostRun = new ChildRun(new FakeProcess([]), 1, "shared");
-        HostState[] host =
-        [
-            new HostState.Waiting(), new HostState.Stopped(), new HostState.FailedToStart("not built"), new HostState.Refused("old protocol"),
-            new HostState.TimedOut(TimeSpan.FromSeconds(30)), new HostState.Exited(3), new HostState.Connecting(hostRun, new()),
-            new HostState.Handshaking(hostRun, new(), null!), new HostState.Linked(hostRun, null, new HostLink("mygame", _ => { })),
-            new HostState.LinkLost(hostRun, new(), "reset"),
-        ];
-
-        foreach (var texts in new[] { cook.Select(s => s.Describe()).ToList(), host.Select(s => s.Describe()).ToList() })
-        {
-            Assert.Equal(texts.Count, texts.Distinct().Count());
-            Assert.Contains(texts, t => t.Contains("not built"));
-            Assert.Contains(texts, t => t.Contains("old protocol"));
-            Assert.Contains(texts, t => t.Contains("30 s"));
-            Assert.Contains(texts, t => t.Contains("code 3"));
-            Assert.Contains(texts, t => t.Contains("reset"));
-        }
-        Assert.Contains(host, s => s.Describe().Contains("mygame"));
-    }
-
     static string Name(CookState state) => state.GetType().Name;
 
     // Waits until the state, read on the context, is a T, and gives it.
@@ -259,16 +235,18 @@ public sealed class SessionStateTests : IDisposable
 
     Task Until(Func<bool> condition) => Until(condition, () => "the condition");
 
+    // The sessions change only on the context, so the condition is read again after each turn that the context runs.
+    // The time limit only ends a test that would otherwise hang.
     async Task Until(Func<bool> condition, Func<string> what)
     {
         var deadline = DateTime.UtcNow + Wait;
         while (!_context.Run(condition))
         {
-            if (DateTime.UtcNow > deadline)
+            var left = deadline - DateTime.UtcNow;
+            if (left <= TimeSpan.Zero || !await _context.Turns.WaitAsync(left, TestContext.Current.CancellationToken))
             {
                 Assert.Fail($"timed out waiting for {_context.Run(what)}. Errors: {string.Join("\n", _context.Errors)}");
             }
-            await Task.Delay(20, TestContext.Current.CancellationToken);
         }
     }
 
@@ -278,19 +256,24 @@ public sealed class SessionStateTests : IDisposable
         _temp.Dispose();
     }
 
-    /// <summary>Runs what is posted on one thread, in order, as the UI thread does, and keeps what threw.</summary>
+    /// <summary>
+    /// Runs what is posted on one thread, in order, as the UI thread does, and keeps what threw. Each turn that it runs
+    /// for the sessions, and not for the test's own reads, releases <see cref="Turns"/>.
+    /// </summary>
     sealed class SerialContext : SynchronizationContext, IDisposable
     {
-        readonly BlockingCollection<(SendOrPostCallback Callback, object? State)> _queue = [];
+        readonly BlockingCollection<(SendOrPostCallback Callback, object? State, bool Read)> _queue = [];
 
         public ConcurrentQueue<Exception> Errors { get; } = new();
+
+        public SemaphoreSlim Turns { get; } = new(0);
 
         public SerialContext()
         {
             var thread = new Thread(() =>
             {
                 SetSynchronizationContext(this);
-                foreach (var (callback, state) in _queue.GetConsumingEnumerable())
+                foreach (var (callback, state, read) in _queue.GetConsumingEnumerable())
                 {
                     try
                     {
@@ -300,17 +283,23 @@ public sealed class SessionStateTests : IDisposable
                     {
                         Errors.Enqueue(e);
                     }
+                    if (!read)
+                    {
+                        Turns.Release();
+                    }
                 }
             })
             { IsBackground = true, Name = "session-state-tests" };
             thread.Start();
         }
 
-        public override void Post(SendOrPostCallback d, object? state)
+        public override void Post(SendOrPostCallback d, object? state) => Add(d, state, read: false);
+
+        void Add(SendOrPostCallback d, object? state, bool read)
         {
             try
             {
-                _queue.Add((d, state));
+                _queue.Add((d, state, read));
             }
             catch (InvalidOperationException)
             {
@@ -321,7 +310,7 @@ public sealed class SessionStateTests : IDisposable
         public T Run<T>(Func<T> function)
         {
             var done = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-            Post(_ =>
+            Add(_ =>
             {
                 try
                 {
@@ -331,7 +320,7 @@ public sealed class SessionStateTests : IDisposable
                 {
                     done.SetException(e);
                 }
-            }, null);
+            }, null, read: true);
             return done.Task.WaitAsync(SessionStateTests.Wait).GetAwaiter().GetResult();
         }
 

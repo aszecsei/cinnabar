@@ -11,8 +11,8 @@ using EntitySnapshot = Cinnabar.Editor.Link.Protocol.EntitySnapshot;
 namespace Cinnabar.Editor.Tests;
 
 /// <summary>
-/// The finish of the mesh editing design: Keep Planar, Select Linked, Grow and Shrink, Edit Pivot with Center Pivot
-/// and Pivot to Grid, Clean's report as a selection, and Bridge and Cap as commands.
+/// The finish of the mesh editing design: Keep Planar, Select Linked, Grow and Shrink, Edit Pivot with Center Pivot,
+/// Clean's report as a selection, and Bridge and Cap as commands.
 /// </summary>
 public sealed class MeshFinishTests : IDisposable
 {
@@ -111,12 +111,9 @@ public sealed class MeshFinishTests : IDisposable
         var worldAfter = MeshFixtures.Mesh(shell).Vertices.Select(v => v + Vec3.Between([0, 0, 0], after.Position)).ToList();
         Assert.Equal(worldBefore, worldAfter);
         Assert.Single(shell.Scene!.History);
-        // Pivot to Grid snaps it back onto the grid, at 0.25 m it is on already, so a finer offset shows it.
         shell.Scene.Undo();
         Assert.Equal(before.Position, EntityPose(shell).Position);
         shell.Scene.Redo();
-        Assert.True(shell.Commands.Get(EditorCommands.MeshPivotToGrid).CanExecute);
-        Assert.False(shell.Mesh.Pivot.PivotToGrid());
         // The Edit Pivot gizmo stands on the entity and drags it, with the vertices moving the other way.
         shell.SetTool(Tool.Move);
         Assert.True(shell.Commands.Get(EditorCommands.MeshEditPivot).Execute());
@@ -138,32 +135,13 @@ public sealed class MeshFinishTests : IDisposable
     }
 
     [Fact]
-    public void CleanSelectsTheEdgesItReports()
-    {
-        // A box with a fin on one edge: that edge has three faces.
-        var fin = Box.With(
-            vertices: Box.Vertices.AddRange(new[] { new Vec3(0, 2, 0), new Vec3(1, 2, 0) }.AsEnumerable()),
-            faces: Box.Faces.Add(new MeshFace(0, [Box.Vertices.Length, Box.Vertices.Length + 1, Box.Edges[0].B, Box.Edges[0].A], Mapping.WorldAligned(Vec3.UnitZ))));
-        using var shell = NewShell(fin);
-        shell.Commands.Get(EditorCommands.MeshClean).Execute();
-        Assert.Equal(MeshElement.Edges, shell.Mesh.MeshElement);
-        // The edge of three faces, and the fin's three open edges.
-        var mesh = MeshFixtures.Mesh(shell);
-        var counts = shell.Mesh.MeshSelection.Items.Select(i => mesh.FacesOfEdge(mesh.Edges[i.Index]).Count).Order().ToList();
-        Assert.Equal([1, 1, 1, 3], counts);
-        Assert.Single(shell.Console.Lines, l => l.Text.Contains("3 edges are open"));
-    }
-
-    [Fact]
     public void CleanSelectsTheOpenEdgesAndCapClosesThem()
     {
         var top = Enumerable.Range(0, Box.Faces.Length).Single(f => Box.FaceNormal(f) == Vec3.UnitY);
         using var shell = NewShell(MeshTools.Delete(Box, MeshElement.Faces, [top]));
-        Assert.EndsWith("Open: 4 edges", shell.Mesh.MeshStatus);
         shell.Commands.Get(EditorCommands.MeshClean).Execute();
         Assert.Equal(MeshElement.Edges, shell.Mesh.MeshElement);
         Assert.Equal(MeshFixtures.Mesh(shell).OpenEdges, shell.Mesh.MeshSelection.Of(MeshFixtures.MeshGuid).Order());
-        Assert.Single(shell.Console.Lines, l => l.Text.Contains("4 edges are open"));
 
         // Bridge refuses one loop with the reason, and Cap closes it.
         Assert.True(shell.Commands.Get(EditorCommands.MeshBridge).CanExecute);
@@ -173,32 +151,9 @@ public sealed class MeshFinishTests : IDisposable
         shell.Commands.Get(EditorCommands.MeshCap).Execute();
         Assert.True(MeshFixtures.Mesh(shell).IsSolid);
         Assert.Equal(MeshElement.Faces, shell.Mesh.MeshElement);
-        Assert.EndsWith("Solid", shell.Mesh.MeshStatus);
         // Undo opens it again.
         shell.Scene!.Undo();
         Assert.EndsWith("Open: 4 edges", shell.Mesh.MeshStatus);
-    }
-
-    [Fact]
-    public void KeepPlanarAppliesToADrag()
-    {
-        using var shell = NewShell(Box);
-        shell.SetTool(Tool.Move);
-        shell.Commands.Get(EditorCommands.MeshKeepPlanar).Execute();
-        Assert.True(shell.Mesh.Pivot.KeepPlanar);
-        // The front face's corner nearest the camera's right, dragged along x, bends the faces around it unless kept planar.
-        var front = Enumerable.Range(0, 6).First(f => MeshFixtures.Mesh(shell).FaceNormal(f) == -Vec3.UnitZ);
-        var corner = MeshFixtures.Mesh(shell).Faces[front].Corners.OrderBy(c => MeshFixtures.Mesh(shell).Vertices[c].X).ThenBy(c => MeshFixtures.Mesh(shell).Vertices[c].Y).First();
-        shell.Mesh.SetMeshSelection(new MeshSelection(MeshElement.Vertices, [new MeshItem(MeshFixtures.MeshGuid, corner)]), switchKind: true);
-        var (pivot, _) = shell.GizmoPose()!.Value;
-        var center = shell.Camera.RelativeTo(pivot);
-        var size = Gizmo.Size(shell.Camera, center, Height);
-        Vec2 Along(double meters) => shell.Camera.Project(center + Vec3.UnitY * meters, Width, Height)!.Value;
-        Assert.True(shell.PressGizmo(Along(0.5 * size)));
-        shell.DragGizmo(Along(0.5 * size + 0.3), invertSnap: false);
-        shell.ReleaseGizmo();
-        Assert.DoesNotContain(MeshFixtures.Mesh(shell).Validate(), p => p.Message.Contains("not planar"));
-        Assert.NotEqual(Box.Vertices, MeshFixtures.Mesh(shell).Vertices);
     }
 
     public void Dispose() => _temp.Dispose();

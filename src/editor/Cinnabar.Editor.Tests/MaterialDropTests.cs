@@ -80,17 +80,12 @@ public sealed class MaterialDropTests : IDisposable
         shell.Scene.Undo();
         Assert.Equal(Old, Material(shell, 0));
         Assert.False(shell.Scene.CanUndo);
-    }
 
-    [Fact]
-    public void ADropOnNothingThatTakesItChangesNothing()
-    {
-        using var shell = NewShell();
-
+        // A drop on nothing that takes it puts the preview back and leaves nothing to undo.
         shell.PreviewMaterial(new MaterialTarget(1, 0), New);
         Assert.False(shell.DropMaterial(Pick(0, (1, 2)), New));
         Assert.Equal(Old, Material(shell, 0));
-        Assert.False(shell.Scene!.InTransaction);
+        Assert.False(shell.Scene.InTransaction);
         Assert.False(shell.Scene.CanUndo);
     }
 

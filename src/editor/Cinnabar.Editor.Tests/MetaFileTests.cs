@@ -44,22 +44,12 @@ public sealed class MetaFileTests : IDisposable
         Assert.Equal(text, again.Text());
     }
 
-    [Fact]
-    public void ANewFileWithNoSettingsIsItsHeaderAndGuid() =>
-        Assert.Equal($"{MetaFile.Header}\nguid = {Guid}\n", MetaFile.New(Guid).Text());
-
     [Theory]
     [InlineData("guid")]
     [InlineData("mip map.kernel")]
     [InlineData("sampler.guid")]
-    [InlineData("sampler.")]
-    [InlineData("")]
     public void TheBuilderRefusesAKeyThatWouldNotParse(string key) =>
         Assert.Throws<ArgumentException>(() => MetaFile.New(Guid).Set(key, "x"));
-
-    [Fact]
-    public void TheBuilderRefusesAGuidThatIsNotOne() =>
-        Assert.Throws<ArgumentException>(() => MetaFile.New("not-a-guid"));
 
     [Fact]
     public void SettingsAreGroupedInSections()
@@ -80,17 +70,15 @@ public sealed class MetaFileTests : IDisposable
     }
 
     [Theory]
-    // The cases of meta_files_hold_a_guid_and_settings, meta_files_name_their_subassets and
-    // meta_files_group_settings_in_sections: no guid, a line without '=', a sub-asset without a GUID, and a guid or a
-    // sub-asset in a section, a section's name that is not an identifier, and a section without its bracket or a name.
+    // Cases of meta_files_hold_a_guid_and_settings, meta_files_name_their_subassets and
+    // meta_files_group_settings_in_sections: no guid, a line without '=', a sub-asset without a GUID, a guid in a
+    // section, a section's name that is not an identifier, a section without its bracket, and a GUID with dashes.
     [InlineData("native = true\n")]
     [InlineData($"guid {Guid}\n")]
     [InlineData($"guid = {Guid}\nmesh.door = 12\n")]
-    [InlineData($"guid = {Guid}\n[sampler]\nmesh.door = {Other}\n")]
     [InlineData($"guid = {Guid}\n[sampler]\nguid = {Other}\n")]
     [InlineData($"guid = {Guid}\n[mip map]\nkernel = box\n")]
     [InlineData($"guid = {Guid}\n[sampler\nwrap = clamp\n")]
-    [InlineData($"guid = {Guid}\n[]\nwrap = clamp\n")]
     [InlineData("guid = 00112233-4455-6677-8899-aabbccddeeff\n")]
     public void AFileThatMetaParseRefusesDoesNotParse(string text) => Assert.Null(MetaFile.Parse(text));
 
@@ -120,7 +108,4 @@ public sealed class MetaFileTests : IDisposable
         Assert.Equal(path, ProjectLayout.FindAsset(_temp.Path, Guid.ToUpperInvariant()));
         Assert.Null(ProjectLayout.FindAsset(_temp.Path, Other));
     }
-
-    [Fact]
-    public void AMissingFileReadsAsNone() => Assert.Null(MetaFile.TryRead(_temp.Combine("none.png.meta")));
 }

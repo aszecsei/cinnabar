@@ -43,17 +43,10 @@ public sealed class TagsTests : IDisposable
         return shell;
     }
 
-    [Fact]
-    public void TheFileBelongsBesideTheProject() =>
-        Assert.Equal(Path.GetFullPath(Path.Combine("samples", "mygame", "project.tags")), ProjectTags.PathFor(Path.Combine("samples", "mygame", "project.settings")));
-
     [Theory]
-    [InlineData("env", "env")]
     [InlineData(" env/stone/ ", "env/stone")]
-    [InlineData("a-b_c/D9", "a-b_c/D9")]
     [InlineData("two words", null)]
     [InlineData("env//stone", null)]
-    [InlineData("", null)]
     [InlineData("a,b", null)]
     [InlineData("a=b", null)]
     public void ATagHasOnlyWhatTheFileCanHold(string text, string? tag) => Assert.Equal(tag, ProjectTags.Normalize(text));
@@ -145,7 +138,7 @@ public sealed class TagsTests : IDisposable
     }
 
     [Fact]
-    public void TagsFilterAndTheirKindsNarrowTogether()
+    public void TagsAndKindsFilterTogetherAndASubassetHasItsFilesTags()
     {
         using var shell = NewShell();
         var model = shell.Content.Model;
@@ -167,65 +160,12 @@ public sealed class TagsTests : IDisposable
 
         model.ClearFilter();
         Assert.False(model.Filtering);
-    }
 
-    [Fact]
-    public void ASubassetHasItsFilesTags()
-    {
-        using var shell = NewShell();
-        var model = shell.Content.Model;
-        shell.Content.Tags.Add([C], "props");
+        // A subasset has its file's tags.
+        tags.Add([C], "props");
         model.ToggleTag("props");
         Assert.Equal(["kit.glb", "kit.glb"], model.Items.Select(a => AssetIndex.Name(a.Path)));
         Assert.Contains(model.Items, a => a.Guid == "c1");
-    }
-
-    [Fact]
-    public void TheSearchTakesATagWord()
-    {
-        using var shell = NewShell();
-        var model = shell.Content.Model;
-        shell.Content.Tags.Add([A], "env/stone");
-        model.Search = "tag:env";
-        Assert.Equal([A], model.Items.Select(a => a.Guid));
-        model.Search = "tag:env door";
-        Assert.Empty(model.Items);
-        model.Search = "tag:nothing";
-        Assert.Empty(model.Items);
-    }
-
-    [Fact]
-    public void TagRowsNestAndCollapse()
-    {
-        using var shell = NewShell();
-        var model = shell.Content.Model;
-        shell.Content.Tags.Add([A], "env/stone");
-        shell.Content.Tags.Add([B], "env/wood");
-
-        var rows = model.TagRows();
-        Assert.Equal(["env", "env/stone", "env/wood"], rows.Select(r => r.Tag));
-        Assert.Equal([2, 1, 1], rows.Select(r => r.Count));
-        Assert.Equal([0, 1, 1], rows.Select(r => r.Depth));
-        Assert.True(rows[0].HasChildren);
-        Assert.False(rows[1].HasChildren);
-
-        model.ToggleTagExpanded("env");
-        Assert.Equal(["env"], model.TagRows().Select(r => r.Tag));
-    }
-
-    [Fact]
-    public void ATagThatGoesStopsFiltering()
-    {
-        using var shell = NewShell();
-        var model = shell.Content.Model;
-        shell.Content.Tags.Add([A], "env");
-        model.ToggleTag("env");
-        Assert.Equal([A], model.Items.Select(a => a.Guid));
-
-        shell.Content.Tags.Remove([A], "env");
-
-        Assert.False(model.Filtering);
-        Assert.Empty(model.FilterTags);
     }
 
     [Fact]

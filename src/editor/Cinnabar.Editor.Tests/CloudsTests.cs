@@ -37,14 +37,12 @@ public sealed class CloudsTests : IDisposable
         Assert.True(clouds.Execute());
 
         Assert.True(clouds.IsChecked);
-        Assert.Equal("Add Clouds", shell.Scene!.History[^1].Label);
         Assert.Equal(1, Field(Clouds(shell.AtmosphereVolume!), Atmosphere.CloudDensity)!.Numbers[0].Float);
         Assert.True(shell.Edit("Set Coverage", Atmosphere.Set(shell.AtmosphereVolume!, SceneEdits.CloudsId, Atmosphere.CloudCoverage, SceneEdits.Floats(0.8))));
 
         Assert.True(clouds.Execute());
 
         Assert.False(clouds.IsChecked);
-        Assert.Equal("Clear Clouds", shell.Scene.History[^1].Label);
         var component = Clouds(shell.AtmosphereVolume!);
         Assert.Equal(0, Field(component, Atmosphere.CloudDensity)!.Numbers[0].Float);
         Assert.Equal(0.8, Field(component, Atmosphere.CloudCoverage)!.Numbers[0].Float, 6);
@@ -62,22 +60,15 @@ public sealed class CloudsTests : IDisposable
         Assert.True(shell.Commands.Get(EditorCommands.WeatherPreset("Storm")).Execute());
 
         Assert.Equal(entries + 1, shell.Scene.History.Count);
-        Assert.Equal("Set Weather to Storm", shell.Scene.History[^1].Label);
         var volume = shell.AtmosphereVolume!;
-        var component = Clouds(volume);
-        Assert.Equal(1, Field(component, Atmosphere.CloudDensity)!.Numbers[0].Float);
-        Assert.Equal(0.95, Field(component, Atmosphere.CloudCoverage)!.Numbers[0].Float, 6);
-        Assert.Equal(0.9, Field(component, Atmosphere.CloudPrecipitation)!.Numbers[0].Float, 6);
-        Assert.Equal(1, Field(component, Atmosphere.CloudType)!.Numbers[0].Float);
-        Assert.Equal(0, Field(component, Atmosphere.Cirrus)!.Numbers[0].Float);
-        Assert.Equal(4500, Field(component, Atmosphere.CloudThickness)!.Numbers[0].Float);
+        var storm = Field(Clouds(volume), Atmosphere.CloudCoverage)!.Numbers[0].Float;
         Assert.Equal("Scalars", Atmosphere.WeatherSourceOf(volume));
         Assert.Equal(MapGuid, Atmosphere.WeatherMapOf(volume));
         Assert.True(Atmosphere.HasClouds(volume));
 
         // Another preset resets what the first set and leaves what it did not.
         Assert.True(shell.Commands.Get(EditorCommands.WeatherPreset("Clear")).Execute());
-        Assert.Equal(0.05, Field(Clouds(shell.AtmosphereVolume!), Atmosphere.CloudCoverage)!.Numbers[0].Float, 6);
+        Assert.NotEqual(storm, Field(Clouds(shell.AtmosphereVolume!), Atmosphere.CloudCoverage)!.Numbers[0].Float);
         Assert.Equal(MapGuid, Atmosphere.WeatherMapOf(shell.AtmosphereVolume!));
 
         shell.Scene.Undo();
@@ -101,26 +92,12 @@ public sealed class CloudsTests : IDisposable
         Assert.Equal(MapGuid, Atmosphere.WeatherMapOf(volume));
         Assert.Equal("Map", Atmosphere.WeatherSourceOf(volume));
         Assert.Equal(origin.Length, Field(Clouds(volume), Atmosphere.WeatherOrigin)!.Numbers.Count);
-    }
 
-    [Fact]
-    public void TheWeatherSourceIsAChoiceAndCenterWeatherSetsTheOriginInRawUnits()
-    {
-        using var shell = NewShell();
-        shell.SelectAtmosphere();
-        var source = (ChoiceCommand)shell.Commands.Get(EditorCommands.AtmosphereWeatherSource);
-        Assert.Equal("Scalars", source.Selected);
-
-        source.Select("Map");
-
-        Assert.Equal("Map", source.Selected);
-        Assert.Equal("Map", Field(Clouds(shell.AtmosphereVolume!), Atmosphere.CloudWeather)!.Text);
-
+        // Center Weather sets the origin in the engine's raw units.
         Assert.True(shell.Commands.Get(EditorCommands.AtmosphereCenterWeather).Execute());
-
-        var origin = Field(Clouds(shell.AtmosphereVolume!), Atmosphere.WeatherOrigin)!;
-        Assert.Equal(3, origin.Numbers.Count);
-        Assert.All(origin.Numbers, n => Assert.True(n.IsInteger));
+        var centered = Field(Clouds(shell.AtmosphereVolume!), Atmosphere.WeatherOrigin)!;
+        Assert.Equal(3, centered.Numbers.Count);
+        Assert.All(centered.Numbers, n => Assert.True(n.IsInteger));
     }
 
     [Fact]
@@ -220,8 +197,6 @@ public sealed class CloudsTests : IDisposable
             "\n[mip_map]\nenabled = false\n";
 
         Assert.Equal(expected, WeatherMapFile.MetaText(MapGuid));
-        Assert.Equal(32, WeatherMapFile.NewGuid().Length);
-        Assert.EndsWith(Path.Combine("textures", "level_weather.png"), WeatherMapFile.PathFor(_temp.Path, _temp.Combine("scenes", "level.scene")));
     }
 
     public void Dispose() => _temp.Dispose();

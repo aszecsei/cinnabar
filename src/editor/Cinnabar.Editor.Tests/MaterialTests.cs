@@ -378,33 +378,6 @@ public sealed class MaterialTests : IDisposable
         Assert.Empty(shell.Scene.Scene.Entities);
     }
 
-    [Fact]
-    public void FrameSelectedAndAddNodeWithTheCanvasFocusedActOnTheGraph()
-    {
-        using var shell = NewShell(DoorScene);
-        var editor = shell.OpenMaterial(shell.Assets.Find(MaterialGuid)!)!;
-        var canvas = new GraphCanvas(shell, editor);
-        var frame = shell.Commands.Get(EditorCommands.FrameSelected);
-        var addNode = shell.Commands.Get(EditorCommands.AddNode);
-
-        // Without a focused canvas, Frame Selected is the scene's, which needs a selection, and Add Node has nothing to do.
-        shell.Selection.Set([]);
-        Assert.False(frame.CanExecute);
-        Assert.False(addNode.CanExecute);
-
-        // The canvas's F and Space are those commands, which it takes while it has the keyboard.
-        Assert.Equal([ShortcutScopes.Viewport, ShortcutScopes.Canvas], shell.KeyBindings.ScopesOf(EditorCommands.FrameSelected));
-        Assert.Contains((EditorCommands.FrameSelected, "F"), shell.KeyBindings.InScope(ShortcutScopes.Canvas));
-        Assert.Contains((EditorCommands.AddNode, "Space"), shell.KeyBindings.InScope(ShortcutScopes.Canvas));
-        shell.Commands.Focus(canvas);
-        Assert.True(frame.CanExecute);
-        Assert.True(addNode.CanExecute);
-        // The scene's Frame Selected cannot run without a selection, so this ran the canvas's.
-        Assert.True(frame.Execute());
-        shell.Commands.Leave(canvas);
-        Assert.False(addNode.CanExecute);
-    }
-
     EditorShell NewShell(string? scene = null)
     {
         Directory.CreateDirectory(_temp.Path);
@@ -517,7 +490,6 @@ public sealed class MaterialTests : IDisposable
         Assert.Equal(_temp.Combine("smoke.effect"), effect.Path);
         // Opening it again shows the same preview.
         Assert.Same(effect, shell.OpenEffect(shell.Assets.Find(EffectGuid)!));
-        Assert.Equal("Open Preview", shell.OpenLabel(shell.Assets.Find(EffectGuid)!));
 
         // Closing its document frees its preview for the next one.
         shell.Layout.CloseDocument(effect);

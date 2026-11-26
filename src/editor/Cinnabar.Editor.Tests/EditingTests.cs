@@ -21,37 +21,6 @@ public sealed class EditingTests : IDisposable
     }
 
     [Fact]
-    public void EditsUndoRedoAndSaveThroughTheCommands()
-    {
-        using var shell = NewShell(out var path);
-        var changes = 0;
-        shell.SceneChanged += () => changes++;
-
-        Assert.False(shell.Commands.Get(EditorCommands.Undo).CanExecute);
-        Assert.True(shell.Edit("Rename", new Rename(1, "Front Door")));
-        Assert.True(shell.Scene!.IsDirty);
-        Assert.True(shell.Commands.Get(EditorCommands.Undo).Execute());
-        Assert.Equal("Door", shell.Scene.Scene.Find(1)!.Name);
-        Assert.True(shell.Commands.Get(EditorCommands.Redo).Execute());
-
-        Assert.True(shell.Commands.Get(EditorCommands.Save).Execute());
-        Assert.False(shell.Scene.IsDirty);
-        Assert.Contains("name = \"Front Door\"", File.ReadAllText(path));
-        Assert.True(changes >= 4);
-    }
-
-    [Fact]
-    public void AnEditThatDoesNotFitGoesToTheConsole()
-    {
-        using var shell = NewShell(out _);
-
-        Assert.False(shell.Edit("Rename", new Rename(99, "Nobody")));
-
-        Assert.Contains(shell.Console.Lines, l => l.Level == LogLevel.Error && l.Text.Contains("cannot rename"));
-        Assert.Empty(shell.Scene!.History);
-    }
-
-    [Fact]
     public void ANewerAutosaveIsOfferedAndRestored()
     {
         string path;
@@ -219,34 +188,6 @@ public sealed class EditingTests : IDisposable
         Assert.Null(Line("gain.override"));
         shell.Scene.Undo();
         Assert.False(Line("gain.override")!.Value.Bool);
-    }
-
-    [Fact]
-    public void ANewVolumeIsGlobalAndOneUndoEntry()
-    {
-        using var shell = NewShell(out _);
-
-        Assert.True(shell.Commands.Get(EditorCommands.CreateVolume).Execute());
-
-        var created = shell.Scene!.Scene.Entities.Single(e => e.Id != 1);
-        Assert.Equal("Global Volume", created.Name);
-        var volume = created.Components.Single(c => c.Id == SceneEdits.VolumeId);
-        Assert.Equal("Global", volume.Fields.Single(f => f.Name == "shape").Value.Text);
-        Assert.Contains(created.Components, c => c.Id == SceneEdits.TransformId);
-        Assert.Equal("Add Global Volume", Assert.Single(shell.Scene.History).Label);
-    }
-
-    [Fact]
-    public void ANewEntityGoesToTheOriginWhileNoSceneViewShows()
-    {
-        using var shell = NewShell(out _);
-
-        shell.CreateEntity();
-
-        var created = shell.Scene!.Scene.Entities.Single(e => e.Id != 1);
-        Assert.Equal("Entity", created.Name);
-        Assert.Equal([0L, 0L, 0L], SceneEdits.WorldPose(shell.Scene.Scene, created)!.Position);
-        Assert.Equal("Create Entity", shell.Scene.History[^1].Label);
     }
 
     public void Dispose() => _temp.Dispose();

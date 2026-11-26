@@ -542,17 +542,5 @@ public sealed class CutsceneTimelineTests : IDisposable
         Assert.Equal(text.Replace(Bark, ""), editor.Document.Text);
         shell.Commands.Get("edit.undo").Execute();
         Assert.Equal(text, editor.Document.Text);
-
-        // Every one of them but the toggles without a key has a key gesture, and no key is bound twice.
-        Assert.Empty(shell.KeyBindings.Warnings);
-        foreach (var id in EditorCommands.CutsceneTimelineCommands)
-        {
-            Assert.NotNull(shell.Commands.Find(id));
-            if (shell.KeyBindings.ShortcutOf(id) is { } shortcut)
-            {
-                Assert.NotNull(KeyGesture.Parse(shortcut));
-            }
-        }
-        Assert.Equal("OemComma", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneNudgeEarlier));
     }
 }

@@ -10,8 +10,8 @@ namespace Cinnabar.Editor.Tests;
 
 /// <summary>
 /// The preview cook that the material, animation graph and UI editors share (see docs/editor/material-editor.md#material-editor):
-/// closing an editor cancels its cook, so an answer that comes later, or a delayed cook, opens no preview for a slot that
-/// the editor gave up.
+/// one cook runs at a time, and closing an editor drops its cook, so an answer that comes later opens no preview for a slot
+/// that the editor gave up.
 /// </summary>
 public sealed class PreviewCookTests : IDisposable
 {
@@ -20,18 +20,20 @@ public sealed class PreviewCookTests : IDisposable
     const string UiGuid = "5b845a4341f6a3b772ec017211470fac";
 
     static readonly PreviewResult Cooked = new("", [], []);
-    static readonly PreviewResult Failed = new("the text has an error", [], []);
 
     readonly TempDirectory _temp = new("preview-cook");
     readonly FakePreviewCooker _cooker = new();
     readonly ConcurrentQueue<ILinkMessage> _sent = new();
+    // The texts that a preview cook sent with the answers that they wait for, and the texts whose answers it took.
+    readonly List<(string Text, TaskCompletionSource<PreviewResult> Answer)> _cooks = [];
+    readonly List<string> _cooked = [];
 
     public void Dispose() => _temp.Dispose();
 
     public static TheoryData<string> Kinds => ["material", "animation graph", "UI document"];
 
-    // A shell with the host linked and the fake cooker, and an open editor of a kind, with an edit that changes its text.
-    (EditorShell Shell, PreviewOwner Editor, Action Edit) Open(string kind)
+    // A shell with the host linked and the fake cooker, and an open editor of a kind.
+    (EditorShell Shell, PreviewOwner Editor) Open(string kind)
     {
         var shell = TestShell.Open(_temp, null, null);
         shell.PreviewCooker = _cooker;
@@ -45,24 +47,21 @@ public sealed class PreviewCookTests : IDisposable
                 shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], MaterialTests.Nodes, []));
                 shell.Assets.Apply(new ShadingModels(MaterialTests.Shading));
                 shell.Assets.Apply(new AssetSnapshot([TestAssets.Make(MaterialGuid, AssetKind.Material, "plain.material", permutations: 1)], []));
-                var editor = shell.OpenMaterial(shell.Assets.Find(MaterialGuid)!)!;
-                return (shell, editor, () => editor.AddParam("float"));
+                return (shell, shell.OpenMaterial(shell.Assets.Find(MaterialGuid)!)!);
             }
             case "animation graph":
             {
                 File.Copy(Path.Combine(samples, "models", "fox", "fox.animation_graph"), _temp.Combine("fox.animation_graph"));
                 shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], [], []));
                 shell.Assets.Apply(new AssetSnapshot([TestAssets.Make(GraphGuid, AssetKind.AnimationGraph, "fox.animation_graph")], []));
-                var editor = shell.OpenAnimationGraph(shell.Assets.Find(GraphGuid)!)!;
-                return (shell, editor, () => editor.AddParam("float"));
+                return (shell, shell.OpenAnimationGraph(shell.Assets.Find(GraphGuid)!)!);
             }
             default:
             {
                 File.Copy(Path.Combine(samples, "ui", "pause.ui"), _temp.Combine("pause.ui"));
                 shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], [], []));
                 shell.Assets.Apply(new AssetSnapshot([TestAssets.Make(UiGuid, AssetKind.Ui, "pause.ui")], []));
-                var editor = shell.OpenUiDocument(shell.Assets.Find(UiGuid)!)!;
-                return (shell, editor, () => Assert.True(editor.AddStyle("probe")));
+                return (shell, shell.OpenUiDocument(shell.Assets.Find(UiGuid)!)!);
             }
         }
     }
@@ -71,7 +70,7 @@ public sealed class PreviewCookTests : IDisposable
     [MemberData(nameof(Kinds))]
     public void AnOpenEditorOpensItsPreviewAgainOnceItsTextCooks(string kind)
     {
-        var (shell, editor, _) = Open(kind);
+        var (shell, editor) = Open(kind);
         using var _ = shell;
         var cook = Assert.Single(_cooker.Requests);
         Assert.Equal(editor.Guid, cook.Guid);
@@ -86,9 +85,9 @@ public sealed class PreviewCookTests : IDisposable
 
     [Theory]
     [MemberData(nameof(Kinds))]
-    public void ACookThatAnswersAfterTheEditorClosesSendsNothing(string kind)
+    public void ACookThatAnswersAfterTheEditorClosesSendsNothingAndNorDoesItsPreview(string kind)
     {
-        var (shell, editor, _) = Open(kind);
+        var (shell, editor) = Open(kind);
         using var _ = shell;
         var cook = Assert.Single(_cooker.Requests);
         _sent.Clear();
@@ -98,76 +97,17 @@ public sealed class PreviewCookTests : IDisposable
         Assert.Null(editor.PreviewId);
 
         cook.Answer(Cooked);
-
-        Assert.IsType<ClosePreview>(Assert.Single(_sent));
-    }
-
-    [Theory]
-    [MemberData(nameof(Kinds))]
-    public async Task AnEditCooksAMomentLater(string kind)
-    {
-        var (shell, _, edit) = Open(kind);
-        using var _ = shell;
-        Assert.Single(_cooker.Requests).Answer(Failed);
-
-        edit();
-
-        await Until(() => _cooker.Requests.Count == 2);
-    }
-
-    [Theory]
-    [MemberData(nameof(Kinds))]
-    public async Task ADelayedCookDoesNotRunAfterTheEditorCloses(string kind)
-    {
-        var (shell, editor, edit) = Open(kind);
-        using var _ = shell;
-        // The first text fails, so a later one that cooks would open the preview again.
-        Assert.Single(_cooker.Requests).Answer(Failed);
-        _sent.Clear();
-
-        edit();
-        shell.CloseGraph((IGraphEditor)editor, discard: true);
-        await Task.Delay(PreviewCook.Delay * 4, TestContext.Current.CancellationToken);
-
-        Assert.Single(_cooker.Requests);
-        Assert.IsType<ClosePreview>(Assert.Single(_sent));
-    }
-
-    [Theory]
-    [MemberData(nameof(Kinds))]
-    public void AClosedPreviewSendsNothing(string kind)
-    {
-        var (shell, editor, _) = Open(kind);
-        using var _ = shell;
-        shell.CloseGraph((IGraphEditor)editor, discard: true);
-        _sent.Clear();
-
         editor.Orbit(10, 5);
         editor.Zoom(1);
         editor.SendPreview();
 
-        Assert.Empty(_sent);
-    }
-
-    [Fact]
-    public void AMaterialDropsAnAnswerAboutAnOlderText()
-    {
-        var (shell, owner, edit) = Open("material");
-        using var _ = shell;
-        var editor = (MaterialEditor)owner;
-        var cook = Assert.Single(_cooker.Requests);
-
-        edit();
-        cook.Answer(new PreviewResult("stale", [new Problem(editor.Document.Path, 4, 0, true, "stale")], []));
-
-        Assert.Same(CheckState.Pending, editor.Checks.State);
-        Assert.Empty(editor.Problems);
+        Assert.IsType<ClosePreview>(Assert.Single(_sent));
     }
 
     [Fact]
     public void AMaterialProblemHasItsNodeAndItsLine()
     {
-        var (shell, owner, _) = Open("material");
+        var (shell, owner) = Open("material");
         using var _ = shell;
         var editor = (MaterialEditor)owner;
         Assert.Same(CheckState.Pending, editor.Checks.State);
@@ -179,14 +119,49 @@ public sealed class PreviewCookTests : IDisposable
         Assert.Equal(new CheckState.Failed("bad"), editor.Checks.State);
     }
 
-    static async Task Until(Func<bool> condition)
+    // A preview cook of a text that the test changes, whose cooks wait for the test's answers.
+    PreviewCook Cooking(Func<string> text) => new(() => true, text, t =>
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
-        while (!condition())
-        {
-            Assert.True(DateTime.UtcNow < deadline, "the condition did not hold within 10 s");
-            await Task.Delay(20, TestContext.Current.CancellationToken);
-        }
+        var answer = new TaskCompletionSource<PreviewResult>();
+        _cooks.Add((t, answer));
+        return answer.Task;
+    }, (t, _) => _cooked.Add(t));
+
+    [Fact]
+    public void ChangesDuringACookCookTheNewestTextOnceAfterIt()
+    {
+        var text = "first";
+        using var cook = Cooking(() => text);
+
+        _ = cook.CookNow();
+        text = "second";
+        _ = cook.CookNow();
+        text = "third";
+        _ = cook.CookNow();
+        Assert.Equal(["first"], _cooks.Select(c => c.Text));
+
+        _cooks[0].Answer.SetResult(Cooked);
+        Assert.Equal(["first", "third"], _cooks.Select(c => c.Text));
+        _cooks[1].Answer.SetResult(Cooked);
+        Assert.Equal(["first", "third"], _cooked);
+        Assert.Equal(2, _cooks.Count);
+    }
+
+    [Fact]
+    public void AClosedCookDropsTheAnswerOfTheCookThatRunsAndCooksNoMore()
+    {
+        using var cook = Cooking(() => "text");
+        _ = cook.CookNow();
+        // A change while it runs would cook again after it.
+        _ = cook.CookNow();
+
+        cook.Dispose();
+        _cooks[0].Answer.SetResult(Cooked);
+        _ = cook.CookNow();
+        cook.Schedule();
+
+        Assert.Single(_cooks);
+        Assert.Empty(_cooked);
     }
 
     /// <summary>A cook link that holds each cook until the test answers it.</summary>

@@ -68,7 +68,7 @@ public sealed class CutsceneCurveEditsTests
     }
 
     [Fact]
-    public void AHandleSetsBothSlopesOfAnUnbrokenKeyAndOneOfABrokenKey()
+    public void AHandleSetsBothSlopesOfAnUnbrokenKeyAndOneOfABrokenKeyAndOnlyItsSidesWeight()
     {
         var file = Parse();
         CutsceneCurveEdits.SetSlope(file, "section:1/channel:value/key:1", TangentSide.Out, 1.5);
@@ -77,6 +77,15 @@ public sealed class CutsceneCurveEditsTests
         Assert.Equal("key 120000 4 bezier 0.25 -1 weights 0.25 0.75 teleport", Key(file, 2));
         CutsceneCurveEdits.SetSlope(file, "section:1/channel:value/key:2", TangentSide.Out, double.NaN);
         Assert.Equal("key 120000 4 bezier 0.25 -1 weights 0.25 0.75 teleport", Key(file, 2));
+
+        // A handle's weight is its side's only, and a key without weights ignores it.
+        file = Parse();
+        CutsceneCurveEdits.SetSlope(file, "section:1/channel:value/key:2", TangentSide.Out, -1.5, weight: 0.5);
+        Assert.Equal("key 120000 4 bezier 2 -1.5 weights 0.25 0.5 teleport", Key(file, 2));
+        CutsceneCurveEdits.SetSlope(file, "section:1/channel:value/key:2", TangentSide.In, 1, weight: 7);
+        Assert.Equal("key 120000 4 bezier 1 -1.5 weights 1 0.5 teleport", Key(file, 2));
+        CutsceneCurveEdits.SetSlope(file, "section:1/channel:value/key:0", TangentSide.Out, 1, weight: 0.5);
+        Assert.Equal("key 0 0 bezier 1", Key(file, 0));
     }
 
     [Fact]
@@ -117,19 +126,16 @@ public sealed class CutsceneCurveEditsTests
     }
 
     [Fact]
-    public void ASplitTakesTheRuntimesValueOfABezierCurveAtTheCut()
+    public void ASplitTakesTheRuntimesValueOfABezierCurveAtTheCutAndKeepsTheInfinity()
     {
         var file = Parse();
         var curve = CutsceneCurveEdits.CurveOf(file.Find("section:1/channel:value")!)!;
         CutsceneEdits.Split(file, ["section:1"], 60000 + 90000);
         Assert.Equal($"key 90000 {CutsceneKeying.Format(CutsceneCurve.Value(curve, 90000, CurveInfinity.Constant, CurveInfinity.Constant))} auto", file.Find("section:1/channel:value/key:2")!.LineTexts.Last().Trim());
         Assert.NotEqual("3.5", CutsceneKeying.Format(CutsceneCurve.Value(curve, 90000, CurveInfinity.Constant, CurveInfinity.Constant)));
-    }
 
-    [Fact]
-    public void ASplitKeepsTheChannelsInfinityInBothHalves()
-    {
-        var file = Parse();
+        // Both halves keep the channel's infinity.
+        file = Parse();
         CutsceneCurveEdits.SetInfinity(file, ["section:1/channel:value"], InfinitySide.Pre, CurveInfinity.Oscillate);
         CutsceneCurveEdits.SetInfinity(file, ["section:1/channel:value"], InfinitySide.Post, CurveInfinity.Cycle);
         var halves = CutsceneEdits.Split(file, ["section:1"], 60000 + 90000);
@@ -214,17 +220,5 @@ public sealed class CutsceneCurveEditsTests
         Assert.True(CutsceneCurveEdits.SetWeighted(file, ["section:1/channel:value/key:2"], false));
         Assert.Equal("key 120000 4 bezier 2 -1 teleport", Key(file, 2));
         Assert.False(CutsceneCurveEdits.SetWeighted(file, ["section:1/channel:value/key:2"], false));
-    }
-
-    [Fact]
-    public void AHandlesWeightIsItsSidesOnlyAndAKeyWithoutWeightsIgnoresIt()
-    {
-        var file = Parse();
-        CutsceneCurveEdits.SetSlope(file, "section:1/channel:value/key:2", TangentSide.Out, -1.5, weight: 0.5);
-        Assert.Equal("key 120000 4 bezier 2 -1.5 weights 0.25 0.5 teleport", Key(file, 2));
-        CutsceneCurveEdits.SetSlope(file, "section:1/channel:value/key:2", TangentSide.In, 1, weight: 7);
-        Assert.Equal("key 120000 4 bezier 1 -1.5 weights 1 0.5 teleport", Key(file, 2));
-        CutsceneCurveEdits.SetSlope(file, "section:1/channel:value/key:0", TangentSide.Out, 1, weight: 0.5);
-        Assert.Equal("key 0 0 bezier 1", Key(file, 0));
     }
 }

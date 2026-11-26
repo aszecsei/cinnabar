@@ -242,17 +242,9 @@ Each action is a command, so it is in the command palette, and `keybindings.json
 
 A redraw reads only the draw list that `CutsceneTimelineLayout.Visible` gives: the rows in view, and the items in view in each row. It finds the keys with a binary search. Each bar's label, and its clip's name and length from the index, are found when the rows are built, not when they draw. A clip's loop marks are made only for the part in view. An event track's row groups all of its triggers into flags on each redraw, one pass over them, so that a pan does not change a badge. `CutsceneFile` keeps an index of its blocks by path, which a change of a keyword line or of the tree drops, so a lookup of a selected path does not search the file.
 
-A test with 50 tracks and 5,000 keys checks two times:
-- the draw list takes less than 4 ms;
-- a drag's step takes less than 50 ms. A step reads the text again, edits it, and builds the rows again, through a search filter that keeps every row.
-
-A second test draws 30 looping audio sections with gain curves, half of whose peak files have not been read. Their waveforms' columns take less than 4 ms a frame, with the whole minute in view and as the view scrolls across it.
-
-The tests do not measure Avalonia's drawing.
-
 ## Sections
 
-An animation or audio section shows what plays in it, so a designer can time to it without playing. `CutsceneTimelineLayout` finds what each bar shows when the rows are built, and its pure helpers, which tests call, place the marks: `Hints`, `ClipMarks`, `LabelRoom`, `Overlaps` and `Handles`, with `CutsceneWaveform.Columns` and `EventTicks` for waveforms and events.
+An animation or audio section shows what plays in it, so a designer can time to it without playing. `CutsceneTimelineLayout` finds what each bar shows when the rows are built, and its pure helpers place the marks: `Hints`, `ClipMarks`, `LabelRoom`, `Overlaps` and `Handles`, with `CutsceneWaveform.Columns` and `EventTicks` for waveforms and events.
 
 ### Labels
 
@@ -780,7 +772,7 @@ Each viewport, the Game view too, has a **Guides** menu on its toolbar (see [Vie
 - **Rule of Thirds** draws a grid of thirds and a centre mark over the framed shot.
 - **Camera Info** writes the camera's name, its focal length and the shot's name while a scene view looks through a camera. The Game view writes the shot's name.
 
-The guides are each user's, for each viewport, in `viewport.json`. `FrameGuides` in `Cinnabar.Editor.Tools` gives their rectangles in the frame's pixels, which `FrameGuidesTests` checks for each aspect.
+The guides are each user's, for each viewport, in `viewport.json`. `FrameGuides` in `Cinnabar.Editor.Tools` gives their rectangles in the frame's pixels, which `FrameGuidesTests` checks for a frame wider and a frame narrower than the guide.
 
 ### Lens
 

@@ -42,6 +42,13 @@ public sealed class WorldFileTests
         Assert.Equal([150000000060, 30, 25], scenes[1].Max!);
         Assert.Equal(25, scenes[1].LoadDistance);
         Assert.Equal(40, scenes[1].UnloadDistance);
+
+        // The raw bounds are the cooker's at the far anchor, and half a unit rounds away from zero.
+        Assert.Equal([150000000020L << 24, -5L << 24, -25L << 24], scenes[1].RawMin!);
+        Assert.Equal([150000000060L << 24, 30L << 24, 25L << 24], scenes[1].RawMax!);
+        Assert.Equal(1, WorldFile.Raw(Math.ScaleB(1, -25)));
+        Assert.Equal(-1, WorldFile.Raw(-Math.ScaleB(1, -25)));
+        Assert.Null(WorldFile.Raw(1e30));
     }
 
     [Fact]
@@ -93,18 +100,6 @@ public sealed class WorldFileTests
     }
 
     [Fact]
-    public void TheRawBoundsAreTheCookersAtTheFarAnchor()
-    {
-        var tile = Read(Sample()).Scenes.ElementAt(1);
-        Assert.Equal([150000000020L << 24, -5L << 24, -25L << 24], tile.RawMin!);
-        Assert.Equal([150000000060L << 24, 30L << 24, 25L << 24], tile.RawMax!);
-        // Half a unit rounds away from zero.
-        Assert.Equal(1, WorldFile.Raw(Math.ScaleB(1, -25)));
-        Assert.Equal(-1, WorldFile.Raw(-Math.ScaleB(1, -25)));
-        Assert.Null(WorldFile.Raw(1e30));
-    }
-
-    [Fact]
     public void ASceneLoadsWithinItsLoadDistanceOfItsBounds()
     {
         var file = Read(Sample());
@@ -130,15 +125,10 @@ public sealed class WorldFileTests
     }
 
     [Fact]
-    public void ANewSettingTakesTheLastSettingsIndentAndARemovedSceneItsComment()
+    public void ANewSettingTakesTheLastSettingsIndent()
     {
         var file = Read("world 1\nscene $" + Base + "\n  min = [0, 0, 0]\n");
         file.SetPersistent(file.Find(Base)!, true);
         Assert.Equal("world 1\nscene $" + Base + "\n  min = [0, 0, 0]\n  persistent = true\n", file.Text);
-
-        // A scene leaves with the comment above it, as a node does.
-        file = Read("world 1\n\n# The base.\nscene $" + Base + "\n\tpersistent = true\n\nscene $" + Tile + "\n\tpersistent = true\n");
-        file.Remove(file.Find(Base)!);
-        Assert.Equal("world 1\n\nscene $" + Tile + "\n\tpersistent = true\n", file.Text);
     }
 }

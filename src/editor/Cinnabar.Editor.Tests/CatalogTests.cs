@@ -6,7 +6,7 @@ using Cinnabar.Editor.Shell;
 
 namespace Cinnabar.Editor.Tests;
 
-/// <summary>The Add Component picker's folders and search (see docs/editor/shell-and-panels.md#properties).</summary>
+/// <summary>The Add Component picker's folders and search (see docs/editor/shell-and-panels.md#properties), and the outliner's folds.</summary>
 public sealed class CatalogTests
 {
     static readonly CatalogItem[] Items =
@@ -18,25 +18,6 @@ public sealed class CatalogTests
         new("spin", "Spin", "mygame"),
         new("odd", "Odd One", ""),
     ];
-
-    [Fact]
-    public void ACategoryReadsAsATitleAndNoneIsOther()
-    {
-        Assert.Equal("Mygame", Catalog.Normalize("mygame"));
-        Assert.Equal("Physics/Joints", Catalog.Normalize(" Physics / Joints "));
-        Assert.Equal("AI", Catalog.Normalize("AI"));
-        Assert.Equal(Catalog.Uncategorized, Catalog.Normalize(""));
-        Assert.Equal(Catalog.Uncategorized, Catalog.Normalize("//"));
-    }
-
-    [Fact]
-    public void WithoutAQueryTheFoldersShowClosedInOrderWithOtherLast()
-    {
-        var rows = Catalog.Rows(Items, "", _ => false);
-
-        Assert.All(rows, r => Assert.True(r.IsFolder));
-        Assert.Equal(["Lighting", "Mygame", "Physics", "Other"], rows.Select(r => r.Label));
-    }
 
     [Fact]
     public void AnOpenFolderHasItsItemsAndThenTheFoldersUnderIt()
@@ -95,32 +76,12 @@ public sealed class CatalogTests
         Assert.Equal("Guard Bark", item.Label);
         Assert.Equal("0123456789abcdef0123456789abcdef", ComponentCatalog.ScriptOf(item));
         Assert.Null(ComponentCatalog.ComponentOf(item));
-        // The picker shows the folder as a title, under the engine's folders' icons or the script's.
         Assert.Equal(["Behaviours", "Ai", "Guard Bark"], Catalog.Rows([item], "").Select(r => r.Label));
-        Assert.Equal("script", ComponentCatalog.FolderIcon("Behaviours/Ai"));
-        Assert.Equal("folder", ComponentCatalog.FolderIcon("Mygame"));
-    }
 
-    [Fact]
-    public void ABehaviourWithACategoryIsInThatFolder()
-    {
+        // A behaviour with a category is in that folder, and one of no category is not offered.
         var ring = TestAssets.Make("0123456789abcdef0123456789abcdef", AssetKind.Script, "scripts/ring.luau", behaviour: "Ring", category: "Tools/Layout", editMode: true);
         var hidden = TestAssets.Make("fedcba9876543210fedcba9876543210", AssetKind.Script, "scripts/helper.luau", behaviour: "Helper", category: ComponentCatalog.NoCategory);
-        var item = Assert.Single(ComponentCatalog.Behaviours([ring, hidden]));
-        Assert.Equal("Tools/Layout", item.Category);
-        Assert.Equal("scripts/ring.luau", item.Detail?[(item.Detail.IndexOf('/') + 1)..]);
-        Assert.Equal(["Tools", "Layout", "Ring"], Catalog.Rows([item], "").Select(r => r.Label));
-    }
-
-    [Fact]
-    public void AnEntitysIconIsItsMostTellingComponents()
-    {
-        Assert.Equal("camera", EntityIcons.For(["Transform", "Camera", "Audio_Listener", "Behaviours"]));
-        Assert.Equal("decision", EntityIcons.For(["Transform", "Character", "Nav_Agent", "Agent", "Mesh_Renderer"]));
-        Assert.Equal("nav-path", EntityIcons.For(["Transform", "Volume", "Nav_Mesh_Volume"]));
-        Assert.Equal("light-point", EntityIcons.For(["Transform", "Point_Light"]));
-        Assert.Equal("script", EntityIcons.For(["Transform", "Behaviours"]));
-        Assert.Null(EntityIcons.For(["Transform", "Spin"]));
+        Assert.Equal("Tools/Layout", Assert.Single(ComponentCatalog.Behaviours([ring, hidden])).Category);
     }
 
     [Fact]

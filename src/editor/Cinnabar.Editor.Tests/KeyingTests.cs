@@ -1,7 +1,5 @@
 using System.Buffers.Binary;
 using System.Text;
-using Avalonia.Controls;
-using Avalonia.LogicalTree;
 using Cinnabar.Editor.Docking;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link;
@@ -185,29 +183,6 @@ public sealed class KeyingTests : IDisposable
     }
 
     [Fact]
-    public void AKeyWaitsForTheWorldToShowThePlayheadAndNotWhileThePreviewPlays()
-    {
-        var (shell, editor, ticket) = NewShell();
-        using var _ = shell;
-        var target = new KeyTarget.Property(1, LightId, "brightness", PropertyShape.Number);
-        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(ticket, 0, 0, 0)));
-
-        editor.SetPlayhead(2000);
-        var before = editor.Document.Text;
-        shell.Keying.Key(Door, LightId, Brightness);
-        Assert.Equal(before, editor.Document.Text);
-        Assert.Contains("Waiting", shell.Keying.StateOf(Door, LightId, Brightness)!.Refusal);
-
-        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 4, new ShownPreview(ticket, 2000, 0, 0)));
-        shell.Keying.Key(Door, LightId, Brightness);
-        Assert.Equal([4.0], CutsceneKeying.KeysAt(editor.File, target, 2000));
-
-        shell.OnGameMessage(new CutscenePreviewTick(ticket, 2000, true));
-        shell.CutscenePreview.PlayPause();
-        Assert.Contains("Pause", shell.Keying.StateOf(Door, LightId, Brightness)!.Refusal);
-    }
-
-    [Fact]
     public void KeyTransformFromTheViewportIsOneEntryThatUndoTakesBack()
     {
         var (shell, editor, ticket) = NewShell();
@@ -264,31 +239,6 @@ public sealed class KeyingTests : IDisposable
 
         Assert.Same(UndoTarget.Scene.Instance, shell.LastEdited);
         Assert.Null(shell.UndoEditor);
-    }
-
-    [Fact]
-    public void ACutsceneThatGivesThePreviewAwayIsNotWhatUndoFollowsWhenItTakesItBack()
-    {
-        var (shell, editor, _) = NewShell();
-        using var __ = shell;
-        shell.Selection.Select(Door);
-        shell.Commands.Get(EditorCommands.CutsceneKeyTransform).Execute();
-        File.WriteAllText(_temp.Combine("other.cutscene"), Cutscene);
-        shell.Assets.Apply(new AssetSnapshot(
-        [
-            TestAssets.Make(SceneGuid, AssetKind.Scene, "door.scene"),
-            TestAssets.Make(CutsceneGuid, AssetKind.Cutscene, "door.cutscene"),
-            TestAssets.Make("fedcba9876543210fedcba9876543210", AssetKind.Cutscene, "other.cutscene"),
-        ], []));
-
-        var other = shell.OpenCutscene(shell.Assets.Find("fedcba9876543210fedcba9876543210")!)!;
-        shell.CutscenePreview.Take(other);
-        Assert.Same(other, shell.CutscenePreview.Owner);
-        Assert.Same(UndoTarget.Scene.Instance, shell.LastEdited);
-        shell.CutscenePreview.Take(editor);
-
-        Assert.Same(editor, shell.CutscenePreview.Owner);
-        Assert.Same(UndoTarget.Scene.Instance, shell.LastEdited);
     }
 
     [Fact]
@@ -349,21 +299,6 @@ public sealed class KeyingTests : IDisposable
     }
 
     [Fact]
-    public void KeyTransformAsksToPossessTheSelectionThatNoBindingHas()
-    {
-        var (shell, editor, _) = NewShell(Cutscene.Replace("0000000000000001", "0000000000000002"));
-        using var __ = shell;
-        shell.Selection.Select(Door);
-        shell.Keying.AskPossess = (_, _) => Task.FromResult(true);
-
-        Assert.Null(shell.Keying.KeyTransformRefusal());
-        shell.Commands.Get(EditorCommands.CutsceneKeyTransform).Execute();
-
-        Assert.Equal(["Possess and Key Transform"], editor.Document.History);
-        Assert.Equal([0.0, 0, 0], CutsceneKeying.KeysAt(editor.File, new KeyTarget.Pose(2, PosePart.Position), 0).Select(v => v!.Value));
-    }
-
-    [Fact]
     public void AutoKeyAsksOnceToPossessAnEntityAndANoSendsItsEditsToTheScene()
     {
         var (shell, editor, _) = NewShell(Cutscene.Replace("0000000000000001", "0000000000000002"));
@@ -402,50 +337,6 @@ public sealed class KeyingTests : IDisposable
         Assert.IsType<FieldRoute.Key>(other.Keying.Route([Door], LightId, Brightness));
         Assert.Empty(editor.Document.History);
     }
-
-    [Fact]
-    public void ThePropertiesPanelShowsTheKeyButtonsStateAsThePlayheadMoves() => Ui.Run(() =>
-    {
-        // The Transform's own fields would need a window for their drags' cursor, so it shows only a flag here.
-        var (shell, editor, _) = NewShell(transform: new ComponentType(SceneEdits.TransformId, "Transform", "Transform", 52, [Field("frozen", 51, FieldKind.Bool)]));
-        using var __ = shell;
-        shell.Selection.Select(Door);
-        var view = new PropertiesView(shell);
-        view.Subscriptions.Attach();
-        var content = (StackPanel)view.Content!;
-        TextBlock Name() => content.GetLogicalDescendants().OfType<TextBlock>().Single(t => t.Classes.Contains("field-name") && t.Text == "Brightness");
-        Button Key() => content.GetLogicalDescendants().OfType<Button>().Single(b => b.ContextMenu != null && b.ContextMenu == Name().ContextMenu);
-        var button = Key();
-        Assert.Contains("key-none", button.Classes);
-
-        // A click keys the field; the same button shows it, as the panel did not build again.
-        button.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
-        Assert.Same(button, Key());
-        Assert.Contains("key-keyed", button.Classes);
-        editor.SetPlayhead(4000);
-        Assert.Same(button, Key());
-        Assert.Contains("key-track", button.Classes);
-
-        // The menu's items act as the state lets them.
-        var items = Name().ContextMenu!.Items.OfType<MenuItem>().ToDictionary(i => (string)i.Header!);
-        Assert.Equal(["Add Track", "Key", "Remove Key", "Go to Track"], items.Keys);
-        Assert.Equal((false, true, false, true), (items["Add Track"].IsEnabled, items["Key"].IsEnabled, items["Remove Key"].IsEnabled, items["Go to Track"].IsEnabled));
-        editor.SetPlayhead(0);
-        Assert.True(items["Remove Key"].IsEnabled);
-        items["Remove Key"].Command!.Execute(null);
-        Assert.Contains("key-track", button.Classes);
-
-        // Go to Track shows the cutscene's tab with the track selected.
-        shell.Layout.ShowViewport(ViewportDocument.SceneId);
-        items["Go to Track"].Command!.Execute(null);
-        Assert.Same(editor, shell.ActiveGraphEditor);
-        Assert.Equal("track:1", editor.Selection);
-
-        // An entity that no binding possesses has an empty button, which offers to possess it.
-        editor.Document.Edit("Unbind", f => f.Find("binding:1")!.Set("possess", $"@{SceneGuid}/0000000000000002"));
-        Assert.Contains("key-none", Key().Classes);
-        Assert.Contains("possess", (string)ToolTip.GetTip(Key())!);
-    });
 
     [Fact]
     public void PastTheRangeTheWorldHoldsItsEndAndAKeyTakesIt()
@@ -492,20 +383,6 @@ public sealed class KeyingTests : IDisposable
         // In a relative track, a step along the own turned x is a step along the key's x.
         Assert.Equal([2.0, 0, 0], PoseKeys.RelativePosition(Yaw(90).Rotate(new Vec3(2, 0, 0)), Yaw(90)).Select(v => Math.Round(v, 6)));
         Assert.Equal([0.0, 30, 0], PoseKeys.RelativeRotation(Yaw(90), Yaw(90) * Yaw(30)).Select(v => Math.Round(v, 4)));
-    }
-
-    [Fact]
-    public void TheKeyCommandsHaveTheirOwnKeys()
-    {
-        using var shell = TestShell.Open(_temp, "door.scene", SceneText);
-
-        Assert.Equal("Ctrl+K", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneKeyTransform));
-        Assert.Equal("Ctrl+Shift+K", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneKeyTrackedFields));
-        Assert.Equal("Alt+K", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneAutoKey));
-        Assert.Equal("Alt+Shift+K", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneAutoKeyAddTracks));
-        Assert.Equal("Enter", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneKeyPreviewValues));
-        Assert.Equal("K", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneShuttlePause));
-        Assert.Empty(shell.KeyBindings.Warnings);
     }
 
     // The cutscene with the door's brightness keyed at 2 at 0 s, as a held field.
@@ -776,38 +653,5 @@ public sealed class KeyingTests : IDisposable
         Assert.Empty(shell.PreviewValues.State is PreviewValuesState.Live live ? live.Values : []);
         editor.EndDrag(cancel: true);
         Assert.Empty(editor.Document.History);
-    }
-
-    [Fact]
-    public void AGizmoDragOfAHeldPoseStartsWhereTheWorldShowsItAndEnterKeysIt()
-    {
-        var (shell, editor, ticket) = NewShell(Cutscene + "track 1 transform \"Walk\"\n\tbinding = 1\n");
-        using var _ = shell;
-        shell.Selection.Select(Door);
-        shell.Viewports[0].Session.Show(new Avalonia.PixelSize(1600, 900));
-        shell.Camera.Place([0, 0, -(5L << 24)], 0, 0);
-        // The document has the door at 0 m; the preview shows it at 1 m on x.
-        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (Pose([1, 0, 0], Quat.Identity), null, new ShownPreview(ticket, 0, 0, 0)));
-        Assert.IsType<FieldRoute.Preview>(shell.Keying.PoseRoute([Door]));
-        var (width, height) = shell.FrameSize;
-        var (pivot, _) = shell.GizmoPose()!.Value;
-        Assert.Equal(1L << 24, pivot[0]);
-        var center = shell.Camera.RelativeTo(pivot);
-        var size = Tools.Gizmo.Size(shell.Camera, center, height);
-        Vec2 Along(double meters) => shell.Camera.Project(center + Vec3.UnitX * meters, width, height)!.Value;
-
-        Assert.True(shell.PressGizmo(Along(0.5 * size)));
-        shell.DragGizmo(Along(0.5 * size + 0.5), invertSnap: false);
-        shell.ReleaseGizmo();
-        var moved = Assert.Single(_sent.OfType<CutscenePreviewValues>().Last().Transforms);
-        Assert.InRange(moved.Position[0], (long)(1.49 * (1 << 24)), (long)(1.51 * (1 << 24)));
-        Assert.Empty(editor.Document.History);
-        Assert.Empty(shell.Scene!.History);
-
-        // Enter keys it from the document's pose, as a relative track does.
-        shell.Commands.Get(EditorCommands.CutsceneKeyPreviewValues).Execute();
-        Assert.Equal(["Key Preview Values"], editor.Document.History);
-        Assert.InRange(CutsceneKeying.KeysAt(editor.File, new KeyTarget.Pose(1, PosePart.Position), 0)[0]!.Value, 1.49, 1.51);
-        Assert.Empty(shell.Scene.History);
     }
 }

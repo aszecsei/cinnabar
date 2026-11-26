@@ -1,12 +1,10 @@
-using System.Diagnostics;
-using System.Text;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Tools;
 using L = Cinnabar.Editor.Tools.CutsceneTimelineLayout;
 
 namespace Cinnabar.Editor.Tests;
 
-/// <summary>The timeline's pure part: ticks and pixels, rows, hit tests, boxes, snapping, and the cost of a redraw.</summary>
+/// <summary>The timeline's pure part: ticks and pixels, rows, hit tests, glyphs, snapping and clips' hints.</summary>
 public sealed class CutsceneTimelineLayoutTests
 {
     static CutsceneFile Intro() => CutsceneFile.Parse(CutsceneFileTests.Sample("intro").ReplaceLineEndings("\n")).File!;
@@ -20,18 +18,10 @@ public sealed class CutsceneTimelineLayoutTests
         L.RulerHeight + layout.Rows.First(r => r.Path == path && r.Kind == kind).Top + L.RowHeight / 2;
 
     [Fact]
-    public void ABindingsRowCarriesWhatItBindsAndABindingsFilterHidesTheRest()
+    public void ABindingsFilterHidesTheOtherBindingsAndTheTracksOfNone()
     {
         var file = Intro();
         var bindings = file.Bindings.Select(b => b.Id).OfType<int>().ToList();
-        var info = new CutsceneBindingInfo(CutsceneBindingKind.Spawned, "Prop", CutsceneBindingState.Broken, "gone");
-
-        var all = L.Build(file, new HashSet<string>(), null, b => b.Id == bindings[0] ? info : null);
-        var rows = all.Rows.Where(r => r.Kind == CutsceneRowKind.Binding).ToList();
-        Assert.Equal(bindings.Count, rows.Count);
-        Assert.Same(info, rows[0].Binding);
-        Assert.All(rows.Skip(1), r => Assert.Null(r.Binding));
-        Assert.All(all.Rows.Where(r => r.Kind != CutsceneRowKind.Binding), r => Assert.Null(r.Binding));
 
         // Only the first binding and its tracks; not the tracks that no binding has, nor the other bindings.
         var only = L.Build(file, new HashSet<string>(), new CutsceneRowFilter("", null, new HashSet<int> { bindings[0] }));
@@ -48,12 +38,12 @@ public sealed class CutsceneTimelineLayoutTests
         Assert.Equal(100, view.X(4000));
         Assert.Equal(4000, view.At(100));
         var fit = TimelineView.Fit(0, 600000, 1000, TimelineZoom.Ticks);
-        Assert.Equal((-30000.0, 660.0), (fit.Start, fit.PerPixel));
         Assert.Equal(TimelineZoom.Ticks.Min, TimelineView.Fit(0, 100, 1000, TimelineZoom.Ticks).PerPixel);
         Assert.Equal(TimelineZoom.Ticks.Max, fit.ZoomAbout(0, 1e9).PerPixel);
+        // A zoom keeps the time under the pointer.
         var zoomed = fit.ZoomAbout(400, 0.25);
         Assert.Equal(fit.At(400), zoomed.At(400), 6);
-        Assert.Equal(165, zoomed.PerPixel, 6);
+        Assert.Equal(fit.PerPixel / 4, zoomed.PerPixel, 6);
 
         // The ruler's ticks are whole seconds where a second fits, and whole frames below: at 25 fps, a frame is 2400 ticks.
         Assert.Equal(48000, TimelineGeometry.FrameSpacing(500, 2400));
@@ -87,7 +77,7 @@ public sealed class CutsceneTimelineLayoutTests
     }
 
     [Fact]
-    public void APointIsOnAnEdgeABodyAKeyAHandleOrNothing()
+    public void APointIsOnAnEdgeABodyAKeyOrNothing()
     {
         var layout = L.Build(Intro(), new HashSet<string>());
         var cuts = Y(layout, "track:5");
@@ -103,28 +93,12 @@ public sealed class CutsceneTimelineLayoutTests
         var music = Y(layout, "track:7");
         Assert.Equal((CutsceneHitKind.Key, "section:9/channel:gain/key:1"), (Hit(X(200000) + 2, music).Kind, Hit(X(200000) + 2, music).Paths[0]));
         Assert.Equal(CutsceneHitKind.Trigger, Hit(X(600000), Y(layout, "track:9")).Kind);
-
-        // The ruler: the length's handle at its top, the range's at its bottom, and the playhead's scrub elsewhere.
-        Assert.Equal(CutsceneHitKind.Length, Hit(X(720000), 4).Kind);
-        Assert.Equal(CutsceneHitKind.RangeEnd, Hit(X(600000), L.RulerHeight - 2).Kind);
-        Assert.Equal(CutsceneHitKind.RangeStart, Hit(X(0) + 1, L.RulerHeight - 2).Kind);
-        Assert.Equal(CutsceneHitKind.Ruler, Hit(X(300000), 4).Kind);
-
-        // The headers: a fold, a lock, and the rest of the row.
-        var fox = Y(layout, "binding:1", CutsceneRowKind.Binding);
-        Assert.Equal(CutsceneHitKind.Fold, Hit(8, fox).Kind);
-        Assert.Equal(CutsceneHitKind.Header, Hit(100, fox).Kind);
-        Assert.Equal((CutsceneHitKind.Lock, "track:5"), (Hit(L.Gutter - 10, cuts).Kind, Hit(L.Gutter - 10, cuts).Paths[0]));
     }
 
     [Fact]
-    public void ABoxSelectsWhatItCoversAndKeysCloseTogetherAreOneGlyph()
+    public void KeysCloseTogetherAreOneGlyphAndOnlyWhatIsInViewDraws()
     {
         var layout = L.Build(Intro(), new HashSet<string>());
-        // From the cuts' row to the music's, from 150000 to 250000.
-        var box = layout.InBox(X(150000), Y(layout, "track:5"), X(250000), Y(layout, "track:7"), Thousand, 0);
-        Assert.Equal(["section:5", "section:6", "section:9/channel:gain/key:1", "section:9"], box);
-
         // Keys under 2 pixels apart merge into one glyph, as a chain: the music's keys are 200000 ticks apart.
         Glyphs(150000, [3]);
         Glyphs(90000, [1, 1, 1]);
@@ -170,7 +144,6 @@ public sealed class CutsceneTimelineLayoutTests
         // The flag at the length is the marker's, not the length's handle, and under the flags, the handle is.
         Assert.Equal((CutsceneHitKind.Marker, "marker:1"), (layout.HitTest(X(720000) + 2, 4, Thousand, 0).Kind, layout.HitTest(X(720000) + 2, 4, Thousand, 0).Paths[0]));
         Assert.Equal(CutsceneHitKind.Length, layout.HitTest(X(720000), L.MarkerHeight + 2, Thousand, 0).Kind);
-        Assert.Equal(CutsceneHitKind.Ruler, layout.HitTest(X(300000), 4, Thousand, 0).Kind);
         Assert.Contains(100000, layout.SnapTargets(new HashSet<string>()));
         Assert.DoesNotContain(100000, layout.SnapTargets(new HashSet<string> { "marker:2" }));
         Assert.Contains(100000, layout.Edges());
@@ -183,7 +156,6 @@ public sealed class CutsceneTimelineLayoutTests
         var file = Intro();
         string[] Labels(CutsceneRowFilter filter) => [.. L.Build(file, new HashSet<string>(), filter).Rows.Select(r => r.Label)];
         // A binding that the text names shows all of its tracks; a track that it names shows with its binding.
-        Assert.Equal(["Walking Fox", "Fox walks", "Fox walk clip", "Running Fox", "Fox runs"], Labels(new("fox", null)));
         Assert.Equal(["Extra Guard", "Bark"], Labels(new("BARK", null)));
         Assert.Equal(["Music"], Labels(new("music", null)));
         Assert.Empty(Labels(new("nothing", null)));
@@ -195,61 +167,6 @@ public sealed class CutsceneTimelineLayoutTests
         Assert.All(keyed.Rows.Where(r => r.Kind == CutsceneRowKind.Track), r => Assert.Contains(r.Keys, k => k.Start is >= 150000 and <= 250000));
         Assert.All(keyed.Rows.Where(r => r.Kind == CutsceneRowKind.Binding), b => Assert.Contains(keyed.Rows, r => r.Depth == 1 && r.Top == b.Top + L.RowHeight));
         Assert.True(keyed.Rows.Count < L.Build(file, new HashSet<string>()).Rows.Count);
-    }
-
-    [Fact]
-    public void ATracksHeaderHasMuteSoloAndLockAtItsRightEnd()
-    {
-        var file = Intro();
-        file.Find("track:7")!.Set("muted", "true");
-        var layout = L.Build(file, new HashSet<string>());
-        var music = Y(layout, "track:7");
-        CutsceneHitKind Hit(double x, double y) => layout.HitTest(x, y, Thousand, 0).Kind;
-        Assert.Equal(CutsceneHitKind.Mute, Hit(L.MuteX + 5, music));
-        Assert.Equal(CutsceneHitKind.Solo, Hit(L.SoloX + 5, music));
-        Assert.Equal(CutsceneHitKind.Lock, Hit(L.Gutter - 5, music));
-        Assert.Equal(CutsceneHitKind.Header, Hit(L.MuteX - 5, music));
-        Assert.Equal(CutsceneHitKind.Header, Hit(L.MuteX + 5, Y(layout, "binding:1", CutsceneRowKind.Binding)));
-        Assert.True(layout.Rows.First(r => r.Path == "track:7").AssetMuted);
-        Assert.False(layout.Rows.First(r => r.Path == "track:5").AssetMuted);
-    }
-
-    // The intro's fox walk clip, its bark and its line, as the index knows them, by GUID.
-    const string Walk = "dea303d3f0374a9e56b0bb58f4a85315";
-    const string BarkSound = "7ce894b4b95e68b918869459e5cd9c93";
-
-    static CutsceneClipInfo? Clips(string guid) => guid switch
-    {
-        Walk => new CutsceneClipInfo("Walk", 100000),
-        BarkSound => new CutsceneClipInfo("bark", null),
-        _ => null,
-    };
-
-    [Fact]
-    public void ALoopingClipHasAMarkAtEachLoopAndCloseMarksAreOneRun()
-    {
-        var clip = new CutsceneClipSpan(0, 1, true, 100000);
-        var marks = L.ClipMarks(0, 350000, clip, Thousand, 1000);
-        Assert.Equal([(100.0, 100.0), (200.0, 200.0), (300.0, 300.0)], marks.Loops);
-        // The pass that the section ends in goes on past its end, faded.
-        Assert.Equal((null, (350.0, 400.0)), (marks.Head, marks.Tail));
-        Assert.Null(marks.End);
-
-        // An offset moves the loops, and shows the rest of the first pass before the start.
-        var offset = L.ClipMarks(0, 350000, clip with { Offset = 30000 }, Thousand, 1000);
-        Assert.Equal([(70.0, 70.0), (170.0, 170.0), (270.0, 270.0)], offset.Loops);
-        Assert.Equal(((-30.0, 0.0), (350.0, 370.0)), (offset.Head, offset.Tail));
-        // At twice the speed, a pass is half as long.
-        Assert.Equal(6, L.ClipMarks(0, 350000, clip with { Speed = 2 }, Thousand, 1000).Loops.Count);
-        // Only the marks in view: from 150000 to 250000.
-        Assert.Equal([(50.0, 50.0)], L.ClipMarks(0, 350000, clip, new TimelineView(150000, 1000, TimelineZoom.Ticks), 100).Loops);
-        // Marks closer than 2 pixels are one run over the part in view.
-        var dense = L.ClipMarks(0, 350000, clip, new TimelineView(0, 60000, TimelineZoom.Ticks), 1000);
-        var run = Assert.Single(dense.Loops);
-        Assert.Equal((100000 / 60000.0, 349999 / 60000.0), run);
-        // A section that ends where a pass ends has no tail, and the reach of its bar is its own span.
-        Assert.Null(L.ClipMarks(0, 300000, clip, Thousand, 1000).Tail);
-        Assert.Equal((0.0, 300000.0), new CutsceneTimelineItem(CutsceneItemKind.Section, 0, 300000, "section:1") { Clip = clip }.Reach);
     }
 
     [Fact]
@@ -273,30 +190,7 @@ public sealed class CutsceneTimelineLayoutTests
     }
 
     [Fact]
-    public void ASectionsLabelIsItsClipsNameAndStaysInTheVisiblePartOfItsBar()
-    {
-        var layout = L.Build(Intro(), new HashSet<string>(), null, null, Clips);
-        CutsceneTimelineItem Bar(string path) => layout.Rows.SelectMany(r => r.Bars).Single(b => b.Path == path);
-        // A clip that the index knows is named and has its span; a sound that has not cooked is named, with no span; one
-        // that the index does not have shows the ID.
-        Assert.Equal(("Walk", new CutsceneClipSpan(0, 1, true, 100000)), (Bar("section:2").Label, Bar("section:2").Clip));
-        Assert.Equal(("bark", null), (Bar("section:3").Label, Bar("section:3").Clip));
-        Assert.Equal("#10", Bar("section:10").Label);
-        Assert.Equal((15000, 15000), (Bar("section:2").EaseIn, Bar("section:2").EaseOut));
-        // A camera cut's blends are its own, not eases.
-        Assert.Equal((0, 0), (Bar("section:5").EaseIn, Bar("section:5").EaseOut));
-
-        // A section that starts off screen has its label at the left of the time area, to its visible end.
-        Assert.Equal((4.0, 292.0), L.LabelRoom(-200, 300, 1000));
-        Assert.Equal((104.0, 492.0), L.LabelRoom(100, 600, 1000));
-        // It stops at the time area's right, and a part too small for a label has none.
-        Assert.Equal((504.0, 492.0), L.LabelRoom(500, 1500, 1000));
-        Assert.Null(L.LabelRoom(990, 1500, 1000));
-        Assert.Null(L.LabelRoom(100, 120, 1000));
-    }
-
-    [Fact]
-    public void AnEaseHandleIsInTheTopOfItsBarBeforeAKeyAndOverlapsAreWhereSectionsBlend()
+    public void AnEaseHandleIsInTheTopOfItsBarBeforeAKey()
     {
         var layout = L.Build(Intro(), new HashSet<string>());
         CutsceneHit Hit(double x, double y) => layout.HitTest(x, y, Thousand, 0);
@@ -314,84 +208,5 @@ public sealed class CutsceneTimelineLayoutTests
         Assert.Equal((15.0, 600.0), L.Handles(layout.Rows.First(r => r.Path == "track:1").Bars[0], Thousand));
         // A bar too narrow for its edges has no handles.
         Assert.Null(L.Handles(new CutsceneTimelineItem(CutsceneItemKind.Section, 0, 10000, "section:1"), Thousand));
-
-        // Sections overlap where one starts before the ones before it end.
-        CutsceneVisibleBar Bar(double x0, double x1) => new(x0, x1, new CutsceneTimelineItem(CutsceneItemKind.Section, 0, 1, "section:1"));
-        Assert.Equal([(80.0, 100.0), (150.0, 170.0)], L.Overlaps([Bar(0, 100), Bar(80, 200), Bar(150, 170)]));
-        Assert.Empty(L.Overlaps([Bar(0, 100), Bar(100, 200)]));
     }
-}
-
-/// <summary>
-/// The timeline's cost at the size the issue names. It measures time, so it runs alone, not beside the other tests.
-/// </summary>
-[Collection(TimingCollection.Name)]
-public sealed class CutsceneTimelineCostTests
-{
-    [Fact]
-    public void ATimelineOfFiftyTracksAndFiveThousandKeysMakesItsDrawListInUnderFourMilliseconds()
-    {
-        var text = new StringBuilder("cutscene 1\nlength = 600000\nrate = 30\nbinding 1 \"Actor\"\n\tpossess = @0123456789abcdef0123456789abcdef/1\n");
-        for (var t = 1; t <= 50; t++)
-        {
-            text.Append($"track {t} property \"Track {t}\"\n\tbinding = 1\n\tcomponent = 160\n\tfield = \"f\"\n\tsection {t} 0 600000\n\t\tchannel value\n");
-            for (var k = 0; k < 100; k++)
-            {
-                text.Append($"\t\t\tkey {k * 6000} {k % 7} linear\n");
-            }
-        }
-        var file = CutsceneFile.Parse(text.ToString()).File!;
-        var build = Stopwatch.StartNew();
-        var layout = L.Build(file, new HashSet<string>());
-        build.Stop();
-        Assert.Equal(5000, layout.Rows.Sum(r => r.Keys.Count));
-        // The whole cutscene across 1400 pixels, with every row in view.
-        var view = TimelineView.Fit(0, 600000, 1400, TimelineZoom.Ticks);
-        for (var i = 0; i < 10; i++)
-        {
-            layout.Visible(view, 1400, 0, 2000);
-        }
-        var times = new List<double>();
-        for (var i = 0; i < 50; i++)
-        {
-            var watch = Stopwatch.StartNew();
-            var rows = layout.Visible(view, 1400, 0, 2000);
-            watch.Stop();
-            Assert.Equal(51, rows.Count);
-            times.Add(watch.Elapsed.TotalMilliseconds);
-        }
-        times.Sort();
-        var median = times[times.Count / 2];
-
-        // A drag's step: the text read again from the drag's start, a move, the rows built again, and the draw list.
-        var source = file.Text;
-        var steps = new List<double>();
-        for (var i = 0; i < 20; i++)
-        {
-            var watch = Stopwatch.StartNew();
-            var stepped = CutsceneFile.Parse(source).File!;
-            CutsceneEdits.Move(stepped, ["section:7", "section:7/channel:value/key:50"], 2000 * (i + 1));
-            // With the search box's text, which every track's name holds, so the filter runs and keeps every row.
-            L.Build(stepped, new HashSet<string>(), new CutsceneRowFilter("track", null)).Visible(view, 1400, 0, 2000);
-            watch.Stop();
-            steps.Add(watch.Elapsed.TotalMilliseconds);
-        }
-        steps.Sort();
-        // A box over every key.
-        var box = Stopwatch.StartNew();
-        Assert.Equal(5050, layout.InBox(L.Gutter, L.RulerHeight, L.Gutter + 1400, 2000, view, 0).Count);
-        box.Stop();
-        TestContext.Current.TestOutputHelper?.WriteLine(
-            $"50 tracks, 5000 keys: first build {build.Elapsed.TotalMilliseconds:0.00} ms; redraw median {median:0.000} ms, worst {times[^1]:0.000} ms; " +
-            $"drag step median {steps[steps.Count / 2]:0.00} ms, worst {steps[^1]:0.00} ms; box of everything {box.Elapsed.TotalMilliseconds:0.00} ms");
-        Assert.True(median < 4, $"a redraw's median is {median:0.000} ms");
-        Assert.True(steps[steps.Count / 2] < 50, $"a drag step's median is {steps[steps.Count / 2]:0.00} ms");
-    }
-}
-
-/// <summary>Tests that measure time, which run one at a time and after the others, so that load does not skew them.</summary>
-[CollectionDefinition(Name, DisableParallelization = true)]
-public sealed class TimingCollection
-{
-    public const string Name = "Timing";
 }

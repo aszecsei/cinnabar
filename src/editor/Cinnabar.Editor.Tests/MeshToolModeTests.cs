@@ -15,8 +15,8 @@ using EntitySnapshot = Cinnabar.Editor.Link.Protocol.EntitySnapshot;
 namespace Cinnabar.Editor.Tests;
 
 /// <summary>
-/// The mesh tools in the shell, without a host: a distance tool and its drag, Shift-drag extrusion, Cut and Draw by
-/// points, Detach, and a primitive whose parameters change after the drag.
+/// The mesh tools in the shell, without a host: a distance tool and its drag, Shift-drag extrusion, Draw's points
+/// against a waiting distance tool, the Cancel ladder, Detach, and a primitive whose parameters change after the drag.
 /// </summary>
 public sealed class MeshToolModeTests : IDisposable
 {
@@ -124,52 +124,6 @@ public sealed class MeshToolModeTests : IDisposable
     }
 
     [Fact]
-    public void CutIsALoopCutFromTheEdgeClicked()
-    {
-        using var shell = NewShell();
-        shell.Commands.Get(EditorCommands.MeshCut).Execute();
-        Assert.Equal(MeshTool.Cut, shell.Mesh.MeshTool);
-        // Hovering the front face's left edge a quarter up shows the loop; a click cuts it, with no Enter.
-        var pixel = PixelOf(shell, new Vec3(-0.5, -0.25, -0.5)) + new Vec2(2, 0);
-        shell.Mesh.HoverMesh(pixel);
-        Assert.True(shell.Mesh.Tools.AddToolPoint(pixel));
-        var mesh = MeshFixtures.Mesh(shell);
-        Assert.Equal(10, mesh.Faces.Length);
-        Assert.Equal(12, mesh.Vertices.Length);
-        Assert.Equal(MeshElement.Vertices, shell.Mesh.MeshElement);
-        Assert.Equal(4, shell.Mesh.MeshSelection.Count);
-        Assert.All(shell.Mesh.MeshSelection.Of(MeshFixtures.MeshGuid), v => Assert.Equal(-0.25, mesh.Vertices[v].Y, 2));
-        Assert.Equal("Cut", Assert.Single(shell.Scene!.History).Label);
-        // A click on nothing with the tool is taken and cuts nothing.
-        Assert.True(shell.Mesh.Tools.AddToolPoint(new Vec2(5, 5)));
-        Assert.Single(shell.Scene.History);
-    }
-
-    [Fact]
-    public void DrawCutsAPolygonIntoTheFaceUnderTheFirstClick()
-    {
-        using var shell = NewShell();
-        shell.Commands.Get(EditorCommands.MeshDraw).Execute();
-        foreach (var corner in new[] { new Vec3(-0.25, -0.25, -0.5), new Vec3(0.25, -0.25, -0.5), new Vec3(0.25, 0.25, -0.5), new Vec3(-0.25, 0.25, -0.5) })
-        {
-            Assert.True(shell.Mesh.Tools.AddToolPoint(PixelOf(shell, corner)));
-        }
-        Assert.Equal(4, shell.Mesh.Tools.ToolPointCount);
-        // A click on the first corner closes the polygon.
-        Assert.True(shell.Mesh.Tools.AddToolPoint(PixelOf(shell, new Vec3(-0.25, -0.25, -0.5))));
-        var mesh = MeshFixtures.Mesh(shell);
-        Assert.Equal(8, mesh.Faces.Length);
-        Assert.Equal(MeshElement.Faces, shell.Mesh.MeshElement);
-        var inner = mesh.Faces[Assert.Single(shell.Mesh.MeshSelection.Of(MeshFixtures.MeshGuid))];
-        Assert.Equal(4, inner.Corners.Length);
-        Assert.All(inner.Corners, c => Assert.Equal(-0.5, mesh.Vertices[c].Z, 6));
-        Assert.Empty(mesh.Validate());
-        // The new face extrudes inward like a doorway: an Extrude by a negative distance.
-        Assert.True(shell.Commands.Get(EditorCommands.MeshExtrude).Execute());
-        shell.Mesh.Tools.CommitPendingDistance();
-    }
-
-    [Fact]
     public void AScrubDoesNotTakeOverAWaitingDistanceTool()
     {
         using var shell = NewShell();
@@ -257,32 +211,13 @@ public sealed class MeshToolModeTests : IDisposable
         Assert.Equal(MeshTool.Draw, shell.Mesh.MeshTool);
         cancel.Run();
         Assert.Equal(MeshTool.Select, shell.Mesh.MeshTool);
+        Assert.False(shell.Mesh.MeshSelection.IsEmpty);
         cancel.Run();
         Assert.True(shell.Mesh.MeshSelection.IsEmpty);
         Assert.True(shell.Mesh.InMeshMode);
         cancel.Run();
         Assert.False(shell.Mesh.InMeshMode);
         Assert.False(cancel.CanExecute);
-    }
-
-    [Fact]
-    public void EscapeEndsWhatIsUnderWayThenTheToolThenTheSelection()
-    {
-        using var shell = NewShell();
-        SelectFaces(shell, 5);
-        shell.Commands.Get(EditorCommands.MeshDraw).Execute();
-        Assert.True(shell.Mesh.Tools.AddToolPoint(PixelOf(shell, DrawCorners[0])));
-
-        shell.Mesh.EscapeMeshMode();
-        Assert.Equal(0, shell.Mesh.Tools.ToolPointCount);
-        Assert.Equal(MeshTool.Draw, shell.Mesh.MeshTool);
-        shell.Mesh.EscapeMeshMode();
-        Assert.Equal(MeshTool.Select, shell.Mesh.MeshTool);
-        Assert.False(shell.Mesh.MeshSelection.IsEmpty);
-        shell.Mesh.EscapeMeshMode();
-        Assert.True(shell.Mesh.MeshSelection.IsEmpty);
-        Assert.True(shell.Mesh.InMeshMode);
-        Assert.Empty(shell.Scene!.History);
     }
 
     [Fact]

@@ -780,10 +780,12 @@ a_replaced_file_ends_its_voice :: proc(t: ^testing.T) {
 	voice := play(f.m, sound, plain())
 	stream_step(f.m)
 
-	time.sleep(20 * time.Millisecond)
 	temporary := fmt.tprintf("%s.tmp", file.path)
 	testing.expect(t, os.write_entire_file(temporary, []byte{1, 2, 3}) == nil)
 	testing.expect_value(t, os.rename(temporary, file.path), nil)
+	// The replacement's time is set a minute on, so the test does not wait for the file system's clock to move.
+	later := time.time_add(time.now(), time.Minute)
+	testing.expect(t, os.change_times(file.path, later, later) == nil)
 
 	out := make([]audio.Device_Frame, STREAM_CHUNK_FRAMES + 10, context.temp_allocator)
 	render(f.m, out)
@@ -1171,10 +1173,12 @@ a_replaced_file_ends_a_compressed_voice :: proc(t: ^testing.T) {
 		voice := play(f.m, sound, plain())
 		stream_step(f.m)
 
-		time.sleep(20 * time.Millisecond)
 		temporary := fmt.tprintf("%s.tmp", file.path)
 		testing.expect(t, os.write_entire_file(temporary, []byte{1, 2, 3}) == nil)
 		testing.expect_value(t, os.rename(temporary, file.path), nil)
+		// The replacement's time is set a minute on, so the test does not wait for the file system's clock to move.
+		later := time.time_add(time.now(), time.Minute)
+		testing.expect(t, os.change_times(file.path, later, later) == nil)
 
 		out := make([]audio.Device_Frame, STREAM_RING_FRAMES, context.temp_allocator)
 		render(f.m, out[:STREAM_CHUNK_FRAMES + 10])
