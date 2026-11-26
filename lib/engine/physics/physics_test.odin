@@ -1871,3 +1871,70 @@ a_suspended_character_leaves_the_simulation :: proc(t: ^testing.T) {
 	ticks(f, 60)
 	testing.expectf(t, position(f, e).x > 10.5, "it moves again: %v", position(f, e))
 }
+
+// A wall that a door cut, as the editor's kernel writes it (see docs/editor/mesh-editing.md#cut-meshes), is a mesh
+// collider like any other: a ray through the doorway hits nothing, and a ray beside it hits the wall.
+@(test)
+a_cut_walls_mesh_collider_has_its_opening :: proc(t: ^testing.T) {
+	f := setup(t, quiet = true)
+	defer teardown(t, f)
+	WALL :: format.Guid {
+		1  = 3,
+		15 = 7,
+	}
+	text := #load("../asset/format/testdata/cutters/wall_door_a.cut.mesh", string)
+	source, _, parsed := format.mesh_text_parse(text, context.temp_allocator)
+	testing.expect(t, parsed, "the cut wall parses")
+	bake := format.mesh_bake(source, context.temp_allocator)
+	positions := make([][3]f32, len(bake.vertices), context.temp_allocator)
+	for v, i in bake.vertices {
+		positions[i] = v.position
+	}
+	// The bake's fronts are clockwise, and a collider's are counter-clockwise, as write_mesh winds them.
+	triangles := make([][3]u32, len(bake.indices) / 3, context.temp_allocator)
+	for &tri, i in triangles {
+		tri = {bake.indices[i * 3], bake.indices[i * 3 + 2], bake.indices[i * 3 + 1]}
+	}
+	data := format.mesh_write(
+		{
+			guid = WALL,
+			collision_positions = positions,
+			collision_triangles = triangles,
+			collision_submeshes = make([]u16, len(triangles), context.temp_allocator),
+		},
+		context.temp_allocator,
+	)
+	buffer: [32]u8
+	path := fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(WALL, &buffer))
+	testing.expect(t, os.write_entire_file(path, data) == nil)
+
+	wall := spawn_at(f, {0, 0, 0})
+	mesh_collider(f, wall, .Mesh, WALL)
+	ticks(f, 1)
+	testing.expect(t, ecs.get(&f.world, wall, Physics_Body).body.generation != 0)
+	// The opening is 1.2 m wide about z = 0 and 2.3 m high; the wall is 12 m long and 3 m high.
+	_, through := raycast(
+		&f.physics,
+		&f.world,
+		ecs.position_from_meters({-5, 1, 0}),
+		{1, 0, 0},
+		10,
+	)
+	testing.expect(t, !through, "a ray through the doorway hits nothing")
+	hit, beside := raycast(
+		&f.physics,
+		&f.world,
+		ecs.position_from_meters({-5, 1, 3}),
+		{1, 0, 0},
+		10,
+	)
+	testing.expect(t, beside && hit.entity == wall, "a ray beside the doorway hits the wall")
+	_, lintel := raycast(
+		&f.physics,
+		&f.world,
+		ecs.position_from_meters({-5, 2.6, 0}),
+		{1, 0, 0},
+		10,
+	)
+	testing.expect(t, lintel, "a ray over the doorway hits its lintel")
+}
