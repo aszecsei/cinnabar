@@ -43,6 +43,9 @@ interface IMeshHost
     /// <summary>The cook session, whose finished cooks release the live meshes.</summary>
     CookSession Cook { get; }
 
+    /// <summary>The cut set, whose cut walls draw their results, which mesh mode picks (see docs/editor/mesh-editing.md#editing-a-cut-wall).</summary>
+    CutSet Cuts { get; }
+
     /// <summary>The index of the project's assets.</summary>
     AssetIndex Assets { get; }
 

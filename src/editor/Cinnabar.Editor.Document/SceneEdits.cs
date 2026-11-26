@@ -25,6 +25,10 @@ public static class SceneEdits
     public const ulong ReflectionProbeId = 54;
     /// <summary>The renderer's Clouds setting (see docs/rendering/clouds.md#clouds).</summary>
     public const ulong CloudsId = 55;
+    /// <summary>The physics Rigid_Body (see docs/physics/design.md#components).</summary>
+    public const ulong RigidBodyId = 64;
+    /// <summary>The physics Collider (see docs/physics/design.md#components).</summary>
+    public const ulong ColliderId = 65;
     /// <summary>The level design Mesh_Cutter (see docs/editor/mesh-editing.md#cutters-and-cut-targets).</summary>
     public const ulong MeshCutterId = 176;
     /// <summary>The level design Cut_Target (see docs/editor/mesh-editing.md#cutters-and-cut-targets).</summary>

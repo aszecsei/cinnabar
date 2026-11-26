@@ -1,9 +1,13 @@
+using Avalonia;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Mesh;
 using Cinnabar.Editor.Shell;
+using Cinnabar.Editor.Tools;
+using EntityInfo = Cinnabar.Editor.Link.Protocol.EntityInfo;
+using EntitySnapshot = Cinnabar.Editor.Link.Protocol.EntitySnapshot;
 using Welcome = Cinnabar.Editor.Link.Cook.Welcome;
 using Wire = Cinnabar.Editor.Link.Protocol;
 
@@ -275,5 +279,206 @@ public sealed class CutSetTests : IDisposable
 
         drag.Commit();
         Assert.Equal(before + 1, Sent());
+    }
+
+    // A wall with a collider: a bare one is the default box.
+    static string ColliderWall(ulong id, string name, string collider = "") =>
+        WallEntity(id, name).TrimEnd('\n') + "\ncomponent 65 Collider\n" + collider + "\n";
+
+    // A box cutter of the scene, at a point of the wall, 0.5 m on a side.
+    static string Window(ulong id, double x, double y, bool cutsCollision) =>
+        $"entity {id:x16}\nname = \"Window\"\n" +
+        $"component 1 Transform\n\tposition = [{(long)(x * Document.Pose.Unit)}, {(long)(y * Document.Pose.Unit)}, 0]\n\trotation = [0, 0, 0, 1]\n\tscale = [1, 1, 1]\n" +
+        $"component 176 Mesh_Cutter\n\textents = [0.25, 0.25, 0.5]\n\tcuts_collision = {(cutsCollision ? "true" : "false")}\n\n";
+
+    const ulong WindowId = 0x0000000000000007;
+
+    [Fact]
+    public void ACutMakesItsWallsColliderAMeshOfTheResultInTheSameEntry()
+    {
+        using var shell = NewShell(ColliderWall(WallId, "Wall"));
+
+        Assert.True(shell.CreateInstance(DoorPrefab, 0));
+        Assert.Single(shell.Scene!.History);
+        var wall = Entity(shell, WallId);
+        var result = Field(wall, SceneEdits.MeshRendererId, "mesh");
+        Assert.Equal("Mesh", Field(wall, SceneEdits.ColliderId, "shape"));
+        Assert.Equal(result, Field(wall, SceneEdits.ColliderId, "mesh"));
+
+        // Deleting the last door leaves a mesh collider of the source.
+        var door = shell.Scene.Expanded.Flat.Entities.Single(e => e.Name == "Door" && e.Parent == 0).Id;
+        Assert.True(shell.Edit("Delete Door", [.. PrefabEdits.DestroyTree(shell.Scene, door)]));
+        Assert.Equal(WallMesh, Field(Entity(shell, WallId), SceneEdits.ColliderId, "mesh"));
+
+        shell.Scene.Undo();
+        Assert.Equal(result, Field(Entity(shell, WallId), SceneEdits.ColliderId, "mesh"));
+        shell.Scene.Undo();
+        wall = Entity(shell, WallId);
+        Assert.Null(Field(wall, SceneEdits.ColliderId, "shape"));
+        Assert.Null(Field(wall, SceneEdits.ColliderId, "mesh"));
+    }
+
+    [Fact]
+    public void ACutterThatSparesCollisionGivesTheColliderAResultOfItsOwn()
+    {
+        using var shell = NewShell(ColliderWall(WallId, "Wall") + Instance(DoorId) + Window(WindowId, 1.5, 2.25, cutsCollision: false));
+
+        var wall = Entity(shell, WallId);
+        var result = Field(wall, SceneEdits.MeshRendererId, "mesh")!;
+        var collision = Field(wall, SceneEdits.ColliderId, "mesh")!;
+        Assert.NotEqual(result, collision);
+        Assert.NotEqual(WallMesh, collision);
+        // The collider has the door's opening and not the window's.
+        Assert.Equal(Expected(0), MeshFile.Write(shell.Mesh.Meshes.Find(collision)!.Data));
+        Assert.NotEqual(Expected(0), ResultOf(shell, WallId));
+        Assert.Equal(collision, shell.Cuts.StateOf(shell.Scene!, WallId)!.Collision);
+
+        // Saved, its file is a collision result's.
+        Assert.True(shell.SaveScene());
+        Assert.Single(Directory.GetFiles(_temp.Combine("level_meshes"), "*.collision.cut.mesh"));
+
+        // Without the window, the collider follows the render result, and its own result closes.
+        Assert.True(shell.Edit("Delete Window", [.. PrefabEdits.DestroyTree(shell.Scene!, WindowId)]));
+        wall = Entity(shell, WallId);
+        Assert.Equal(Field(wall, SceneEdits.MeshRendererId, "mesh"), Field(wall, SceneEdits.ColliderId, "mesh"));
+        Assert.Null(shell.Mesh.Meshes.Find(collision));
+        shell.Scene!.Undo();
+        Assert.Equal(collision, Field(Entity(shell, WallId), SceneEdits.ColliderId, "mesh"));
+        // Its saved file holds the cut again, so the host draws that.
+        Assert.Equal(collision, shell.Cuts.StateOf(shell.Scene, WallId)!.Collision);
+        Assert.Null(shell.Mesh.Meshes.Find(collision));
+    }
+
+    [Fact]
+    public void ACutNeverWritesIntoAColliderMeshOfTheDesignersOwn()
+    {
+        const string Own = "a0000000000000000000000000000002";
+        var hull = Primitives.Block(new Vec3(-2, 0, -0.2), new Vec3(2, 3, 0.2));
+        Directory.CreateDirectory(_temp.Path);
+        File.WriteAllText(_temp.Combine("hull.mesh"), MeshFile.Write(hull));
+        using var shell = NewShell(ColliderWall(WallId, "Wall", $"\tshape = Mesh\n\tmesh = ${Own}\n") + Window(WindowId, 1.5, 2.25, cutsCollision: false), index: false);
+        Index(shell, TestAssets.Make(Own, AssetKind.Mesh, "hull.mesh"));
+
+        // A window that spares collision leaves the collider alone, and a door then gives it a result of its own.
+        Assert.Equal(Own, Field(Entity(shell, WallId), SceneEdits.ColliderId, "mesh"));
+        Assert.True(shell.CreateInstance(DoorPrefab, 0));
+        var collision = Field(Entity(shell, WallId), SceneEdits.ColliderId, "mesh");
+        Assert.NotEqual(Own, collision);
+        Assert.Null(shell.Mesh.Meshes.Find(Own));
+        Assert.Equal(MeshFile.Write(hull), File.ReadAllText(_temp.Combine("hull.mesh")));
+    }
+
+    [Fact]
+    public void APrimitiveColliderThatNoCutterCutsSaysItIgnoresTheCut()
+    {
+        using var shell = NewShell(ColliderWall(WallId, "Wall") + Window(WindowId, 0, 1.5, cutsCollision: false));
+
+        Assert.Null(Field(Entity(shell, WallId), SceneEdits.ColliderId, "shape"));
+        Assert.Contains(shell.ProblemsOf(WallId), p => p.StartsWith("the box ignores the cut"));
+
+        Assert.True(shell.Edit("Cut Collision", new SetField(WindowId, SceneEdits.MeshCutterId, "cuts_collision", SceneValue.Of(true))));
+        Assert.Equal("Mesh", Field(Entity(shell, WallId), SceneEdits.ColliderId, "shape"));
+        Assert.Empty(shell.ProblemsOf(WallId));
+    }
+
+    [Fact]
+    public void AStaticColliderInADoorsOpeningPlugsIt()
+    {
+        const string Plugged = "d0000000000000000000000000000003";
+        string Leaf(string body) => Door +
+            "\nentity 1000000000000003\nname = \"Leaf\"\nparent = @1000000000000001\ncomponent 2 Local_Transform\n\toffset = [0, 1, 0]\n" +
+            "\tscale = [1, 2, 0.05]\ncomponent 65 Collider\n" + body;
+        const string Swinging = "d0000000000000000000000000000004";
+        Directory.CreateDirectory(_temp.Path);
+        File.WriteAllText(_temp.Combine("plugged.prefab"), Leaf(""));
+        File.WriteAllText(_temp.Combine("swinging.prefab"), Leaf("component 64 Rigid_Body\n\tmotion = Kinematic\n"));
+        using var shell = NewShell(WallEntity(WallId, "Wall") +
+            $"entity {DoorId:x16}\nname = \"Door\"\nprefab = ${Plugged}\n" + Pose() + "\n" +
+            $"entity {OtherDoorId:x16}\nname = \"Door\"\nprefab = ${Swinging}\n" + Pose(10) + "\n", index: false);
+        Index(shell, TestAssets.Make(Plugged, AssetKind.Prefab, "plugged.prefab"), TestAssets.Make(Swinging, AssetKind.Prefab, "swinging.prefab"));
+
+        Assert.Contains(shell.ProblemsOf(ScenePath.Id(DoorId, OpeningNode)), p => p.Contains("the static collider of Leaf plugs the opening"));
+        // A kinematic leaf does not.
+        Assert.Empty(shell.ProblemsOf(ScenePath.Id(OtherDoorId, OpeningNode)));
+    }
+
+    const double Width = 1600;
+    const double Height = 900;
+    const ulong WallHandle = 1UL << 32;
+
+    // Mesh mode on a wall that a door cuts, seen from 5 m in front of it, 1.5 m up.
+    EditorShell InMeshModeOnACutWall()
+    {
+        var shell = NewShell(WallEntity(WallId, "Wall") + Instance(DoorId));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(WallHandle, "Wall", WallId, 1, 0, true, [1, 33, 177])]));
+        shell.Viewports[0].Session.Show(new PixelSize((int)Width, (int)Height));
+        shell.Camera.Place([0, (long)(1.5 * Document.Pose.Unit), (long)(-5 * Document.Pose.Unit)], 0, 0);
+        shell.Selection.Select(WallHandle);
+        shell.Mesh.EnterMeshMode();
+        Assert.True(shell.Mesh.InMeshMode);
+        return shell;
+    }
+
+    // The pixel of a point of the wall's space.
+    static Vec2 At(EditorShell shell, double x, double y, double z) =>
+        shell.Camera.Project(new Vec3(x, y - 1.5, z + 5), Width, Height)!.Value;
+
+    // The face of a mesh whose corners all lie at z.
+    static int FaceAt(MeshData mesh, double z) =>
+        Enumerable.Range(0, mesh.Faces.Length).Single(f => mesh.Faces[f].Corners.All(c => Math.Abs(mesh.Vertices[c].Z - z) < 1e-9));
+
+    [Fact]
+    public void MeshModeOnACutWallEditsItsSourceAndPicksItsResult()
+    {
+        using var shell = InMeshModeOnACutWall();
+        Assert.Equal([WallMesh], shell.Mesh.EditedMeshes.Keys);
+        Assert.NotNull(shell.Cuts.MapOf(shell.Scene!, WallId));
+
+        // Beside the hole, a fragment of the front is the source's front face.
+        shell.PickAt(At(shell, 1.5, 1.5, -0.125), SelectMode.Replace);
+        Assert.Equal(new MeshItem(WallMesh, FaceAt(Wall, -0.125)), Assert.Single(shell.Mesh.MeshSelection.Items));
+
+        // A jamb that the door made selects nothing, and says what made it.
+        var jamb = At(shell, 0.5, 1.5, 0);
+        shell.Mesh.HoverMesh(jamb);
+        Assert.Contains("made by Opening", shell.Mesh.MeshStatus);
+        shell.PickAt(jamb, SelectMode.Replace);
+        Assert.True(shell.Mesh.MeshSelection.IsEmpty);
+        shell.Mesh.HoverMesh(At(shell, 1.5, 1.5, -0.125));
+        Assert.DoesNotContain("made by", shell.Mesh.MeshStatus);
+    }
+
+    [Fact]
+    public void AnEditOfACutWallsSourceCutsItAgainInTheSameEntry()
+    {
+        using var shell = InMeshModeOnACutWall();
+        var entries = shell.Scene!.History.Count;
+        var hash = MeshCutters.HashOf(Entity(shell, WallId));
+        var wider = Primitives.Block(new Vec3(-3, 0, -0.125), new Vec3(3, 3, 0.125));
+
+        Assert.True(shell.Mesh.EditMesh("Widen", WallMesh, wider));
+        Assert.Equal(entries + 1, shell.Scene.History.Count);
+        Assert.NotEqual(hash, MeshCutters.HashOf(Entity(shell, WallId)));
+        var cut = MeshBoolean.Subtract(wider, Document.Pose.Identity, Primitives.Block(new Vec3(-0.5, -1, -0.5), new Vec3(0.5, 1, 0.5)),
+            new Pose([0, (long)Document.Pose.Unit, 0], Quat.Identity, [1, 1, 1]), 0).Mesh;
+        Assert.Equal(MeshFile.Write(cut), ResultOf(shell, WallId));
+
+        shell.Scene.Undo();
+        Assert.Equal(hash, MeshCutters.HashOf(Entity(shell, WallId)));
+        Assert.Equal(Expected(0), ResultOf(shell, WallId));
+    }
+
+    [Fact]
+    public void ARefusedCutWallPicksItsSourceAsItIs()
+    {
+        using var shell = InMeshModeOnACutWall();
+        // Without its top, the source is not solid, so the cut is refused and keeps its last good result.
+        var open = MeshTools.Delete(Wall, MeshElement.Faces, [Enumerable.Range(0, Wall.Faces.Length).Single(f => Wall.Faces[f].Corners.All(c => Wall.Vertices[c].Y == 3))]);
+        Assert.True(shell.Mesh.EditMesh("Delete Top", WallMesh, open));
+        Assert.IsType<CutState.Refused>(shell.Cuts.StateOf(shell.Scene!, WallId));
+        Assert.Null(shell.Cuts.MapOf(shell.Scene!, WallId));
+
+        // The pick is of the source, whose faces the old map does not know.
+        Assert.Equal(new MeshItem(WallMesh, FaceAt(open, -0.125)), shell.Mesh.MeshElementAt(At(shell, 0, 1.5, -0.125)));
     }
 }

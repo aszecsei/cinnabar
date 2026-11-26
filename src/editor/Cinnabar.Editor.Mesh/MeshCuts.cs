@@ -48,7 +48,8 @@ public sealed record CutInputs(SceneEntity Target, string Source, MeshData Sourc
     // A mesh's file text, kept for each snapshot, since every step of every edit hashes the scene's targets again.
     static readonly ConditionalWeakTable<MeshData, string> Texts = [];
 
-    static string Text(MeshData mesh) => Texts.GetValue(mesh, MeshFile.Write);
+    /// <summary>A mesh's file text, kept for each snapshot.</summary>
+    public static string Text(MeshData mesh) => Texts.GetValue(mesh, MeshFile.Write);
 
     // To a tenth of a micrometer, far under the plane tolerance, so noise in the last bit of a double does not count.
     static string Number(double v) => Math.Round(v, 7).ToString("R", CultureInfo.InvariantCulture);
@@ -63,13 +64,21 @@ public abstract record CutResult
     public sealed record Uncut : CutResult;
 
     /// <summary>
-    /// The source with every cutter subtracted, in the target's space, and the slots whose material the cut set, which
-    /// the target's <c>Mesh_Renderer</c> draws.
+    /// The source with every cutter subtracted, in the target's space, the slots whose material the cut set, which
+    /// the target's <c>Mesh_Renderer</c> draws, and the map of the mesh back onto the source.
     /// </summary>
-    public sealed record Cut(MeshData Mesh, IReadOnlyDictionary<int, string> Slots) : CutResult;
+    public sealed record Cut(MeshData Mesh, IReadOnlyDictionary<int, string> Slots, CutMap Map) : CutResult;
 
     /// <summary>A cutter that the boolean refused, or a ninth material, with the reason.</summary>
     public sealed record Refused(string Reason) : CutResult;
+}
+
+/// <summary>What a cut target's <c>Collider</c> follows: see <see cref="MeshCuts.CollisionOf"/>.</summary>
+public enum CollisionCut
+{
+    Source,
+    Render,
+    Own,
 }
 
 /// <summary>Derives cut targets' meshes from their sources and their cutters (see docs/editor/mesh-editing.md#cut-meshes).</summary>
@@ -117,12 +126,13 @@ public static class MeshCuts
         : cutter.Mesh != "" ? meshOf(cutter.Mesh) : null;
 
     /// <summary>
-    /// The source with each cutter subtracted in turn, as Carve does (see docs/editor/mesh-editing.md#booleans). The
-    /// faces that a cutter makes take its cap slot (<see cref="CapSlots"/>).
+    /// The source with each cutter subtracted in turn, as Carve does (see docs/editor/mesh-editing.md#booleans), or with
+    /// those that <paramref name="only"/> passes. The faces that a cutter makes take its cap slot (<see cref="CapSlots"/>).
     /// </summary>
-    public static CutResult Derive(CutInputs inputs)
+    public static CutResult Derive(CutInputs inputs, Func<CutterInput, bool>? only = null)
     {
-        if (inputs.Cutters.Count == 0)
+        var cutters = Enumerable.Range(0, inputs.Cutters.Count).Where(i => only?.Invoke(inputs.Cutters[i]) ?? true).ToList();
+        if (cutters.Count == 0)
         {
             return new CutResult.Uncut();
         }
@@ -132,8 +142,10 @@ public static class MeshCuts
             return new CutResult.Refused(refusal!);
         }
         var mesh = inputs.SourceMesh;
+        // Each face's source face, or ~i for a face that cutter i made, composed over the steps.
+        var origin = Enumerable.Range(0, mesh.Faces.Length).ToArray();
         var named = new Dictionary<int, string>();
-        for (var i = 0; i < inputs.Cutters.Count; i++)
+        foreach (var i in cutters)
         {
             var cutter = inputs.Cutters[i];
             var result = MeshBoolean.Subtract(mesh, inputs.Pose, cutter.Volume, cutter.Pose, slots[i]);
@@ -145,6 +157,7 @@ public static class MeshCuts
             {
                 continue;
             }
+            origin = [.. result.SourceFace.Select(f => f >= 0 ? origin[f] : ~i)];
             var material = CapMaterial(cutter);
             mesh = material != "" ? result.Mesh.With(materials: result.Mesh.Materials.SetItem(slots[i], material)) : result.Mesh;
             if (material != "")
@@ -152,8 +165,17 @@ public static class MeshCuts
                 named[slots[i]] = material;
             }
         }
-        return new CutResult.Cut(mesh, named);
+        var labels = inputs.Cutters.Select(c => c.Entity.Name.Length > 0 ? c.Entity.Name : $"{c.Entity.Id:x16}").ToList();
+        return new CutResult.Cut(mesh, named, new CutMap(inputs.SourceMesh, mesh, origin, labels));
     }
+
+    /// <summary>
+    /// What a target's <c>Collider</c> follows: the source, since no cutter cuts collision; the render result, since
+    /// every cutter does; or a result of its own, cut by only the cutters that do.
+    /// </summary>
+    public static CollisionCut CollisionOf(CutInputs inputs) =>
+        inputs.Cutters.Count(c => c.Fields.CutsCollision) is var n && n == 0 ? CollisionCut.Source
+        : n == inputs.Cutters.Count ? CollisionCut.Render : CollisionCut.Own;
 
     /// <summary>
     /// The slot of each cutter's cap faces, by the face-material rules: the source's slot that names its material,

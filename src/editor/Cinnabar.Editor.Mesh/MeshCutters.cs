@@ -122,6 +122,117 @@ public static class MeshCutters
         return result;
     }
 
+    /// <summary>
+    /// The entities of a cutter's own instance whose static collider meets its volume, which would plug the opening for
+    /// physics and the navmesh bake (see docs/content/kinds/nav-meshes.md#input), in the scene's order. A collider is
+    /// static as the bake reads it: not a sensor, on an entity with no Rigid_Body, or whose own or nearest ancestor's
+    /// Rigid_Body is Static. Its bounds are a box around its shape, at its offset, whatever its rotation.
+    /// </summary>
+    public static IReadOnlyList<SceneEntity> Plugs(Expansion expansion, SceneEntity cutter, Func<string, MeshData?> meshOf)
+    {
+        var flat = expansion.Flat;
+        if (cutter.Components.Find(c => c.Id == SceneEdits.MeshCutterId) is not { } component
+            || SceneEdits.WorldPose(flat, cutter) is not { } cutterPose
+            || OwnInstance(expansion, cutter.Id) is not { } own
+            || Bounds(CutterFields.Of(component), meshOf) is not var (cutMin, cutMax))
+        {
+            return [];
+        }
+        var result = new List<SceneEntity>();
+        foreach (var entity in flat.Entities)
+        {
+            if (entity.Id == cutter.Id || expansion.InstanceOf(entity.Id) is not { } inst || !StartsWith(inst.Path, own)
+                || entity.Components.Find(c => c.Id == SceneEdits.ColliderId) is not { } collider
+                || Bool(collider, "sensor") || !IsStatic(flat, entity)
+                || ColliderBounds(collider, meshOf) is not var (min, max)
+                || SceneEdits.WorldPose(flat, entity) is not { } pose)
+            {
+                continue;
+            }
+            var toCutter = MeshPlacement.Between(pose, cutterPose);
+            var corners = Enumerable.Range(0, 8).Select(i => toCutter.Apply(new Vec3(
+                (i & 1) == 0 ? min.X : max.X, (i & 2) == 0 ? min.Y : max.Y, (i & 4) == 0 ? min.Z : max.Z)));
+            var (aMin, aMax) = MeshBoolean.Bounds(corners);
+            if (MeshBoolean.Overlap(aMin, aMax, cutMin, cutMax))
+            {
+                result.Add(entity);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>A Collider's shape, as <c>asset_format.Collider_Shape</c> names it: <c>Box</c> when the scene leaves it out.</summary>
+    public static string ColliderShape(SceneComponent collider) =>
+        collider.Fields.Find(f => f.Name == "shape")?.Value is { Kind: SceneValueKind.Name } v ? v.Text : "Box";
+
+    /// <summary>What a Collider's <c>mesh</c> names, or null.</summary>
+    public static string? ColliderMesh(SceneComponent collider) => Asset(collider.Fields.Find(f => f.Name == "mesh")?.Value);
+
+    // Whether an entity's collider is part of a static body, as the navmesh bake's nav_static reads it: its own
+    // Rigid_Body's, or else its nearest ancestor's, is Static, or none has one. A Rigid_Body's motion is Dynamic when
+    // the scene leaves it out.
+    static bool IsStatic(Scene flat, SceneEntity entity)
+    {
+        var current = entity;
+        for (var depth = 0; depth < 64 && current != null; depth++)
+        {
+            if (current.Components.Find(c => c.Id == SceneEdits.RigidBodyId) is { } body)
+            {
+                return body.Fields.Find(f => f.Name == "motion")?.Value is { Kind: SceneValueKind.Name, Text: "Static" };
+            }
+            current = current.Parent != 0 ? flat.Find(current.Parent) : null;
+        }
+        return true;
+    }
+
+    // A box around a collider's shape in its entity's space before its scale, as DEFAULT_COLLIDER sizes it. A rotated
+    // collider takes the box around its box turned any way.
+    static (Vec3 Min, Vec3 Max)? ColliderBounds(SceneComponent collider, Func<string, MeshData?> meshOf)
+    {
+        Vec3 half;
+        var center = Vector(collider, "offset") ?? Vec3.Zero;
+        switch (ColliderShape(collider))
+        {
+            case "Sphere":
+                var r = Number(collider, "radius") ?? 0.5;
+                half = new Vec3(r, r, r);
+                break;
+            case "Capsule" or "Cylinder":
+                var radius = Number(collider, "radius") ?? 0.5;
+                half = new Vec3(radius, (Number(collider, "height") ?? 2) / 2, radius);
+                break;
+            case "Mesh" or "Convex_Mesh":
+                if (ColliderMesh(collider) is not { } guid || meshOf(guid) is not { Vertices.Length: > 0 } mesh)
+                {
+                    return null;
+                }
+                var (mMin, mMax) = MeshBoolean.Bounds(mesh.Vertices);
+                center += (mMin + mMax) / 2;
+                half = (mMax - mMin) / 2;
+                break;
+            case "Height_Field":
+                return null;
+            default:
+                half = (Vector(collider, "size") ?? new Vec3(1, 1, 1)) / 2;
+                break;
+        }
+        if (collider.Fields.Any(f => f.Name == "rotation"))
+        {
+            var l = half.Length;
+            half = new Vec3(l, l, l);
+        }
+        return (center - half, center + half);
+    }
+
+    static Vec3? Vector(SceneComponent c, string name) =>
+        c.Fields.Find(f => f.Name == name)?.Value is { Kind: SceneValueKind.Number, Numbers.Count: 3 } v
+            ? new Vec3(v.Numbers[0].Float, v.Numbers[1].Float, v.Numbers[2].Float) : null;
+
+    static double? Number(SceneComponent c, string name) =>
+        c.Fields.Find(f => f.Name == name)?.Value is { Kind: SceneValueKind.Number, Numbers.Count: 1 } v ? v.Numbers[0].Float : null;
+
+    static bool Bool(SceneComponent c, string name) => c.Fields.Find(f => f.Name == name)?.Value is { Kind: SceneValueKind.Bool, Bool: true };
+
     // The path of the innermost instance that holds an entity, which its own instance's entities start with: the
     // instance that it is the root of, or the one that its prefab places it in. Null for an entity of the scene. An
     // instance whose root is no flat entity is a variant's base, whose root is the variant's: the variant is the
