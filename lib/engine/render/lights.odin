@@ -225,9 +225,8 @@ Light_Frame :: struct {
 	binned_probes:     bool,
 	constants:         gpu.Upload,
 	zero:              gpu.Upload,
-	// The hits' light grid (see light_grid_upload), made at its first request in the frame.
-	grid:              gpu.Upload,
-	grid_made:         bool,
+	// The hits' light grid (see light_grid_upload): nil until its first request in the frame.
+	grid:              Light_Grid_Upload,
 	clusters:          Buffer,
 	indices:           Buffer,
 	counter:           Buffer,

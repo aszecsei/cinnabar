@@ -267,20 +267,32 @@ light_grid_lights :: proc(grid: Light_Grid, p: [3]f32, allocator := context.allo
 	return found[:]
 }
 
+// Light_Grid_Upload is a frame's light grid in the upload ring once it is made, or Light_Grid_Failed when its upload
+// failed. A frame's is nil until its first request.
+Light_Grid_Upload :: union {
+	gpu.Upload,
+	Light_Grid_Failed,
+}
+
+Light_Grid_Failed :: struct {}
+
 // light_grid_upload is the frame's light grid in the upload ring, made at its first request in the frame, or false
 // when the upload fails.
 @(private)
 light_grid_upload :: proc(f: ^Frame) -> (gpu.Upload, bool) {
 	lf := f.lights
-	if lf.grid_made {
-		return lf.grid, lf.grid.data != nil
+	switch made in lf.grid {
+	case gpu.Upload:
+		return made, true
+	case Light_Grid_Failed:
+		return {}, false
 	}
-	lf.grid_made = true
 	allocator := f.renderer.platform.frame_allocator
 	grid := build_light_grid(lf.records[:], f.view.position, allocator)
 	size := int(grid.header.lists_first) + len(grid.lists) * 4
 	upload, ok := f.renderer.platform.gpu_upload(size, 16)
 	if !ok {
+		lf.grid = Light_Grid_Failed{}
 		return {}, false
 	}
 	(^Light_Grid_Header)(raw_data(upload.data))^ = grid.header

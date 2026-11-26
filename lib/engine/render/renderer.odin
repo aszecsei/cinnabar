@@ -443,6 +443,8 @@ Frame :: struct {
 	no_meshlet_hierarchy:     bool,
 	scene_frame:              ^Scene_Frame,
 	lights:                   ^Light_Frame,
+	// The emissive triangles that the hits' light samples this frame, or nil (see add_gi_emitter_passes).
+	emitters:                 ^Gi_Emitter_Frame,
 	shadows:                  ^Shadow_Frame,
 	// The ray scene, when a feature requested it this frame (see request_ray_scene).
 	ray_scene:                ^Ray_Scene_Frame,
@@ -943,6 +945,8 @@ draw_view :: proc(
 	// The cloud shadow map first: the passes that light the world from here on read it.
 	add_cloud_shadow_passes(f)
 	add_ao_passes(f, settings.ambient_occlusion)
+	// The emitters before every pass that lights hits, which samples them.
+	f.emitters = add_gi_emitter_passes(f)
 	add_gi_world_probes(f)
 	add_gi_passes(f)
 	add_screen_reflection_passes(f)

@@ -22,7 +22,8 @@ static const uint HIT_MAX_SUBMESHES = 16;
 
 // Hit_Lights are what a hit's light needs beyond the frame constants: the ray scene that the shadow rays trace, with
 // its hit table, whose translucent submeshes they pass through; the light grid in a buffer at an offset, whose punctual
-// lights the hits pick from after the directional ones, the lights that each hit weighs, and the seed of its choices.
+// lights the hits pick from after the directional ones, with the emitters' samples, which hold emitter_count triangles,
+// or none for 0, the lights that each hit weighs, and the seed of its choices.
 struct Hit_Lights {
 	uint accel;
 	uint hit_instances;
@@ -33,6 +34,8 @@ struct Hit_Lights {
 	uint light_grid_offset;
 	uint candidates;
 	uint seed;
+	uint emitters;
+	uint emitter_count;
 };
 
 // hit_translucent is whether a primitive of a slot is a translucent submesh's, by the hit table.
@@ -111,7 +114,7 @@ float4 hit_light(Hit_Record hit, uint surfaces, uint ray, Hit_Lights lights, Pro
 			direct += hit_direct(lights, load_light(i), origin, normal);
 		}
 		uint state = lowbias32(lights.seed ^ lowbias32(ray));
-		Hit_Choice choice = pick_hit_light(lights.light_grid, lights.light_grid_offset, lights.candidates, origin, normal, state);
+		Hit_Choice choice = pick_hit_light(lights.light_grid, lights.light_grid_offset, lights.candidates, lights.emitters, lights.emitter_count, origin, normal, state);
 		if (choice.weight > 0) {
 			direct += choice.light * choice.weight * hit_shadow(lights, origin, choice.direction, choice.distance);
 		}

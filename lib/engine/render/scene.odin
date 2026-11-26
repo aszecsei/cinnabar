@@ -798,6 +798,8 @@ Scene_Frame :: struct {
 	hit_submeshes:      gpu.Upload,
 	hit_instance_count: int,
 	hit_bins:           []u32,
+	// Each hit_submeshes record's key, which the GI's emitters follow from frame to frame.
+	hit_keys:           []Hit_Entry_Key,
 	instances:          Buffer,
 	arguments:          Buffer,
 	mesh_arguments:     Buffer,
@@ -1016,6 +1018,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	if tracing {
 		hits.instances = make([]Hit_Instance, MAX_INSTANCES, r.platform.frame_allocator)
 		hits.submeshes = make([dynamic]Hit_Submesh, r.platform.frame_allocator)
+		hits.keys = make([dynamic]Hit_Entry_Key, r.platform.frame_allocator)
 	}
 
 	it := ecs.query_iter(w, r.meshes.query)
@@ -1105,6 +1108,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 					r.materials.pipelines[:],
 					hit_pipeline_ready,
 					r.platform,
+					e,
 				) {
 					mask |= RAY_MASK_SURFACES
 				}
@@ -1381,6 +1385,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	if tracing {
 		sf.hit_instances, sf.hit_submeshes, sf.hit_instance_count =
 			hit_instance_upload, hit_submesh_upload, int(s.high)
+		sf.hit_keys = hits.keys[:]
 		// The fallback's bin is always dispatched: a hit of a submesh that has no record takes it too.
 		bins := make([dynamic]u32, r.platform.frame_allocator)
 		for used, bin in hits.used {

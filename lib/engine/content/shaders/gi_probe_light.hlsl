@@ -20,6 +20,8 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	lights.light_grid_offset = push.light_grid_offset;
 	lights.candidates = push.candidates;
 	lights.seed = push.seed;
+	lights.emitters = push.emitter_samples;
+	lights.emitter_count = push.emitter_count;
 	float4 result = hit_light(load_hit(push.hits, ray), push.surfaces, ray, lights, frame_probe_grid());
 	cn_rw_buffer(push.rays).Store<float4>(ray * 16, result);
 }

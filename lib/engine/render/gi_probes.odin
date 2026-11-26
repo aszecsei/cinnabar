@@ -182,6 +182,8 @@ Probe_Push :: struct {
 	hit_instances_offset: u32,
 	hit_submeshes:        u32,
 	hit_submeshes_offset: u32,
+	emitter_samples:      u32,
+	emitter_count:        u32,
 }
 
 #assert(size_of(Probe_Push) <= 128)
@@ -216,6 +218,7 @@ Hit_Light_Inputs :: struct {
 	light_grid: gpu.Upload,
 	candidates: u32,
 	seed:       u32,
+	emitters:   ^Gi_Emitter_Frame,
 	lit:        History,
 }
 
@@ -595,6 +598,7 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 		light_grid = light_grid,
 		candidates = params.candidates,
 		seed       = p.frame,
+		emitters   = f.emitters,
 		lit        = lit,
 	}
 	ray_count := u32(len(pf.jobs)) * params.rays
@@ -671,6 +675,9 @@ add_hit_light_passes :: proc(
 	read(g, pass, hits)
 	read(g, pass, surfaces)
 	declare_cloud_shadow(f, pass)
+	if hit_emitters(inputs) {
+		read(g, pass, inputs.emitters.samples)
+	}
 	if inputs.radiance != 0 {
 		read(g, pass, inputs.radiance)
 		read(g, pass, inputs.irradiance)
@@ -697,6 +704,12 @@ add_hit_light_passes :: proc(
 	}
 }
 
+// hit_emitters is whether a batch\'s hits sample emissive triangles this frame.
+@(private)
+hit_emitters :: proc(inputs: ^Hit_Light_Inputs) -> bool {
+	return inputs.emitters != nil && inputs.emitters.triangles > 0
+}
+
 // hit_light_inputs are what lights a client's hits other than the probes' own: the frame's world probes where they run,
 // and otherwise a grid of no levels, whose hits take the ambient light; the frame's light grid, with the lights that
 // each hit weighs and the seed of its choices; and a lit scene of last frame. ok is false when an upload fails.
@@ -716,6 +729,7 @@ hit_light_inputs :: proc(
 		light_grid = light_grid_upload(f) or_return,
 		candidates = candidates,
 		seed       = seed,
+		emitters   = f.emitters,
 		lit        = lit,
 	}
 	if f.gi != nil && f.gi.probes != nil {
@@ -788,6 +802,10 @@ run_probe_pass :: proc(ctx: ^Pass_Context) {
 		hit_instances_offset = f.scene_frame.hit_instances.offset,
 		hit_submeshes        = gpu.read_index(f.scene_frame.hit_submeshes.buffer),
 		hit_submeshes_offset = f.scene_frame.hit_submeshes.offset,
+	}
+	if hit_emitters(inputs) {
+		push.emitter_samples = gpu.read_index(gpu_buffer(g, inputs.emitters.samples))
+		push.emitter_count = inputs.emitters.triangles
 	}
 	if step.pass == .Update {
 		push.exposure = gpu.read_index(gpu_buffer(g, f.exposure))

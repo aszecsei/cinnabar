@@ -64,13 +64,14 @@ Gi_Settings :: struct {
 // Gi_Passes is the global illumination's pipelines and the scratch that its passes share, in the Renderer. What a
 // technique keeps for a camera from frame to frame is in Gi_State.
 Gi_Passes :: struct {
-	trace:  Shader_Pipeline,
-	merge:  Shader_Pipeline,
-	gather: Shader_Pipeline,
-	lit:    Shader_Pipeline,
-	probes: Gi_Probes,
-	split:  Gi_Split,
-	voxel:  Gi_Voxel,
+	trace:    Shader_Pipeline,
+	merge:    Shader_Pipeline,
+	gather:   Shader_Pipeline,
+	lit:      Shader_Pipeline,
+	probes:   Gi_Probes,
+	emitters: Gi_Emitters,
+	split:    Gi_Split,
+	voxel:    Gi_Voxel,
 }
 
 // Gi_State is one view's global illumination between frames, in View_State: the screen cascades' frame count, and the
@@ -184,6 +185,7 @@ gi_init :: proc(gi: ^Gi_Passes) {
 	gi.gather = shader_pipeline(GI_GATHER_SHADER)
 	gi.lit = shader_pipeline(GI_LIT_SHADER)
 	gi_probes_init(&gi.probes)
+	gi_emitters_init(&gi.emitters)
 	gi_split_init(&gi.split)
 	gi_voxel_init(&gi.voxel)
 }
@@ -193,6 +195,7 @@ gi_destroy :: proc(gi: ^Gi_Passes, platform: ^core.Platform_API) {
 		destroy_shader_pipeline(p, platform)
 	}
 	gi_probes_destroy(&gi.probes, platform)
+	gi_emitters_destroy(&gi.emitters, platform)
 	gi_split_destroy(&gi.split, platform)
 	gi_voxel_destroy(&gi.voxel, platform)
 }
@@ -206,6 +209,7 @@ sync_gi_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&gi.gather, r.platform, assets, {label = "gi gather"}, force)
 	sync_compute_pipeline(&gi.lit, r.platform, assets, {label = "gi lit"}, force)
 	sync_gi_probe_pipelines(r, force)
+	sync_gi_emitter_pipelines(r, force)
 	sync_gi_split_pipelines(r, force)
 	sync_gi_voxel_pipelines(r, force)
 }

@@ -68,9 +68,11 @@ hit_entries_map_each_submeshs_primitives_to_its_block_and_bin :: proc(t: ^testin
 	table := Hit_Table {
 		instances = make([]Hit_Instance, 8, context.temp_allocator),
 		submeshes = make([dynamic]Hit_Submesh, context.temp_allocator),
+		keys      = make([dynamic]Hit_Entry_Key, context.temp_allocator),
 	}
 	// A slot before, so the records start past its.
 	append(&table.submeshes, Hit_Submesh{})
+	append(&table.keys, Hit_Entry_Key{})
 	surfaces := add_hit_entries(&table, 3, &mesh, items, pipelines, test_ready, nil)
 	testing.expect(t, surfaces, "the slot has opaque submeshes")
 	testing.expect_value(
@@ -108,6 +110,11 @@ hit_entries_map_each_submeshs_primitives_to_its_block_and_bin :: proc(t: ^testin
 		t,
 		table.used[0] && table.used[1] && !table.used[2] && !table.used[3] && !table.used[4],
 	)
+	// Each record has its key: the entity's submesh, its pipeline, and whether hit shading evaluates it.
+	testing.expect_value(t, len(table.keys), len(table.submeshes))
+	testing.expect_value(t, table.keys[1], Hit_Entry_Key{submesh = 0, pipeline = 0, shaded = true})
+	testing.expect_value(t, table.keys[2], Hit_Entry_Key{submesh = 1, pipeline = 1})
+	testing.expect_value(t, table.keys[3], Hit_Entry_Key{submesh = 2, pipeline = 2})
 
 	// A slot of transparent submeshes only has no surface for rays to shade.
 	glass := Resident_Mesh {

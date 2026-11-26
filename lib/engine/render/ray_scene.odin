@@ -4,6 +4,7 @@ import "core:strings"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
+import "cinnabar:engine/ecs"
 
 // The ray scene (see docs/rendering/ray-scene.md#ray-scene): the GPU scene's top-level acceleration structure, which
 // any feature that traces requests, and hit shading, which evaluates the materials at a client's ray hits. The first
@@ -159,12 +160,25 @@ Hit_Batch :: struct {
 }
 
 // Hit_Table is the frame's hit table as build_scene makes it: a record for each slot up to the scene's highest, and
-// the submeshes' records. used is whether any submesh is in each bin.
+// the submeshes' records, with a key for each, which the GI's emitters follow from frame to frame. used is whether any
+// submesh is in each bin.
 @(private)
 Hit_Table :: struct {
 	instances: []Hit_Instance,
 	submeshes: [dynamic]Hit_Submesh,
+	keys:      [dynamic]Hit_Entry_Key,
 	used:      [MAX_HIT_BINS]bool,
+}
+
+// Hit_Entry_Key is what a frame knows of a hit table's submesh record beyond the GPU's: its entity and submesh, which
+// stay the same from frame to frame where the record's place does not, its material's pipeline, and whether its
+// material is two-sided and hit shading evaluates it, an opaque or masked material whose hit pipeline is ready.
+Hit_Entry_Key :: struct {
+	entity:    ecs.Entity,
+	submesh:   u32,
+	pipeline:  u32,
+	two_sided: bool,
+	shaded:    bool,
 }
 
 // Hit_Reservation is a batch's turn at hit shading, which reserve_hit_shading takes and add_hit_shading spends: the
@@ -359,6 +373,7 @@ add_hit_entries :: proc(
 	pipelines: []Material_Pipeline,
 	ready: proc(platform: ^core.Platform_API, pipeline: gpu.Pipeline) -> bool,
 	platform: ^core.Platform_API,
+	entity := ecs.Entity{},
 ) -> (
 	surfaces: bool,
 ) {
@@ -373,6 +388,7 @@ add_hit_entries :: proc(
 		submesh := mesh.submeshes[item.submesh]
 		pipeline := &pipelines[item.bin]
 		bin: u32
+		shaded := false
 		switch {
 		case material_group(pipeline) != .Opaque:
 			bin = HIT_TRANSLUCENT
@@ -380,9 +396,20 @@ add_hit_entries :: proc(
 		case pipeline.hit != {} && ready(platform, pipeline.hit):
 			bin = item.bin + 1
 			surfaces = true
+			shaded = true
 		case:
 			surfaces = true
 		}
+		append(
+			&table.keys,
+			Hit_Entry_Key {
+				entity = entity,
+				submesh = u32(item.submesh),
+				pipeline = item.bin,
+				two_sided = pipeline.two_sided,
+				shaded = shaded,
+			},
+		)
 		table.used[bin & HIT_BIN_MASK] = true
 		append(
 			&table.submeshes,

@@ -8,7 +8,8 @@
 // hits pick from after the directional ones, candidates the lights that each hit weighs, and seed that of its choices.
 // depth is this frame's, and lit the global illumination's lit scene of last frame, when lit_valid. exposure is the
 // frame's, which the update reads. hit_instances and hit_submeshes are the frame's hit table, which the hits' shadow
-// rays read to pass through translucent submeshes.
+// rays read to pass through translucent submeshes. emitter_samples are the GI's emitters' triangles, emitter_count of
+// them, or 0 without them, which the hits sample.
 struct Probe_Push {
 	uint shadow_atlas;
 	uint shadow_mask;
@@ -31,6 +32,8 @@ struct Probe_Push {
 	uint hit_instances_offset;
 	uint hit_submeshes;
 	uint hit_submeshes_offset;
+	uint emitter_samples;
+	uint emitter_count;
 };
 #define MATERIAL_PUSH Probe_Push
 // No shading model: the hits need only the light loop's lookups.
