@@ -157,6 +157,25 @@ Each tool is a pure function in `Cinnabar.Editor.Mesh` (`MeshTools.cs`, `MeshToo
 - **Refusals.** The result must pass validation and be solid. Otherwise it is refused with the reason, and the mesh does not change. A Subtract that leaves nothing is refused, because the cutter contains the target. An Intersect of meshes that do not meet is refused. A Subtract by a cutter that does not meet the target gives the target itself, and a Union of two meshes that do not meet is the two together.
 - **Cost.** A Subtract of a box from a box of 5,046 faces takes about 80 ms, and from a sphere of 2,048 faces, whose tree is a chain, about 180 ms, as measured in a Release build. `MeshBooleanTests` checks that both stay solid, and does not time them.
 
+## Cutters and cut targets
+
+A door prefab carries the shape of its opening, and each instance cuts its wall. A prefab refers to nothing outside itself, so a cutter cannot name its wall. It finds its walls by overlap. Two level design components, in `lib/engine/asset/format/components.odin` so that the cooker can read them, say what is cut. The `cut` package registers them in the Level Design category of Add Component. No system of the game reads them.
+
+- **`Mesh_Cutter`** (176) is the volume that a cut removes.
+  - `shape` is `Box` or `Mesh`. A box is `extents`, half its size along each of the entity's axes, times the entity's scale. An extent of 0 is 0.5 m. A mesh is `mesh`, a `.mesh`, at the entity's pose. It must be solid ([The mesh model](#the-mesh-model)).
+  - `cap_material` is the material of the faces that the cut makes, such as a doorway's jambs.
+  - `layers` is a mask of the target layers that it cuts: bit i cuts layer i. 0 cuts every layer.
+  - `cuts_collision`, true by default, makes the cut reach the target's `Collider` too.
+- **`Cut_Target`** (177) lets cutters cut its entity. An entity opts in by having it. Its `layer` is 0 to 31.
+- **Matching.** `MeshCutters.Targets` (`MeshCutters.cs`) gives the entities of an expanded scene that a cutter cuts. An entity is cut when all of these are true:
+  - it has a `Cut_Target` whose layer is in the cutter's mask;
+  - its `Mesh_Renderer` names a `.mesh`. A model's mesh cannot be cut;
+  - the bounds of the two meet. The cutter's bounds are moved into the target's space by `MeshPlacement.Between` ([Booleans](#booleans)), with the plane tolerance as a margin;
+  - it is not in the cutter's own prefab instance. That is the innermost instance that holds the cutter, by the `<instance>#` path of its entities ([Prefabs: Instances in a scene](prefabs.md#instances-in-a-scene)). So a door does not cut its own frame, and a door in a room prefab still cuts the room's walls.
+- **In the viewport.** A cutter's helper (`helpers.odin`) draws its box, or its mesh's edges, in red when it is selected, and grey for the viewport's All helpers. A mesh of more than 1,024 triangles draws its bounds. The helper loads a cutter's mesh the first time it draws it, because the game loads none for it.
+- **Adding one.** The Add menu's Level Design category has a Cutter, a box `Mesh_Cutter`. The Gameplay tab places one too.
+- **The sample.** `samples/mygame/content/prefabs/door.prefab` is the swinging door of `shadow_cache.scene` with its opening. The leaf has `swing.luau` and a kinematic `Rigid_Body`. The "Opening", a box `Mesh_Cutter` a little larger than the leaf, is a child of the root and not of the leaf. So it keeps its own scale and does not swing.
+
 ## Primitives and Draw
 
 New geometry starts as a primitive or as a drawn polygon. Both are generators in `Cinnabar.Editor.Mesh`, `Primitives.Make` and `MeshCut.Plane`, `parameters → MeshData`, so each is a unit test, and the cooker's `mesh` template, which the content browser's New Mesh uses, is the Block generator's output written by hand.

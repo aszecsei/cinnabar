@@ -1,0 +1,40 @@
+# A door that cuts its own opening (see docs/editor/mesh-editing.md#cutters-and-cut-targets): the swinging leaf of the
+# shadow cache scene, and an opening a little larger than the leaf, whose Mesh_Cutter cuts every wall with a Cut_Target
+# that it overlaps. The root is at the floor, in the middle of the doorway. The leaf is a kinematic body, so it pushes
+# what it meets as it swings and the navmesh bake does not plug the opening with it. The opening is under the root,
+# not under the leaf, so it keeps its own scale and does not swing.
+scene 3
+
+entity 1000000000000001
+name = "Door"
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+
+entity 1000000000000002
+name = "Leaf"
+parent = @1000000000000001
+component 2 Local_Transform
+	offset = [0, 1.1, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 2.2, 0.08]
+component 4 Previous_Transform
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $cbeb3ff7d07840a7a816ea35868ee5b0
+	cast_shadows = true
+component 64 Rigid_Body
+	motion = Kinematic
+component 65 Collider
+behaviour 85f762623d3e4026b8a86e287b667274
+
+entity 1000000000000003
+name = "Opening"
+parent = @1000000000000001
+component 2 Local_Transform
+	offset = [0, 1.15, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 176 Mesh_Cutter
+	extents = [0.55, 1.15, 0.5]

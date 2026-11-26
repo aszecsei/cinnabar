@@ -19,6 +19,7 @@ import "cinnabar:engine/anim"
 import "cinnabar:engine/asset"
 import "cinnabar:engine/audio"
 import "cinnabar:engine/camera"
+import "cinnabar:engine/cut"
 import "cinnabar:engine/cutscene"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor"
@@ -289,6 +290,7 @@ register_components :: proc(r: ^ecs.Registry, h: Hooks) {
 	scene.register_components(r)
 	streaming.register_components(r)
 	volume.register_components(r)
+	cut.register_components(r)
 	physics.register_components(r)
 	audio.register_components(r)
 	anim.register_components(r)

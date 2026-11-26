@@ -25,6 +25,10 @@ public static class SceneEdits
     public const ulong ReflectionProbeId = 54;
     /// <summary>The renderer's Clouds setting (see docs/rendering/clouds.md#clouds).</summary>
     public const ulong CloudsId = 55;
+    /// <summary>The level design Mesh_Cutter (see docs/editor/mesh-editing.md#cutters-and-cut-targets).</summary>
+    public const ulong MeshCutterId = 176;
+    /// <summary>The level design Cut_Target (see docs/editor/mesh-editing.md#cutters-and-cut-targets).</summary>
+    public const ulong CutTargetId = 177;
     /// <summary>A volume's setting's override flag is a field of its own in a scene, which only false needs (see docs/world/volumes.md#volumes).</summary>
     public const string OverrideSuffix = ".override";
 
@@ -179,7 +183,8 @@ public static class SceneEdits
 
     /// <summary>
     /// The world pose that the scene gives an entity: a root's Transform, or its parent's world pose composed with its
-    /// Local_Transform, as the engine's propagation does. Null for an entity with neither.
+    /// Local_Transform, as the engine's propagation does. A scale that the scene leaves out is 1, as the engine reads it
+    /// (format.DEFAULT_SCALE). Null for an entity with neither.
     /// </summary>
     public static Pose? WorldPose(Scene scene, SceneEntity entity, int depth = 0)
     {
@@ -187,7 +192,7 @@ public static class SceneEdits
         if (entity.Parent != 0 && local != null && depth < 64 && scene.Find(entity.Parent) is { } parent)
         {
             var p = WorldPose(scene, parent, depth + 1) ?? Pose.Identity;
-            var (offset, rotation, scale) = (Vector(local.Fields, "offset", 0), Rotation(local.Fields), Vector(local.Fields, "scale", 0));
+            var (offset, rotation, scale) = (Vector(local.Fields, "offset", 0), Rotation(local.Fields), Vector(local.Fields, "scale", 1));
             return p.Compose(offset, rotation, scale);
         }
         var transform = entity.Components.Find(c => c.Id == TransformId);
@@ -199,7 +204,7 @@ public static class SceneEdits
         long[] raw = position is { Kind: SceneValueKind.Number, Numbers.Count: 3 } && position.Numbers.All(n => n.IsInteger)
             ? [.. position.Numbers.Select(n => (long)n.Integer!.Value)]
             : [0, 0, 0];
-        return new Pose(raw, Rotation(transform.Fields), Vector(transform.Fields, "scale", 0));
+        return new Pose(raw, Rotation(transform.Fields), Vector(transform.Fields, "scale", 1));
     }
 
     static double[] Vector(List<SceneField> fields, string name, double missing)

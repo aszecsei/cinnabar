@@ -6,6 +6,7 @@ import "core:math/linalg"
 import "cinnabar:engine/ai"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/cut"
 import "cinnabar:engine/cutscene"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
@@ -28,6 +29,12 @@ import "cinnabar:engine/volume"
 UNSELECTED :: [4]f32{0.6, 0.6, 0.6, 0.5}
 @(private = "file")
 VOLUME_COLOR :: [4]f32{0.3, 0.8, 1, 1}
+// A mesh cutter's volume, red as what it removes.
+@(private = "file")
+CUTTER_COLOR :: [4]f32{1, 0.35, 0.3, 1}
+// A cutter's mesh with more triangles than this draws its bounds: its edges would be too many lines.
+@(private = "file")
+CUTTER_MESH_TRIANGLES :: 1024
 @(private)
 CAMERA_COLOR :: [4]f32{1, 1, 1, 1}
 // The frustum of the camera that the cutscene preview shows at its playhead: the timeline's camera-cut color, #E69138.
@@ -377,6 +384,9 @@ draw_entity_helpers :: proc(
 			}
 		}
 	}
+	if c := ecs.get(w, entity, cut.Mesh_Cutter); c != nil {
+		draw_cutter(e, d, c^, pose, selected ? CUTTER_COLOR : UNSELECTED)
+	}
 	if p := ecs.get(w, entity, render.Reflection_Probe); p != nil {
 		// As the renderer takes them (see render.reflection_probe_records): the fade is inside the influence box.
 		extent, projection := render.reflection_probe_extents(p^, pose.scale)
@@ -681,6 +691,78 @@ draw_joint :: proc(
 	if j.body_b != 0 && ecs.is_alive(w, j.body_b) {
 		if other, ok := ecs.presented(w, j.body_b); ok {
 			debug.line(d, frame.position, other.position, COLLIDER_COLOR)
+		}
+	}
+}
+
+// draw_cutter draws a Mesh_Cutter's volume: its box, or its mesh's edges, or the mesh's bounds when it has too many. A
+// cutter's mesh is loaded the first time it draws, and kept for the session, since the game loads none for it.
+@(private = "file")
+draw_cutter :: proc(
+	e: ^Editor,
+	d: ^debug.Draw,
+	c: cut.Mesh_Cutter,
+	pose: ecs.Transform,
+	color: [4]f32,
+) {
+	switch c.shape {
+	case .Box:
+		extent :: proc(x: f32) -> f32 {
+			return x > 0 ? x : cut.DEFAULT_EXTENT
+		}
+		half :=
+			[3]f32{extent(c.extents.x), extent(c.extents.y), extent(c.extents.z)} *
+			linalg.abs(pose.scale)
+		debug.box(d, pose.position, half, pose.rotation, color)
+	case .Mesh:
+		if e.assets == nil || c.mesh == {} {
+			return
+		}
+		h, loaded := asset.find(e.assets, c.mesh)
+		if !loaded {
+			h, loaded = asset.load(e.assets, c.mesh)
+			if !loaded {
+				return
+			}
+		}
+		data, _ := asset.data(e.assets, h)
+		blob, ok := format.mesh_view(data)
+		if !ok {
+			return
+		}
+		to_world :: proc(pose: ecs.Transform, p: [3]f32) -> ecs.World_Position {
+			return ecs.position_offset(
+				pose.position,
+				linalg.quaternion128_mul_vector3(pose.rotation, p * pose.scale),
+			)
+		}
+		positions := format.mesh_collision_positions(data, blob)
+		triangles := format.mesh_collision_triangles(data, blob)
+		if len(triangles) == 0 || len(triangles) > CUTTER_MESH_TRIANGLES {
+			size := linalg.abs(pose.scale)
+			center := to_world(pose, blob.bounds.center)
+			debug.box(
+				d,
+				center,
+				(blob.bounds.max - blob.bounds.min) * 0.5 * size,
+				pose.rotation,
+				color,
+			)
+			return
+		}
+		// A cutter is solid, so each edge is in two triangles, once each way: drawing it one way draws it once.
+		for tri in triangles {
+			for k in 0 ..< 3 {
+				a, b := tri[k], tri[(k + 1) % 3]
+				if a < b && int(b) < len(positions) {
+					debug.line(
+						d,
+						to_world(pose, positions[a]),
+						to_world(pose, positions[b]),
+						color,
+					)
+				}
+			}
 		}
 	}
 }

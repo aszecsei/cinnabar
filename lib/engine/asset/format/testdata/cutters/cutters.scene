@@ -1,0 +1,36 @@
+# A wall that cutters can cut, a cutter with every field set, and one that sets none, which reads as the defaults. The
+# editor's SceneFileTests and asset_format's scene tests both read this file, so the two parsers agree on the fields.
+scene 3
+
+entity 3000000000000001
+name = "Wall"
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $5d1f0c2a9b3e4f60a7c8d9e0f1a2b3c4
+component 177 Cut_Target
+	layer = 2
+
+entity 3000000000000002
+name = "Opening"
+component 1 Transform
+	position = [0, 19293798, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 176 Mesh_Cutter
+	shape = Mesh
+	extents = [0.55, 1.15, 0.5]
+	mesh = $6e2a1d3b0c4f5a71b8d9e0f1a2b3c4d5
+	cap_material = $7f3b2e4c1d5a6b82c9e0f1a2b3c4d5e6
+	layers = 4
+	cuts_collision = false
+
+entity 3000000000000003
+name = "Bare Cutter"
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 176 Mesh_Cutter

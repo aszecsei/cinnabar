@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Mesh;
 
 namespace Cinnabar.Editor.Tests;
 
@@ -284,6 +285,32 @@ public class SceneFileTests
         var path = Path.Combine(EditorOptions.RepositoryRoot(), "lib", "engine", "asset", "format", "testdata", "prefabs", name);
         var text = File.ReadAllText(path).ReplaceLineEndings("\n");
         Assert.Equal(text, SceneFile.Write(Parse(text)));
+    }
+
+    // The fixture that asset_format's scene tests and the cooker's read: the same fields, and the same defaults for a
+    // cutter that sets none (see docs/editor/mesh-editing.md#cutters-and-cut-targets).
+    [Fact]
+    public void CuttersAndTargetsRoundTripWithTheCookersFields()
+    {
+        var path = Path.Combine(EditorOptions.RepositoryRoot(), "lib", "engine", "asset", "format", "testdata", "cutters", "cutters.scene");
+        var text = File.ReadAllText(path).ReplaceLineEndings("\n");
+        var scene = Parse(text);
+        Assert.Equal(text, SceneFile.Write(scene));
+
+        Assert.Equal(2, MeshCutters.TargetLayer(scene.Entities[0]));
+        var full = CutterFields.Of(scene.Entities[1].Components.Single(c => c.Id == SceneEdits.MeshCutterId));
+        Assert.Equal(CutterShape.Mesh, full.Shape);
+        Assert.Equal(1.15, full.Extents.Y, 6);
+        Assert.Equal("6e2a1d3b0c4f5a71b8d9e0f1a2b3c4d5", full.Mesh);
+        Assert.Equal("7f3b2e4c1d5a6b82c9e0f1a2b3c4d5e6", full.CapMaterial);
+        Assert.Equal(4u, full.Layers);
+        Assert.False(full.CutsCollision);
+        Assert.True(full.Cuts(2));
+        Assert.False(full.Cuts(1));
+
+        var bare = CutterFields.Of(scene.Entities[2].Components.Single(c => c.Id == SceneEdits.MeshCutterId));
+        Assert.Equal(CutterFields.Default, bare);
+        Assert.True(bare.Cuts(31));
     }
 
     [Theory]
