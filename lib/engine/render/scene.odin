@@ -1117,7 +1117,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 							reference,
 							id = slot,
 							mask = mask,
-							flags = {.Force_Opaque},
+							flags = hit_instance_flags(hits.instances[slot]),
 						),
 					)
 					// The frame's own view refits the skinned structures, over the positions that it posed.

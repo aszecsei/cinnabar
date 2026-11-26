@@ -13,7 +13,8 @@ import format "cinnabar:engine/asset/format"
 // and Jungle Ruins about 1,200 with an instance set for each of its 778 point instancers (see
 // docs/content/kinds/stages.md#limits).
 MAX_RESIDENT :: 4096
-// A resident mesh keeps at most this many submeshes. A mesh with more draws only these.
+// A resident mesh keeps at most this many submeshes. A mesh with more draws only these. Match HIT_MAX_SUBMESHES in
+// gi_hit_light.hlsli.
 MAX_SUBMESHES :: 16
 // An asset that cannot be made resident is tried again after this many frames.
 RESIDENT_RETRY_FRAMES :: 60

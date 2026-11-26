@@ -7,7 +7,8 @@
 // Matches Probe_Push in lib/engine/render/gi_probes.odin. light_grid is the frame's light grid, whose punctual lights the
 // hits pick from after the directional ones, candidates the lights that each hit weighs, and seed that of its choices.
 // depth is this frame's, and lit the global illumination's lit scene of last frame, when lit_valid. exposure is the
-// frame's, which the update reads.
+// frame's, which the update reads. hit_instances and hit_submeshes are the frame's hit table, which the hits' shadow
+// rays read to pass through translucent submeshes.
 struct Probe_Push {
 	uint shadow_atlas;
 	uint shadow_mask;
@@ -26,6 +27,10 @@ struct Probe_Push {
 	uint lit_valid;
 	uint exposure;
 	uint seed;
+	uint hit_instances;
+	uint hit_instances_offset;
+	uint hit_submeshes;
+	uint hit_submeshes_offset;
 };
 #define MATERIAL_PUSH Probe_Push
 // No shading model: the hits need only the light loop's lookups.

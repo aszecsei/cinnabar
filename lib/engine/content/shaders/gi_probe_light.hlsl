@@ -12,6 +12,10 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	}
 	Hit_Lights lights;
 	lights.accel = push.accel;
+	lights.hit_instances = push.hit_instances;
+	lights.hit_instances_offset = push.hit_instances_offset;
+	lights.hit_submeshes = push.hit_submeshes;
+	lights.hit_submeshes_offset = push.hit_submeshes_offset;
 	lights.light_grid = push.light_grid;
 	lights.light_grid_offset = push.light_grid_offset;
 	lights.candidates = push.candidates;

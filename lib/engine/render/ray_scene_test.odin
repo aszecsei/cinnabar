@@ -73,7 +73,17 @@ hit_entries_map_each_submeshs_primitives_to_its_block_and_bin :: proc(t: ^testin
 	append(&table.submeshes, Hit_Submesh{})
 	surfaces := add_hit_entries(&table, 3, &mesh, items, pipelines, test_ready, nil)
 	testing.expect(t, surfaces, "the slot has opaque submeshes")
-	testing.expect_value(t, table.instances[3], Hit_Instance{mesh = 5, first = 1, count = 4})
+	testing.expect_value(
+		t,
+		table.instances[3],
+		Hit_Instance{mesh = 5, first = 1, count = 4, flags = HIT_INSTANCE_TRANSLUCENT},
+	)
+	// Its instance is not opaque, so the hits' shadow rays can pass through its translucent submesh.
+	testing.expect_value(
+		t,
+		hit_instance_flags(table.instances[3]),
+		gpu.Accel_Instance_Flags{.Force_Non_Opaque},
+	)
 	testing.expect_value(
 		t,
 		table.submeshes[1],
@@ -111,7 +121,30 @@ hit_entries_map_each_submeshs_primitives_to_its_block_and_bin :: proc(t: ^testin
 		t,
 		!add_hit_entries(&table, 4, &glass, {{mesh = 6, bin = 1}}, pipelines, test_ready, nil),
 	)
-	testing.expect_value(t, table.instances[4], Hit_Instance{mesh = 6, first = 5, count = 1})
+	testing.expect_value(
+		t,
+		table.instances[4],
+		Hit_Instance{mesh = 6, first = 5, count = 1, flags = HIT_INSTANCE_TRANSLUCENT},
+	)
+
+	// A slot of opaque submeshes only is opaque, so the hardware commits its hits at once.
+	wall := Resident_Mesh {
+		submesh_count = 1,
+	}
+	wall.submeshes[0] = {
+		first_index = 0,
+		index_count = 3,
+	}
+	testing.expect(
+		t,
+		add_hit_entries(&table, 5, &wall, {{mesh = 7, bin = 0}}, pipelines, test_ready, nil),
+	)
+	testing.expect_value(t, table.instances[5].flags, 0)
+	testing.expect_value(
+		t,
+		hit_instance_flags(table.instances[5]),
+		gpu.Accel_Instance_Flags{.Force_Opaque},
+	)
 }
 
 // hit_blob is an opaque material blob whose variants are fake bytecode, with the hit pass's when hit.

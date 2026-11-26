@@ -62,10 +62,12 @@ struct Hit_Surface {
 };
 
 // Match Hit_Instance and Hit_Submesh in lib/engine/render/ray_scene.odin: the hit table, which the frame uploads. A
-// slot's instance names its mesh record and its submeshes' first record and count. A submesh's record has its
+// slot's instance names its mesh record and its submeshes' first record and count, with HIT_INSTANCE_TRANSLUCENT when
+// any of them is translucent, which makes its instance in the scene's structure not opaque. A submesh's record has its
 // primitives, its material's block and its bin, with HIT_TRANSLUCENT for a transparent or additive material's.
 static const uint HIT_BIN_MASK = 0xffffff;
 static const uint HIT_TRANSLUCENT = 1u << 24;
+static const uint HIT_INSTANCE_TRANSLUCENT = 1;
 struct Hit_Instance {
 	uint mesh;
 	uint first;

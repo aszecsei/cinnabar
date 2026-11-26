@@ -28,6 +28,9 @@ MAX_HIT_RAYS :: 65535 * HIT_GROUP_SIZE
 // A Hit_Submesh's bin has this for a transparent or additive material's submesh, which the fallback shades.
 HIT_TRANSLUCENT :: 1 << 24
 HIT_BIN_MASK :: HIT_TRANSLUCENT - 1
+// A Hit_Instance's flags have this when any of its submeshes is translucent: its instance in the scene's structure is
+// not opaque, so the hits' shadow rays pass through those submeshes (see hit_shadow in gi_hit_light.hlsli).
+HIT_INSTANCE_TRANSLUCENT :: 1
 
 // HIT_BIN_SHADER bins a client's hits by their materials (lib/engine/content/shaders/hit_bin.hlsl), and
 // HIT_DEFAULT_SHADER shades the fallback bin (hit_default.hlsl).
@@ -59,8 +62,8 @@ Hit_Surface :: struct {
 #assert(size_of(Hit_Record) == 32 && size_of(Hit_Surface) == 32)
 
 // Hit_Instance and Hit_Submesh match their HLSL structs in ray_scene.hlsli: the frame's hit table. A slot's record
-// names its mesh record and the records of its submeshes; a submesh's has its primitives, its material's block, and its
-// bin with HIT_TRANSLUCENT.
+// names its mesh record and the records of its submeshes, with HIT_INSTANCE_TRANSLUCENT when any of them is
+// translucent; a submesh's has its primitives, its material's block, and its bin with HIT_TRANSLUCENT.
 Hit_Instance :: struct {
 	mesh:  u32,
 	first: u32,
@@ -345,7 +348,8 @@ commit_ray_scene :: proc(data: rawptr) {
 
 // add_hit_entries adds a slot's records to the hit table: the slot's, and one for each of its items but impostors, with
 // the bin of its material's hit pipeline. A transparent or additive material's submesh, and one whose pipeline has no
-// hit pass ready, take the fallback's bin. It gives whether the slot has a surface that hit shading evaluates.
+// hit pass ready, take the fallback's bin, and a slot with a translucent submesh has HIT_INSTANCE_TRANSLUCENT. It gives
+// whether the slot has a surface that hit shading evaluates.
 @(private)
 add_hit_entries :: proc(
 	table: ^Hit_Table,
@@ -360,6 +364,7 @@ add_hit_entries :: proc(
 ) {
 	first := u32(len(table.submeshes))
 	mesh_index: u32
+	flags: u32
 	for item in items {
 		if item.flags & ITEM_IMPOSTOR != 0 || int(item.submesh) >= int(mesh.submesh_count) {
 			continue
@@ -371,6 +376,7 @@ add_hit_entries :: proc(
 		switch {
 		case material_group(pipeline) != .Opaque:
 			bin = HIT_TRANSLUCENT
+			flags |= HIT_INSTANCE_TRANSLUCENT
 		case pipeline.hit != {} && ready(platform, pipeline.hit):
 			bin = item.bin + 1
 			surfaces = true
@@ -392,8 +398,15 @@ add_hit_entries :: proc(
 		mesh  = mesh_index,
 		first = first,
 		count = u32(len(table.submeshes)) - first,
+		flags = flags,
 	}
 	return
+}
+
+// hit_instance_flags are a slot's instance's flags in the scene's structure: opaque, so the hardware commits its hits
+// at once, unless it has a translucent submesh, which the hits' shadow rays look up and pass through.
+hit_instance_flags :: proc(instance: Hit_Instance) -> gpu.Accel_Instance_Flags {
+	return instance.flags & HIT_INSTANCE_TRANSLUCENT != 0 ? {.Force_Non_Opaque} : {.Force_Opaque}
 }
 
 // hit_pipeline_ready is whether a material's hit pipeline has compiled.

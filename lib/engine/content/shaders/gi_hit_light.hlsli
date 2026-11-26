@@ -15,39 +15,73 @@
 
 // Directional lights' shadow rays stop this far away, in meters.
 static const float HIT_SHADOW_DISTANCE = 1000;
+// A shadow ray that meets more translucent triangles than this counts as shadowed, so its loop is bounded.
+static const uint HIT_SHADOW_MAX_CANDIDATES = 8;
+// A slot's submeshes. Match MAX_SUBMESHES in lib/engine/render/residency.odin.
+static const uint HIT_MAX_SUBMESHES = 16;
 
-// Hit_Lights are what a hit's light needs beyond the frame constants: the ray scene that the shadow rays trace, the
-// light grid in a buffer at an offset, whose punctual lights the hits pick from after the directional ones, the lights
-// that each hit weighs, and the seed of its choices.
+// Hit_Lights are what a hit's light needs beyond the frame constants: the ray scene that the shadow rays trace, with
+// its hit table, whose translucent submeshes they pass through; the light grid in a buffer at an offset, whose punctual
+// lights the hits pick from after the directional ones, the lights that each hit weighs, and the seed of its choices.
 struct Hit_Lights {
 	uint accel;
+	uint hit_instances;
+	uint hit_instances_offset;
+	uint hit_submeshes;
+	uint hit_submeshes_offset;
 	uint light_grid;
 	uint light_grid_offset;
 	uint candidates;
 	uint seed;
 };
 
+// hit_translucent is whether a primitive of a slot is a translucent submesh's, by the hit table.
+bool hit_translucent(Hit_Lights lights, uint slot, uint primitive) {
+	Hit_Instance instance = cn_buffer(lights.hit_instances).Load<Hit_Instance>(lights.hit_instances_offset + slot * sizeof(Hit_Instance));
+	if ((instance.flags & HIT_INSTANCE_TRANSLUCENT) == 0) {
+		return false;
+	}
+	for (uint k = 0; k < min(instance.count, HIT_MAX_SUBMESHES); k++) {
+		Hit_Submesh submesh = cn_buffer(lights.hit_submeshes).Load<Hit_Submesh>(lights.hit_submeshes_offset + (instance.first + k) * sizeof(Hit_Submesh));
+		if (primitive - submesh.first_primitive < submesh.primitive_count) {
+			return (submesh.bin & HIT_TRANSLUCENT) != 0;
+		}
+	}
+	return false;
+}
+
 // hit_shadow is whether a light reaches a point relative to the camera, along a direction toward it, within a distance.
-float hit_shadow(uint accel, float3 p, float3 direction, float distance) {
+// Only an instance with a translucent submesh is not opaque, and the ray passes through that submesh's triangles: a
+// lantern's glass does not hide its flame, and a window lets the sun in.
+float hit_shadow(Hit_Lights lights, float3 p, float3 direction, float distance) {
 	RayDesc ray;
 	ray.Origin = p + frame.camera_offset.xyz;
 	ray.Direction = direction;
 	ray.TMin = 0;
 	ray.TMax = distance;
-	RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_FORCE_OPAQUE> query;
-	query.TraceRayInline(cn_accel(accel), 0, RAY_MASK_SHADOWS, ray);
-	query.Proceed();
+	RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
+	query.TraceRayInline(cn_accel(lights.accel), 0, RAY_MASK_SHADOWS, ray);
+	uint candidates = 0;
+	while (query.Proceed()) {
+		if (query.CandidateType() != CANDIDATE_NON_OPAQUE_TRIANGLE) {
+			continue;
+		}
+		candidates++;
+		if (candidates > HIT_SHADOW_MAX_CANDIDATES || !hit_translucent(lights, query.CandidateInstanceID(), query.CandidatePrimitiveIndex())) {
+			query.CommitNonOpaqueTriangleHit();
+		}
+	}
 	return query.CommittedStatus() == COMMITTED_NOTHING ? 1 : 0;
 }
 
-float3 hit_direct(uint accel, Light_Record l, float3 p, float3 normal) {
+float3 hit_direct(Hit_Lights lights, Light_Record l, float3 p, float3 normal) {
 	Light light = light_falloff(l, p);
 	float cosine = saturate(dot(normal, light.direction));
 	if (cosine <= 0 || all(light.color <= 0)) {
 		return 0;
 	}
 	float distance = l.type == LIGHT_DIRECTIONAL ? HIT_SHADOW_DISTANCE : length(l.position - p);
-	return light.color * cosine * hit_shadow(accel, p, light.direction, distance);
+	return light.color * cosine * hit_shadow(lights, p, light.direction, distance);
 }
 
 // hit_light is the light that a ray's hit sends back along it, and the ray's distance: the hit's, negative for a back
@@ -74,12 +108,12 @@ float4 hit_light(Hit_Record hit, uint surfaces, uint ray, Hit_Lights lights, Pro
 		float3 origin = p + geometric * epsilon * 4;
 		float3 direct = 0;
 		for (uint i = 0; i < frame.directional_count; i++) {
-			direct += hit_direct(lights.accel, load_light(i), origin, normal);
+			direct += hit_direct(lights, load_light(i), origin, normal);
 		}
 		uint state = lowbias32(lights.seed ^ lowbias32(ray));
 		Hit_Choice choice = pick_hit_light(lights.light_grid, lights.light_grid_offset, lights.candidates, origin, normal, state);
 		if (choice.weight > 0) {
-			direct += choice.light * choice.weight * hit_shadow(lights.accel, origin, choice.direction, choice.distance);
+			direct += choice.light * choice.weight * hit_shadow(lights, origin, choice.direction, choice.distance);
 		}
 		float3 bounce;
 		bool probes = sample_probes(grid, p, normal, normal, false, bounce);
