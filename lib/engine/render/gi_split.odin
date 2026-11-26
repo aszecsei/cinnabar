@@ -21,6 +21,8 @@ MAX_SPLIT_LEVELS :: 8
 MAX_SPLIT_CASCADES :: 4
 // A window's cells along each axis, at the first cascade.
 SPLIT_WINDOW :: 512
+// The rays' directions repeat after this many frames. Match RAY_CYCLE in gi_split_trace.hlsl.
+SPLIT_RAY_CYCLE :: 16
 SPLIT_GROUP :: 64
 SPLIT_SLOT_SIZE :: 16
 SPLIT_ENTRY_SIZE :: 8
@@ -861,7 +863,11 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 		{hits = sf.hits, surfaces = sf.surfaces, count = ray_count},
 		.Compute,
 	)
-	add_hit_light_passes(f, &pf.hit_light, "gi split", shaded, sf.rays)
+	// The split's rays repeat every SPLIT_RAY_CYCLE frames, so the lights that their hits pick repeat with them, and a
+	// still view's probes settle on fixed choices.
+	inputs := new_clone(pf.hit_light, f.renderer.platform.frame_allocator)
+	inputs.seed = s.frame % SPLIT_RAY_CYCLE
+	add_hit_light_passes(f, inputs, "gi split", shaded, sf.rays)
 	p = add_compute_pass(
 		g,
 		"gi split deposit",

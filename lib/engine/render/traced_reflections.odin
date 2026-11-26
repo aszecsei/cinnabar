@@ -161,7 +161,7 @@ add_traced_reflection_passes :: proc(f: ^Frame) -> bool {
 	if !hit_shading_ready(f) {
 		return false
 	}
-	inputs, ok := hit_light_inputs(f, sf.params.distance, sf.lit)
+	inputs, ok := hit_light_inputs(f, sf.params.candidates, u32(f.state.frames), sf.lit)
 	if !ok {
 		return false
 	}

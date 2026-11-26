@@ -11,6 +11,7 @@
 
 #include "gi_common.hlsli"
 #include "ray_scene.hlsli"
+#include "hash.hlsli"
 
 // Match lib/engine/render/gi_split.odin.
 static const uint MAX_SPLIT_LEVELS = 8;
@@ -146,14 +147,9 @@ uint3 split_key_cell(uint key) {
 	return uint3(key & 511, (key >> 9) & 511, (key >> 18) & 511);
 }
 
-// split_hash is a key's place in a table (lowbias32, Chris Wellons).
+// split_hash is a key's place in a table.
 uint split_hash(uint x) {
-	x ^= x >> 16;
-	x *= 0x7feb352du;
-	x ^= x >> 15;
-	x *= 0x846ca68bu;
-	x ^= x >> 16;
-	return x;
+	return lowbias32(x);
 }
 
 // split_find is the slot of a probe's key at a cascade, or SPLIT_NO_SLOT when the cascade has no such probe.

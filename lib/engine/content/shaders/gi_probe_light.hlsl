@@ -12,9 +12,10 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	}
 	Hit_Lights lights;
 	lights.accel = push.accel;
-	lights.lights = push.lights;
-	lights.lights_offset = push.lights_offset;
-	lights.light_count = push.light_count;
+	lights.light_grid = push.light_grid;
+	lights.light_grid_offset = push.light_grid_offset;
+	lights.candidates = push.candidates;
+	lights.seed = push.seed;
 	float4 result = hit_light(load_hit(push.hits, ray), push.surfaces, ray, lights, frame_probe_grid());
 	cn_rw_buffer(push.rays).Store<float4>(ray * 16, result);
 }

@@ -4,9 +4,10 @@
 #ifndef GI_PROBE_PASS_HLSLI
 #define GI_PROBE_PASS_HLSLI
 
-// Matches Probe_Push in lib/engine/render/gi_probes.odin. lights lists the punctual lights that the hits see, after the
-// directional ones. depth is this frame's, and lit the global illumination's lit scene of last frame, when lit_valid.
-// exposure is the frame's, which the update reads.
+// Matches Probe_Push in lib/engine/render/gi_probes.odin. light_grid is the frame's light grid, whose punctual lights the
+// hits pick from after the directional ones, candidates the lights that each hit weighs, and seed that of its choices.
+// depth is this frame's, and lit the global illumination's lit scene of last frame, when lit_valid. exposure is the
+// frame's, which the update reads.
 struct Probe_Push {
 	uint shadow_atlas;
 	uint shadow_mask;
@@ -16,14 +17,15 @@ struct Probe_Push {
 	uint surfaces;
 	uint rays;
 	uint accel;
-	uint lights;
-	uint lights_offset;
-	uint light_count;
+	uint light_grid;
+	uint light_grid_offset;
+	uint candidates;
 	uint ray_count;
 	uint depth;
 	uint lit;
 	uint lit_valid;
 	uint exposure;
+	uint seed;
 };
 #define MATERIAL_PUSH Probe_Push
 // No shading model: the hits need only the light loop's lookups.

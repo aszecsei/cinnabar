@@ -1,6 +1,7 @@
 // The light that a traced ray's hit sends back along the ray (see docs/rendering/global-illumination.md#world-probes):
-// its emission, the direct light of every directional light and of a list of punctual lights, each shadowed by a ray
-// toward it, and the world probes' light at the hit, so light bounces once more each time, for its diffuse part and its
+// its emission, the direct light of every directional light, each shadowed by a ray toward it, and of one punctual
+// light that it picks from the frame's light grid by resampled importance sampling (gi_light_sampling.hlsli), shadowed
+// by one ray, and the world probes' light at the hit, so light bounces once more each time, for its diffuse part and its
 // specular part alike, or the sky's along the hit's reflection for the specular part where no probe counts. A ray that hit nothing sees
 // the ambient light. A back face of a one-sided surface is black, and its distance is negative, which tells the world
 // probes that a probe may be inside geometry. A pass includes it after material_lighting.hlsli, whose lights it reads,
@@ -10,17 +11,20 @@
 
 #include "ray_scene.hlsli"
 #include "gi_probes.hlsli"
+#include "gi_light_sampling.hlsli"
 
 // Directional lights' shadow rays stop this far away, in meters.
 static const float HIT_SHADOW_DISTANCE = 1000;
 
-// Hit_Lights are what a hit's light needs beyond the frame constants: the ray scene that the shadow rays trace, and the
-// punctual lights that the hits see, after the directional ones.
+// Hit_Lights are what a hit's light needs beyond the frame constants: the ray scene that the shadow rays trace, the
+// light grid in a buffer at an offset, whose punctual lights the hits pick from after the directional ones, the lights
+// that each hit weighs, and the seed of its choices.
 struct Hit_Lights {
 	uint accel;
-	uint lights;
-	uint lights_offset;
-	uint light_count;
+	uint light_grid;
+	uint light_grid_offset;
+	uint candidates;
+	uint seed;
 };
 
 // hit_shadow is whether a light reaches a point relative to the camera, along a direction toward it, within a distance.
@@ -72,9 +76,10 @@ float4 hit_light(Hit_Record hit, uint surfaces, uint ray, Hit_Lights lights, Pro
 		for (uint i = 0; i < frame.directional_count; i++) {
 			direct += hit_direct(lights.accel, load_light(i), origin, normal);
 		}
-		for (uint k = 0; k < lights.light_count; k++) {
-			uint index = cn_buffer(lights.lights).Load(lights.lights_offset + k * 4);
-			direct += hit_direct(lights.accel, load_light(index), origin, normal);
+		uint state = lowbias32(lights.seed ^ lowbias32(ray));
+		Hit_Choice choice = pick_hit_light(lights.light_grid, lights.light_grid_offset, lights.candidates, origin, normal, state);
+		if (choice.weight > 0) {
+			direct += choice.light * choice.weight * hit_shadow(lights.accel, origin, choice.direction, choice.distance);
 		}
 		float3 bounce;
 		bool probes = sample_probes(grid, p, normal, normal, false, bounce);

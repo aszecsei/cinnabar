@@ -31,7 +31,7 @@ GI_PROBE_HYSTERESIS :: 0.97
 // A level's box moves when the camera is more than this many probes from its middle, so a camera on a probe's edge
 // does not move it back and forth.
 GI_PROBE_RECENTER :: 2
-// The punctual lights that the hits see, after every directional light.
+// The punctual lights that the voxel cones' injection sees, after every directional light.
 GI_MAX_PROBE_LIGHTS :: 16
 // A point moves off its surface by this share of its level's spacing before the probes are looked up.
 GI_PROBE_BIAS :: 0.25
@@ -42,21 +42,44 @@ GI_PROBE_RESET_GROUP :: 64
 
 // Gi_Probe_Params are the world probes at a level: how many levels, the first level's spacing as a power of two of
 // meters, so every spacing divides the render origin's 1024 m cell, each probe's rays, the probes that a frame
-// updates, and the most pre-exposed luminance that a ray's light keeps before the update blends it (clamp_hit_light).
+// updates, the most pre-exposed luminance that a ray's light keeps before the update blends it (clamp_hit_light), and
+// the lights that the hits' light weighs for each ray before it picks one (see gi_light_sampling.hlsli).
 Gi_Probe_Params :: struct {
 	levels:       u32,
 	spacing:      u32,
 	rays:         u32,
 	budget:       u32,
 	radiance_max: f32,
+	candidates:   u32,
 }
 
 @(rodata)
 GI_PROBE_PARAMS := [Quality_Level]Gi_Probe_Params {
-	.Low = {levels = 2, spacing = 1, rays = 32, budget = 1024, radiance_max = 16},
-	.Medium = {levels = 3, spacing = 0, rays = 64, budget = 2048, radiance_max = 16},
-	.High = {levels = 3, spacing = 0, rays = 64, budget = 4096, radiance_max = 16},
-	.Ultra = {levels = 4, spacing = 0, rays = 64, budget = 8192, radiance_max = 16},
+	.Low = {levels = 2, spacing = 1, rays = 32, budget = 1024, radiance_max = 16, candidates = 4},
+	.Medium = {
+		levels = 3,
+		spacing = 0,
+		rays = 64,
+		budget = 2048,
+		radiance_max = 16,
+		candidates = 8,
+	},
+	.High = {
+		levels = 3,
+		spacing = 0,
+		rays = 64,
+		budget = 4096,
+		radiance_max = 16,
+		candidates = 16,
+	},
+	.Ultra = {
+		levels = 4,
+		spacing = 0,
+		rays = 64,
+		budget = 8192,
+		radiance_max = 16,
+		candidates = 16,
+	},
 }
 
 // The engine's world probe shaders, by their .meta files.
@@ -138,22 +161,23 @@ Probe_Grid :: struct {
 // Probe_Push matches Probe_Push in gi_probe_pass.hlsli.
 @(private = "file")
 Probe_Push :: struct {
-	shadow_atlas:  u32,
-	shadow_mask:   u32,
-	grid:          u32,
-	grid_offset:   u32,
-	hits:          u32,
-	surfaces:      u32,
-	rays:          u32,
-	accel:         u32,
-	lights:        u32,
-	lights_offset: u32,
-	light_count:   u32,
-	ray_count:     u32,
-	depth:         u32,
-	lit:           u32,
-	lit_valid:     u32,
-	exposure:      u32,
+	shadow_atlas:      u32,
+	shadow_mask:       u32,
+	grid:              u32,
+	grid_offset:       u32,
+	hits:              u32,
+	surfaces:          u32,
+	rays:              u32,
+	accel:             u32,
+	light_grid:        u32,
+	light_grid_offset: u32,
+	candidates:        u32,
+	ray_count:         u32,
+	depth:             u32,
+	lit:               u32,
+	lit_valid:         u32,
+	exposure:          u32,
+	seed:              u32,
 }
 
 #assert(size_of(Probe_Push) <= 128)
@@ -176,18 +200,19 @@ Gi_Probe_Frame :: struct {
 }
 
 // Hit_Light_Inputs are what lights a batch of hits beside the frame constants (see add_hit_light_passes): the probe grid,
-// whose probes' light the hits take, with its textures and states, which are 0 for a grid of no levels; the punctual
-// lights that the hits see, after every directional light; and a lit scene of last frame, for the hits that the screen
-// shows.
+// whose probes' light the hits take, with its textures and states, which are 0 for a grid of no levels; the frame's
+// light grid, whose punctual lights the hits pick from after every directional light, the lights that each hit weighs
+// before it picks one, and the seed of its choices; and a lit scene of last frame, for the hits that the screen shows.
 @(private)
 Hit_Light_Inputs :: struct {
-	grid:        gpu.Upload,
-	radiance:    Texture,
-	irradiance:  Texture,
-	states:      Buffer,
-	lights:      gpu.Upload,
-	light_count: u32,
-	lit:         History,
+	grid:       gpu.Upload,
+	radiance:   Texture,
+	irradiance: Texture,
+	states:     Buffer,
+	light_grid: gpu.Upload,
+	candidates: u32,
+	seed:       u32,
+	lit:        History,
 }
 
 gi_probes_init :: proc(p: ^Gi_Probes) {
@@ -493,9 +518,9 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	// The uploads and hit shading's turn come first: once the levels move, the reset must run, and the probes' hits must
 	// be shaded.
 	jobs_upload, jobs_ok := platform.gpu_upload(int(params.budget) * 4, 16)
-	lights_upload, lights_ok := platform.gpu_upload(GI_MAX_PROBE_LIGHTS * 4, 16)
+	light_grid, light_grid_ok := light_grid_upload(f)
 	grid_upload, grid_ok := platform.gpu_upload(size_of(Probe_Grid), 16)
-	if !jobs_ok || !lights_ok || !grid_ok {
+	if !jobs_ok || !light_grid_ok || !grid_ok {
 		return nil
 	}
 	reservation, reserved := reserve_hit_shading(f, params.budget * params.rays).?
@@ -515,7 +540,6 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	pf.rays = import_buffer(g, shared.rays)
 
 	grid := &pf.grid
-	reach: f32
 	for l in 0 ..< int(params.levels) {
 		spacing := params.spacing + u32(l)
 		level := &p.levels[l]
@@ -534,12 +558,9 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 				0,
 			},
 		}
-		reach = meters * f32(GI_PROBE_GRID.x)
 	}
 	pf.jobs = probe_jobs(&p.schedule, params.levels, int(params.budget), platform.frame_allocator)
 	copy(jobs_upload.data, ([^]byte)(raw_data(pf.jobs))[:len(pf.jobs) * 4])
-	lights := probe_lights(f, reach)
-	copy(lights_upload.data, ([^]byte)(raw_data(lights))[:len(lights) * 4])
 	p.frame += 1
 	grid^ = {
 		levels         = grid.levels,
@@ -563,13 +584,14 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	(^Probe_Grid)(raw_data(grid_upload.data))^ = grid^
 	pf.upload = grid_upload
 	pf.hit_light = {
-		grid        = grid_upload,
-		radiance    = pf.radiance,
-		irradiance  = pf.irradiance,
-		states      = pf.states,
-		lights      = lights_upload,
-		light_count = u32(len(lights)),
-		lit         = lit,
+		grid       = grid_upload,
+		radiance   = pf.radiance,
+		irradiance = pf.irradiance,
+		states     = pf.states,
+		light_grid = light_grid,
+		candidates = params.candidates,
+		seed       = p.frame,
+		lit        = lit,
 	}
 	ray_count := u32(len(pf.jobs)) * params.rays
 
@@ -672,12 +694,13 @@ add_hit_light_passes :: proc(
 }
 
 // hit_light_inputs are what lights a client's hits other than the probes' own: the frame's world probes where they run,
-// and otherwise a grid of no levels, whose hits take the ambient light; the punctual lights whose spheres come within
-// reach of the camera; and a lit scene of last frame. ok is false when an upload fails.
+// and otherwise a grid of no levels, whose hits take the ambient light; the frame's light grid, with the lights that
+// each hit weighs and the seed of its choices; and a lit scene of last frame. ok is false when an upload fails.
 @(private)
 hit_light_inputs :: proc(
 	f: ^Frame,
-	reach: f32,
+	candidates: u32,
+	seed: u32,
 	lit: History,
 ) -> (
 	inputs: Hit_Light_Inputs,
@@ -685,13 +708,11 @@ hit_light_inputs :: proc(
 ) {
 	r := f.renderer
 	platform := r.platform
-	lights_upload := platform.gpu_upload(GI_MAX_PROBE_LIGHTS * 4, 16) or_return
-	lights := probe_lights(f, reach)
-	copy(lights_upload.data, ([^]byte)(raw_data(lights))[:len(lights) * 4])
 	inputs = {
-		lights      = lights_upload,
-		light_count = u32(len(lights)),
-		lit         = lit,
+		light_grid = light_grid_upload(f) or_return,
+		candidates = candidates,
+		seed       = seed,
+		lit        = lit,
 	}
 	if f.gi != nil && f.gi.probes != nil {
 		pf := f.gi.probes
@@ -747,17 +768,18 @@ run_probe_pass :: proc(ctx: ^Pass_Context) {
 	g := ctx.graph
 	hits, rays := gpu_buffer(g, step.hits), gpu_buffer(g, step.rays)
 	push := Probe_Push {
-		grid          = gpu.read_index(inputs.grid.buffer),
-		grid_offset   = inputs.grid.offset,
-		hits          = step.pass == .Trace ? gpu.write_index(hits) : gpu.read_index(hits),
-		surfaces      = gpu.read_index(gpu_buffer(g, step.surfaces)),
-		rays          = step.pass == .Light || step.pass == .Screen ? gpu.write_index(rays) : gpu.read_index(rays),
-		accel         = gpu.read_index(gpu_accel(g, ray_scene_accel(f))),
-		lights        = gpu.read_index(inputs.lights.buffer),
-		lights_offset = inputs.lights.offset,
-		light_count   = inputs.light_count,
-		ray_count     = step.ray_count,
-		lit_valid     = u32(inputs.lit.valid),
+		grid              = gpu.read_index(inputs.grid.buffer),
+		grid_offset       = inputs.grid.offset,
+		hits              = step.pass == .Trace ? gpu.write_index(hits) : gpu.read_index(hits),
+		surfaces          = gpu.read_index(gpu_buffer(g, step.surfaces)),
+		rays              = step.pass == .Light || step.pass == .Screen ? gpu.write_index(rays) : gpu.read_index(rays),
+		accel             = gpu.read_index(gpu_accel(g, ray_scene_accel(f))),
+		light_grid        = gpu.read_index(inputs.light_grid.buffer),
+		light_grid_offset = inputs.light_grid.offset,
+		candidates        = inputs.candidates,
+		ray_count         = step.ray_count,
+		lit_valid         = u32(inputs.lit.valid),
+		seed              = inputs.seed,
 	}
 	if step.pass == .Update {
 		push.exposure = gpu.read_index(gpu_buffer(g, f.exposure))
