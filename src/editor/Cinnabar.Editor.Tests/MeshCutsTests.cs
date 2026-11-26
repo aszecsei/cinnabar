@@ -73,4 +73,74 @@ public sealed class MeshCutsTests
         Assert.NotEqual(hash, Inputs(Level(0, "\textents = [0.5, 1.1, 0.5]\n")).Hash());
         Assert.Equal(0u, Inputs(Level(10)).Hash());
     }
+
+    [Fact]
+    public void ACutsMapTakesItsFragmentsBackToTheSourceAndKnowsItsCuttersFaces()
+    {
+        var cut = Assert.IsType<CutResult.Cut>(MeshCuts.Derive(Inputs(Level(0))));
+        var map = cut.Map;
+        var mesh = cut.Mesh;
+        var front = Enumerable.Range(0, Wall.Faces.Length).Single(f => Wall.Faces[f].Corners.All(c => Wall.Vertices[c].Z == -0.125));
+
+        // Every result face is a fragment of a source face that lies on its plane, or a jamb of the opening.
+        for (var f = 0; f < mesh.Faces.Length; f++)
+        {
+            var corners = mesh.Faces[f].Corners.Select(c => mesh.Vertices[c]).ToList();
+            if (map.SourceFace(f) is { } s)
+            {
+                Assert.Null(map.Cutter(f));
+                var plane = Wall.Faces[s].Corners.Select(c => Wall.Vertices[c]).ToList();
+                var normal = Vec3.Cross(plane[1] - plane[0], plane[2] - plane[0]).Normalized();
+                Assert.All(corners, p => Assert.True(Math.Abs(Vec3.Dot(p - plane[0], normal)) < 1e-9));
+            }
+            else
+            {
+                Assert.Equal("Opening", map.Cutter(f));
+                Assert.All(corners, p => Assert.True(Math.Abs(p.X) <= 0.5 + 1e-9));
+            }
+        }
+        var fragments = map.ResultsOf(MeshElement.Faces, front).ToList();
+        Assert.True(fragments.Count >= 1);
+        Assert.All(fragments, f => Assert.Equal(front, map.SourceFace(f)));
+
+        // The source's corners are the result's, and the opening's are new.
+        for (var v = 0; v < mesh.Vertices.Length; v++)
+        {
+            var p = mesh.Vertices[v];
+            var corner = Math.Abs(p.X) == 2 && (p.Y == 0 || p.Y == 3);
+            Assert.Equal(corner, map.SourceVertex(v) is { } s && Wall.Vertices[s] == p);
+        }
+        // An edge along the source's bottom front edge is that edge, though the opening split it; a jamb's edge is new.
+        var bottom = Wall.EdgeIndex(
+            Enumerable.Range(0, Wall.Vertices.Length).Single(i => Wall.Vertices[i] == new Vec3(-2, 0, -0.125)),
+            Enumerable.Range(0, Wall.Vertices.Length).Single(i => Wall.Vertices[i] == new Vec3(2, 0, -0.125)));
+        for (var e = 0; e < mesh.Edges.Length; e++)
+        {
+            var (a, b) = (mesh.Vertices[mesh.Edges[e].A], mesh.Vertices[mesh.Edges[e].B]);
+            if (a.Y == 0 && b.Y == 0 && a.Z == -0.125 && b.Z == -0.125)
+            {
+                Assert.Equal(bottom, map.SourceEdge(e));
+            }
+            if (Math.Abs(a.X) == 0.5 && a.X == b.X && a.Y != b.Y)
+            {
+                Assert.Null(map.SourceEdge(e));
+            }
+        }
+    }
+
+    // The fixtures of the game's tests of a cut wall: a wall 12 m long along z, 3 m high and 0.4 m thick, cut by a
+    // doorway 1.2 m wide and 2.3 m high at z, as the kernel cuts it.
+    [Theory]
+    [InlineData("wall_door_a.cut.mesh", 0.0)]
+    [InlineData("wall_door_b.cut.mesh", 3.0)]
+    public void TheCutWallFixturesAreTheKernelsCuts(string file, double z)
+    {
+        var wall = Primitives.Block(new Vec3(-0.2, 0, -6), new Vec3(0.2, 3, 6));
+        var door = Primitives.Block(new Vec3(-0.5, -1.15, -0.6), new Vec3(0.5, 1.15, 0.6));
+        var cut = MeshBoolean.Subtract(wall, Document.Pose.Identity, door,
+            new Pose([0, (long)(1.15 * Document.Pose.Unit), (long)(z * Document.Pose.Unit)], Quat.Identity, [1, 1, 1]), 0);
+        Assert.Null(cut.Reason);
+        var path = Path.Combine(EditorOptions.RepositoryRoot(), "lib", "engine", "asset", "format", "testdata", "cutters", file);
+        Assert.Equal(MeshFile.Write(cut.Mesh), File.ReadAllText(path).ReplaceLineEndings("\n"));
+    }
 }

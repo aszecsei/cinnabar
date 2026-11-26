@@ -603,3 +603,77 @@ a_navmesh_is_in_the_blob_of_its_volumes_sublevel :: proc(t: ^testing.T) {
 		testing.expect_value(t, n.entity, 0x100)
 	}
 }
+
+// A wall that a door cut, as the editor saves it (see docs/editor/mesh-editing.md#cut-meshes), bakes as any static mesh
+// collider: its doorway is walkable. When the door moves and the editor saves the cut again, the next bake moves the
+// gap with it.
+@(test)
+nav_meshes_walk_through_a_cut_walls_doorway :: proc(t: ^testing.T) {
+	DOOR_A :: #load("../../lib/engine/asset/format/testdata/cutters/wall_door_a.cut.mesh", string)
+	DOOR_B :: #load("../../lib/engine/asset/format/testdata/cutters/wall_door_b.cut.mesh", string)
+	tree := make_tree(t, {{"content/wall.cut.mesh", DOOR_A}})
+	defer remove_tree(tree)
+	options := tree_options(tree)
+	pass := cook(options, {.Mesh})
+	testing.expectf(t, pass.ok, "problems: %v", pass.problems.list)
+	wall := tree_guid(t, tree, "wall.cut.mesh")
+	buffer: [32]u8
+	// A 20 m floor with its top at 0, and the wall across it along z, 12 m long, with its doorway 1.2 m wide.
+	scene := strings.concatenate(
+		{
+			"scene 1\n\n",
+			nav_entity(0x100, {0, 0, 0}, components = NAV_VOLUME),
+			nav_entity(0x1, {0, -0.25, 0}, {20, 0.5, 20}),
+			nav_entity(
+				0x2,
+				{0, 0, 0},
+				components = fmt.tprintf(
+					"component 65 Collider\n\tshape = Mesh\n\tmesh = $%s\n",
+					format.guid_format(wall, &buffer),
+				),
+			),
+		},
+		context.temp_allocator,
+	)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/level.scene", tree.dir),
+			transmute([]byte)scene,
+		) ==
+		nil,
+	)
+	for door, step in ([2]string{DOOR_A, DOOR_B}) {
+		if step > 0 {
+			testing.expect(
+				t,
+				os.write_entire_file(
+					fmt.tprintf("%s/content/wall.cut.mesh", tree.dir),
+					transmute([]byte)door,
+				) ==
+				nil,
+			)
+		}
+		baked := cook(options, {.Mesh, .Scene, .Nav_Mesh})
+		testing.expectf(t, baked.ok, "problems: %v", baked.problems.list)
+		data, blob, _, ok := nav_blob_of(t, tree, "level.scene", 0x100, format.NAV_DEFAULT_AGENT)
+		if !ok {
+			return
+		}
+		// The doorway is at z = 0, and then at z = 3.
+		open: [3]f32 = step == 0 ? {0, 0, 0} : {0, 0, 3}
+		shut: [3]f32 = step == 0 ? {0, 0, 3} : {0, 0, 0}
+		testing.expectf(
+			t,
+			nav_polygon_at(data, blob, open) >= 0,
+			"no polygon in the doorway at %v",
+			open,
+		)
+		testing.expectf(
+			t,
+			nav_polygon_at(data, blob, shut) < 0,
+			"a polygon in the wall at %v",
+			shut,
+		)
+	}
+}

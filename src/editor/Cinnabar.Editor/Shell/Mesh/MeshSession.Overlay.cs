@@ -32,19 +32,30 @@ public sealed partial class MeshSession
         if (CanEditInMeshMode)
         {
             var meshes = new List<Wire.MeshOverlayMesh>();
-            foreach (var (guid, sceneId) in _editedMeshes)
+            foreach (var (guid, sceneId) in _editedMeshes.ToList())
             {
-                if (FindMeshData(guid) is not { } mesh)
+                if (FindMeshData(guid) is not { } source)
                 {
                     continue;
                 }
+                // A cut wall draws its result, so its overlay is over the result, with the source's elements mapped onto
+                // it. The host draws an overlay over a live mesh only, and a result that its file holds has no document
+                // until mesh mode opens it.
+                var drawn = Drawn(guid);
+                if (drawn.Map != null && Meshes.Find(drawn.Guid) == null && OpenMesh(drawn.Guid) == null)
+                {
+                    continue;
+                }
+                var mesh = drawn.Mesh;
                 var handle = _shell.FindInScene(sceneId)?.Handle ?? 0;
-                var selected = MeshSelection.Of(guid).ToList();
-                var hovered = _hovered is { } h && h.Guid == guid ? h.Index : -1;
+                var selected = MeshSelection.Of(guid).SelectMany(i => drawn.Map?.ResultsOf(MeshElement, i) ?? [i]).Distinct().ToList();
+                // The overlay has one hovered element, so a cut wall's hovered element draws as its first fragment.
+                var hovered = _hover is not MeshHover.Element h || h.Item.Guid != guid ? -1
+                    : drawn.Map is { } map ? map.ResultsOf(MeshElement, h.Item.Index).DefaultIfEmpty(-1).First() : h.Item.Index;
                 var edges = MeshElement == MeshElement.Edges ? selected.Where(e => e < mesh.Edges.Length).Select(e => new Wire.LiveEdge((uint)mesh.Edges[e].A, (uint)mesh.Edges[e].B)).ToArray() : [];
                 var hoveredEdge = MeshElement == MeshElement.Edges && hovered >= 0 && hovered < mesh.Edges.Length ? mesh.Edges[hovered] : (MeshEdge?)null;
                 meshes.Add(new Wire.MeshOverlayMesh(
-                    Convert.FromHexString(guid),
+                    Convert.FromHexString(drawn.Guid),
                     handle,
                     MeshElement == MeshElement.Vertices ? [.. selected.Select(v => (uint)v)] : [],
                     edges,
@@ -53,7 +64,7 @@ public sealed partial class MeshSession
                     hoveredEdge is { } he ? new Wire.LiveEdge((uint)he.A, (uint)he.B) : new Wire.LiveEdge(0, 0),
                     hoveredEdge != null,
                     MeshElement == MeshElement.Faces ? hovered : -1,
-                    Tools.ToolMarks(guid, mesh)));
+                    Tools.ToolMarks(guid, source)));
             }
             var (origin, axis) = GridPlane();
             message = new Wire.MeshOverlay(true, (Wire.MeshElement)MeshElement, [.. meshes], ShowGrid, (float)GridSize, origin, (byte)axis);

@@ -33,7 +33,8 @@ public sealed partial class MeshSession
 
     // The edited meshes: each mesh file's GUID and the entity that places it, by scene ID.
     readonly Dictionary<string, ulong> _editedMeshes = [];
-    MeshItem? _hovered;
+    // What the mouse is over: an element of an edited mesh, a face that a cutter made, or nothing.
+    MeshHover? _hover;
     string _sentOverlay = "";
 
     public bool InMeshMode { get; private set; }
@@ -78,6 +79,10 @@ public sealed partial class MeshSession
             if (PrimaryMesh is { } primary)
             {
                 status += $"  ·  {Solidity(primary)}";
+            }
+            if (_hover is MeshHover.CutFace cut)
+            {
+                status += $"  ·  made by {cut.Cutter}";
             }
             if (Tools.HasPendingDistance)
             {
@@ -160,15 +165,12 @@ public sealed partial class MeshSession
         _editedMeshes.Clear();
         foreach (var (entity, guid) in meshes)
         {
-            // Its mesh is derived from its source, so an edit of it would be lost at the next cut.
-            if (MeshCutters.SourceOf(entity) != null)
+            // A cut wall's mesh is derived from its source, so the source is what an edit changes, and the result draws
+            // and picks (see docs/editor/mesh-editing.md#editing-a-cut-wall).
+            var edited = MeshCutters.SourceOf(entity) ?? guid;
+            if (OpenMesh(edited) != null)
             {
-                _shell.Console.Add(LogLevel.Warning, $"mesh: cannot edit {entity.Name}: its mesh is cut by its cutters. Move its cutters off it to edit it.");
-                continue;
-            }
-            if (OpenMesh(guid) != null)
-            {
-                _editedMeshes[guid] = entity.Id;
+                _editedMeshes[edited] = entity.Id;
             }
         }
         if (_editedMeshes.Count == 0)
@@ -177,7 +179,7 @@ public sealed partial class MeshSession
         }
         InMeshMode = true;
         MeshSelection = new MeshSelection(MeshElement, []);
-        _hovered = null;
+        _hover = null;
         _shell.Context.Set(MeshContext, true);
         OnMeshModeChanged();
     }
@@ -195,7 +197,7 @@ public sealed partial class MeshSession
         InMeshMode = false;
         MeshTool = MeshTool.Select;
         MeshSelection = new MeshSelection(MeshElement, []);
-        _hovered = null;
+        _hover = null;
         _editedMeshes.Clear();
         _shell.Context.Set(MeshContext, false);
         OnMeshModeChanged();
@@ -280,7 +282,7 @@ public sealed partial class MeshSession
         _shell.CancelGizmo();
         MeshElement = kind;
         MeshSelection = MeshSelection.As(kind, FindMeshData);
-        _hovered = null;
+        _hover = null;
         OnMeshModeChanged();
     }
 

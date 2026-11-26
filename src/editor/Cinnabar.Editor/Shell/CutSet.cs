@@ -8,21 +8,23 @@ namespace Cinnabar.Editor.Shell;
 
 /// <summary>
 /// What the cut set knows of a cut target (see docs/editor/mesh-editing.md#cut-meshes). A target that it has no state
-/// for is Uncut. A state that names a result has its GUID, which the target's <c>Mesh_Renderer</c> names.
+/// for is Uncut. A state that names a result has its GUID, which the target's <c>Mesh_Renderer</c> names. A state with
+/// a collision result, which only the cutters that cut collision cut, has its GUID too, which the target's
+/// <c>Collider</c> names.
 /// </summary>
-public abstract record CutState(string? Result)
+public abstract record CutState(string? Result, string? Collision)
 {
-    /// <summary>The first cut named a new result, which is not derived yet. Its document holds the source until it is.</summary>
-    public sealed record Made(string Result) : CutState(Result);
+    /// <summary>A cut named a new result or collision result, which is not derived yet. Its document holds the source until it is.</summary>
+    public sealed record Made(string Result, string? Collision) : CutState(Result, Collision);
 
-    /// <summary>The result is derived from the inputs of the hash.</summary>
-    public sealed record Cut(string Result, uint Hash) : CutState(Result);
+    /// <summary>The result is derived from the inputs of the hash, and maps back onto its source by the map.</summary>
+    public sealed record Cut(string Result, uint Hash, string? Collision, CutMap Map) : CutState(Result, Collision);
 
     /// <summary>
     /// The inputs of the hash cannot be cut, for the reason. The result keeps the last good cut, or the source when there
     /// was none. A first cut that is refused before it names a result, for a ninth material, has none.
     /// </summary>
-    public sealed record Refused(string? Result, uint Hash, string Reason) : CutState(Result);
+    public sealed record Refused(string? Result, uint Hash, string Reason, string? Collision) : CutState(Result, Collision);
 }
 
 /// <summary>
@@ -46,7 +48,14 @@ public sealed class CutSet
         public readonly Action<IReadOnlyList<Operation>> Applied = applied;
         public readonly Dictionary<ulong, CutState> Targets = [];
         public Flush Flush = Flush.Idle;
+        // The collision results that this scene's cuts named, which a collider names again after an undo and a redo.
+        public readonly HashSet<string> Collisions = [];
+        // What each entity's cut or cutter warns of, derived with the cuts: a collider that ignores them, or one that
+        // plugs a cutter's opening.
+        public Dictionary<ulong, IReadOnlyList<string>> Warnings = [];
     }
+
+    const string CollisionSuffix = ".collision.cut" + MeshFile.Extension;
 
     readonly EditorShell _shell;
     readonly Dictionary<SceneDocument, SceneCuts> _scenes = [];
@@ -62,16 +71,39 @@ public sealed class CutSet
     /// <summary>Posts a derive to the next frame, so that a drag derives once a frame, from its newest step. A test replaces it.</summary>
     internal Action<Action> Post { get; set; }
 
-    /// <summary>A target's refusal came or went, which <see cref="ProblemsOf"/> shows.</summary>
+    /// <summary>A target's refusal or an entity's warning came or went, which <see cref="ProblemsOf"/> shows.</summary>
     public event Action? ProblemsChanged;
 
     /// <summary>What the cut set knows of a target of an open scene, by its ID in the expanded scene, or null for Uncut.</summary>
     public CutState? StateOf(SceneDocument document, ulong id) =>
         _scenes.TryGetValue(document, out var cuts) ? cuts.Targets.GetValueOrDefault(id) : null;
 
-    /// <summary>Why a target of an open scene cannot be cut, for Properties, or nothing.</summary>
-    public IReadOnlyList<string> ProblemsOf(SceneDocument document, ulong id) =>
-        StateOf(document, id) is CutState.Refused r ? [$"the cut is refused: {r.Reason}"] : [];
+    /// <summary>Why a target of an open scene cannot be cut, and what its cut or its cutter warns of, for Properties, or nothing.</summary>
+    public IReadOnlyList<string> ProblemsOf(SceneDocument document, ulong id)
+    {
+        var problems = new List<string>();
+        if (StateOf(document, id) is CutState.Refused r)
+        {
+            problems.Add($"the cut is refused: {r.Reason}");
+        }
+        if (_scenes.TryGetValue(document, out var cuts) && cuts.Warnings.TryGetValue(id, out var warnings))
+        {
+            problems.AddRange(warnings);
+        }
+        return problems;
+    }
+
+    /// <summary>
+    /// The result that a cut target draws and the map of it onto its source, for mesh mode, while the map's indices are
+    /// the source's: the target is cut, and its source has the faces it had, as while a drag moves its vertices before
+    /// the next derive, or the same mesh read again, as when mesh mode opens it. Null otherwise, as for a refused cut or an edit of the topology that is not derived yet, when
+    /// mesh mode draws the source.
+    /// </summary>
+    public (string Result, CutMap Map)? MapOf(SceneDocument document, ulong id) =>
+        StateOf(document, id) is CutState.Cut cut && document.Expanded.Flat.Find(id) is { } target
+            && MeshCutters.SourceOf(target) is { } source && MeshOf(source) is { } now
+            && (ReferenceEquals(now, cut.Map.Source) || now.Faces == cut.Map.Source.Faces || CutInputs.Text(now) == CutInputs.Text(cut.Map.Source))
+            ? (cut.Result!, cut.Map) : null;
 
     /// <summary>
     /// Starts deriving the cuts of an open scene. Call it before the shell's own handlers subscribe, so that a result
@@ -101,8 +133,9 @@ public sealed class CutSet
         foreach (var state in cuts.Targets.Values)
         {
             Close(state.Result);
+            Close(state.Collision);
         }
-        if (cuts.Targets.Values.Any(s => s is CutState.Refused))
+        if (cuts.Targets.Values.Any(s => s is CutState.Refused) || cuts.Warnings.Count > 0)
         {
             ProblemsChanged?.Invoke();
         }
@@ -130,6 +163,7 @@ public sealed class CutSet
         {
             Drop(cuts, id);
         }
+        Warn(document, cuts, plan);
     }
 
     /// <summary>
@@ -181,27 +215,62 @@ public sealed class CutSet
         }
     }
 
+    // What the scene's cuts and cutters warn of: a target's collider that keeps its primitive since no cutter of it cuts
+    // collision, and a cutter's own static collider in its opening, which physics and the navmesh bake keep solid.
+    void Warn(SceneDocument document, SceneCuts cuts, IReadOnlyList<CutInputs> plan)
+    {
+        var warnings = new Dictionary<ulong, IReadOnlyList<string>>();
+        void Add(ulong id, string warning) => warnings[id] = [.. warnings.GetValueOrDefault(id) ?? [], warning];
+        foreach (var inputs in plan)
+        {
+            if (inputs.Cutters.Count > 0 && MeshCuts.CollisionOf(inputs) == CollisionCut.Source
+                && inputs.Target.Components.Find(c => c.Id == SceneEdits.ColliderId) is { } collider
+                && MeshCutters.ColliderShape(collider) is var shape && shape != "Mesh")
+            {
+                Add(inputs.Target.Id, $"the {shape.Replace('_', ' ').ToLowerInvariant()} ignores the cut, since no cutter of it has cuts_collision set");
+            }
+        }
+        var expansion = document.Expanded;
+        foreach (var cutter in expansion.Flat.Entities.Where(e => e.Components.Any(c => c.Id == SceneEdits.MeshCutterId)))
+        {
+            foreach (var plug in MeshCutters.Plugs(expansion, cutter, MeshOf))
+            {
+                Add(cutter.Id, $"the static collider of {Label(plug)} plugs the opening for physics and the navmesh: give it a Kinematic Rigid_Body");
+            }
+        }
+        var same = warnings.Count == cuts.Warnings.Count
+            && warnings.All(w => cuts.Warnings.TryGetValue(w.Key, out var was) && was.SequenceEqual(w.Value));
+        cuts.Warnings = warnings;
+        if (!same)
+        {
+            ProblemsChanged?.Invoke();
+        }
+    }
+
     // The fields that the scene's edit derives, which join its entry: see SceneDocument.Derive.
     List<Operation> FieldOperations(SceneDocument document, SceneCuts cuts) =>
         Plan(document) is { } plan ? [.. TargetOperations(document, cuts, plan).SelectMany(t => t.Ops)] : [];
 
     // Each target's field operations, in the scene's order. A result belongs to one target: a target whose result
-    // another one owns, as a duplicated wall's does, cuts as for the first time, with a result of its own.
+    // another one owns, as a duplicated wall's does, cuts as for the first time, with a result of its own. So does a
+    // collision result.
     List<(SceneEntity Target, List<Operation> Ops)> TargetOperations(SceneDocument document, SceneCuts cuts, IReadOnlyList<CutInputs> plan)
     {
         var claimed = new HashSet<string>();
         var result = new List<(SceneEntity, List<Operation>)>();
         foreach (var inputs in plan)
         {
-            var own = ResultOf(inputs.Target) is { } r && !OwnedElsewhere(document, inputs.Target.Id, r) && claimed.Add(r);
-            result.Add((inputs.Target, FieldOperations(document, cuts, inputs, own)));
+            var id = inputs.Target.Id;
+            var own = ResultOf(inputs.Target) is { } r && !OwnedElsewhere(document, id, r) && claimed.Add(r);
+            var collision = CollisionOf(cuts, inputs.Target) is { } c && !OwnedElsewhere(document, id, c) && claimed.Add(c) ? c : null;
+            result.Add((inputs.Target, FieldOperations(document, cuts, inputs, own, collision)));
         }
         return result;
     }
 
-    // Whether a target of another scene, or another target of this one, has the result.
+    // Whether a target of another scene, or another target of this one, has the result or collision result.
     bool OwnedElsewhere(SceneDocument document, ulong id, string result) =>
-        _scenes.Any(s => s.Value.Targets.Any(t => t.Value.Result == result && (s.Key != document || t.Key != id)));
+        _scenes.Any(s => s.Value.Targets.Any(t => (t.Value.Result == result || t.Value.Collision == result) && (s.Key != document || t.Key != id)));
 
     /// <summary>
     /// The result that a cut target's fields name: what its <c>Mesh_Renderer</c> names while its <c>Cut_Target</c> has a
@@ -210,10 +279,29 @@ public sealed class CutSet
     static string? ResultOf(SceneEntity target) =>
         MeshCutters.SourceOf(target) is { } source && MeshCutters.RendererMesh(target) is { } mesh && mesh != source ? mesh : null;
 
+    // The collision result that a target's Collider names: a mesh that a cut of this scene named, or whose file is a
+    // collision result's, and not the source or the render result. Null for a collider that names anything else, such
+    // as a collision mesh of the designer's own, which a cut never writes into.
+    string? CollisionOf(SceneCuts cuts, SceneEntity target)
+    {
+        if (target.Components.Find(c => c.Id == SceneEdits.ColliderId) is not { } collider
+            || MeshCutters.ColliderMesh(collider) is not { } guid
+            || guid == MeshCutters.SourceOf(target) || guid == ResultOf(target))
+        {
+            return null;
+        }
+        return cuts.Collisions.Contains(guid)
+            || _shell.Assets.Find(guid) is { } asset && _shell.Assets.FullPath(asset) is { } path
+                && path.EndsWith(CollisionSuffix, StringComparison.OrdinalIgnoreCase)
+            ? guid : null;
+    }
+
     // The fields of a target that differ from what its inputs give: its source, the mesh that its renderer names, the
-    // hash and its cap slots' materials. A first cut makes a new result, and a target that nothing cuts goes back to its
-    // source.
-    List<Operation> FieldOperations(SceneDocument document, SceneCuts cuts, CutInputs inputs, bool owned)
+    // hash, its cap slots' materials and its collider. A first cut makes a new result, and a target that nothing cuts
+    // goes back to its source. A collider follows the cutters that cut collision: the source with none, the render
+    // result with all of them, else a collision result of its own, which is new the first time. A cut that the
+    // collider follows makes it a Mesh.
+    List<Operation> FieldOperations(SceneDocument document, SceneCuts cuts, CutInputs inputs, bool owned, string? collision)
     {
         var e = inputs.Target;
         var ops = new List<Operation>();
@@ -222,12 +310,20 @@ public sealed class CutSet
             return ops;
         }
         var source = MeshCutters.SourceOf(e);
+        var collider = e.Components.Find(c => c.Id == SceneEdits.ColliderId);
+        var named = collider != null ? MeshCutters.ColliderMesh(collider) : null;
+        // Whether the collider follows a result now, so it goes back to the source with no cutter that cuts collision.
+        var follows = named != null && (named == ResultOf(e) || named == collision);
         if (inputs.Cutters.Count == 0)
         {
             if (source != null)
             {
                 ops.Add(new SetField(e.Id, SceneEdits.MeshRendererId, "mesh", SceneValue.AssetRef(source)));
                 ops.Add(new SetField(e.Id, SceneEdits.CutTargetId, "source", null));
+                if (follows)
+                {
+                    ops.Add(new SetField(e.Id, SceneEdits.ColliderId, "mesh", SceneValue.AssetRef(source)));
+                }
             }
             if (MeshCutters.HashOf(e) != 0)
             {
@@ -240,10 +336,11 @@ public sealed class CutSet
             // A refusal keeps the last good cut, and Derive says why.
             return ops;
         }
-        if (!owned)
+        var result = ResultOf(e);
+        if (!owned || result == null)
         {
-            var result = Convert.ToHexStringLower(Guid.NewGuid().ToByteArray());
-            Make(document, cuts, inputs, result);
+            result = NewGuid();
+            Make(document, cuts, inputs, result, newResult: true, null);
             ops.Add(new SetField(e.Id, SceneEdits.CutTargetId, "source", SceneValue.AssetRef(inputs.Source)));
             ops.Add(new SetField(e.Id, SceneEdits.MeshRendererId, "mesh", SceneValue.AssetRef(result)));
         }
@@ -262,21 +359,71 @@ public sealed class CutSet
                 ops.Add(new SetField(e.Id, SceneEdits.MeshRendererId, field, SceneValue.AssetRef(material)));
             }
         }
+        if (collider == null)
+        {
+            return ops;
+        }
+        string? wanted;
+        switch (MeshCuts.CollisionOf(inputs))
+        {
+            case CollisionCut.Render:
+                wanted = result;
+                break;
+            case CollisionCut.Own:
+                if (collision == null)
+                {
+                    collision = NewGuid();
+                    Make(document, cuts, inputs, result, newResult: false, collision);
+                }
+                wanted = collision;
+                break;
+            default:
+                // A primitive keeps its shape, with a warning.
+                wanted = follows ? inputs.Source : null;
+                break;
+        }
+        if (wanted != null)
+        {
+            if (MeshCutters.ColliderShape(collider) != "Mesh")
+            {
+                ops.Add(new SetField(e.Id, SceneEdits.ColliderId, "shape", SceneValue.Name("Mesh")));
+            }
+            if (named != wanted)
+            {
+                ops.Add(new SetField(e.Id, SceneEdits.ColliderId, "mesh", SceneValue.AssetRef(wanted)));
+            }
+        }
         return ops;
     }
 
-    // A first cut's result: a document of the source's mesh, which the host draws from the start, until the derive.
-    void Make(SceneDocument document, SceneCuts cuts, CutInputs inputs, string result)
+    static string NewGuid() => Convert.ToHexStringLower(Guid.NewGuid().ToByteArray());
+
+    // A new result, or a new collision result beside the target's result: a document of the source's mesh, which the
+    // host draws from the start, until the derive. Its document is added before the field that names it is sent.
+    void Make(SceneDocument document, SceneCuts cuts, CutInputs inputs, string result, bool newResult, string? collision)
     {
-        if (cuts.Targets.GetValueOrDefault(inputs.Target.Id) is { } old && !OwnedElsewhere(document, inputs.Target.Id, old.Result ?? ""))
+        var old = cuts.Targets.GetValueOrDefault(inputs.Target.Id);
+        if (newResult)
         {
-            Close(old.Result);
+            if (old?.Result is { } was && !OwnedElsewhere(document, inputs.Target.Id, was))
+            {
+                Close(was);
+            }
+            _shell.Mesh.Meshes.Add(new MeshDocument(ResultPath(document, inputs.Target, result, ""), result, inputs.SourceMesh, saved: false));
         }
-        _shell.Mesh.Meshes.Add(new MeshDocument(ResultPath(document, inputs.Target, result), result, inputs.SourceMesh, saved: false));
-        Change(cuts, inputs.Target, new CutState.Made(result));
+        if (collision != null)
+        {
+            if (old?.Collision is { } was && !OwnedElsewhere(document, inputs.Target.Id, was))
+            {
+                Close(was);
+            }
+            cuts.Collisions.Add(collision);
+            _shell.Mesh.Meshes.Add(new MeshDocument(ResultPath(document, inputs.Target, collision, CollisionSuffix), collision, inputs.SourceMesh, saved: false));
+        }
+        Change(cuts, inputs.Target, new CutState.Made(result, collision ?? old?.Collision));
     }
 
-    // Derives a target's result, unless the cut set has it from the same inputs.
+    // Derives a target's result and its collision result, unless the cut set has them from the same inputs.
     void Update(SceneDocument document, SceneCuts cuts, CutInputs inputs)
     {
         var e = inputs.Target;
@@ -288,39 +435,55 @@ public sealed class CutSet
             if (inputs.Cutters.Count > 0 && ResultOf(e) == null && MeshCuts.CapSlots(inputs).Reason is { } why)
             {
                 Close(state?.Result);
-                Change(cuts, e, new CutState.Refused(null, hash, why));
+                Close(state?.Collision);
+                Change(cuts, e, new CutState.Refused(null, hash, why, null));
                 return;
             }
             Drop(cuts, e.Id);
             return;
         }
-        if (state is CutState.Cut c && c.Result == result && c.Hash == hash
-            || state is CutState.Refused r && r.Result == result && r.Hash == hash)
+        var collision = MeshCuts.CollisionOf(inputs) == CollisionCut.Own
+            && CollisionOf(cuts, e) is { } c && !OwnedElsewhere(document, e.Id, c) ? c : null;
+        if (state is CutState.Cut done && done.Result == result && done.Hash == hash && done.Collision == collision
+            || state is CutState.Refused r && r.Result == result && r.Hash == hash && r.Collision == collision)
         {
             return;
         }
-        if (state != null && state.Result != result)
+        if (state?.Result is { } oldResult && oldResult != result)
         {
-            Close(state.Result);
+            Close(oldResult);
         }
-        switch (MeshCuts.Derive(inputs))
+        if (state?.Collision is { } oldCollision && oldCollision != collision)
         {
-            case CutResult.Cut cut:
-                Put(document, e, result, cut.Mesh);
-                Change(cuts, e, new CutState.Cut(result, hash));
-                break;
-            case CutResult.Refused refused:
-                // The last good cut stays. With none, as after an undo and a redo of a refused first cut, the source draws.
-                if (_shell.Mesh.Meshes.Find(result) == null && !File.Exists(ResultPath(document, e, result)))
-                {
-                    _shell.Mesh.Meshes.Add(new MeshDocument(ResultPath(document, e, result), result, inputs.SourceMesh, saved: false));
-                }
-                Change(cuts, e, new CutState.Refused(result, hash, refused.Reason));
-                break;
+            Close(oldCollision);
         }
+        var derived = MeshCuts.Derive(inputs);
+        var collided = collision != null ? MeshCuts.Derive(inputs, c => c.Fields.CutsCollision) : null;
+        if (derived is CutResult.Cut cut && (collided is null || collided is CutResult.Cut))
+        {
+            Put(document, e, result, cut.Mesh, "");
+            if (collision != null && collided is CutResult.Cut own)
+            {
+                cuts.Collisions.Add(collision);
+                Put(document, e, collision, own.Mesh, CollisionSuffix);
+            }
+            Change(cuts, e, new CutState.Cut(result, hash, collision, cut.Map));
+            return;
+        }
+        // The last good cut stays. With none, as after an undo and a redo of a refused first cut, the source draws.
+        var reason = derived is CutResult.Refused refused ? refused.Reason : ((CutResult.Refused)collided!).Reason;
+        foreach (var (guid, suffix) in new[] { (result, ""), (collision, CollisionSuffix) })
+        {
+            if (guid != null && _shell.Mesh.Meshes.Find(guid) == null && !File.Exists(ResultPath(document, e, guid, suffix)))
+            {
+                _shell.Mesh.Meshes.Add(new MeshDocument(ResultPath(document, e, guid, suffix), guid, inputs.SourceMesh, saved: false));
+            }
+        }
+        Change(cuts, e, new CutState.Refused(result, hash, reason, collision));
     }
+
     // Sets a result's document to a mesh: the open one, or the file's when it holds that mesh, else a new one.
-    void Put(SceneDocument document, SceneEntity target, string result, MeshData mesh)
+    void Put(SceneDocument document, SceneEntity target, string result, MeshData mesh, string suffix)
     {
         var meshes = _shell.Mesh.Meshes;
         if (meshes.Find(result) is { } open)
@@ -331,7 +494,7 @@ public sealed class CutSet
             }
             return;
         }
-        var path = ResultPath(document, target, result);
+        var path = ResultPath(document, target, result, suffix);
         // A file that holds the cut, as at the scene's open, is what the host draws already, cooked.
         if (File.Exists(path) && MeshDocument.Open(path, result) is ({ } saved, _) && MeshFile.Write(saved.Data) == MeshFile.Write(mesh))
         {
@@ -340,7 +503,7 @@ public sealed class CutSet
         meshes.Add(new MeshDocument(path, result, mesh, saved: false));
     }
 
-    // The target no longer has a result: its document closes.
+    // The target no longer has a result: its documents close.
     void Drop(SceneCuts cuts, ulong id)
     {
         if (cuts.Targets.GetValueOrDefault(id) is not { } state)
@@ -348,6 +511,7 @@ public sealed class CutSet
             return;
         }
         Close(state.Result);
+        Close(state.Collision);
         var refused = state is CutState.Refused;
         cuts.Targets.Remove(id);
         if (refused)
@@ -446,8 +610,8 @@ public sealed class CutSet
             && _shell.Assets.FullPath(asset) is { } path && File.Exists(path) ? path : null;
 
     // A result's file: the index's, once it has one, else beside the scene, by the target's name and ID, so a redo
-    // after an undo makes the same file.
-    string ResultPath(SceneDocument document, SceneEntity target, string result)
+    // after an undo makes the same file. A collision result's ends .collision.cut.mesh.
+    string ResultPath(SceneDocument document, SceneEntity target, string result, string suffix)
     {
         if (_shell.Assets.Find(result) is { } asset && _shell.Assets.FullPath(asset) is { } indexed)
         {
@@ -455,7 +619,7 @@ public sealed class CutSet
         }
         var directory = Path.Combine(Path.GetDirectoryName(document.Path)!, $"{Path.GetFileNameWithoutExtension(document.Path)}_meshes");
         var name = string.Concat(target.Name.Select(c => Path.GetInvalidFileNameChars().Contains(c) || c == ' ' ? '_' : c));
-        return Path.Combine(directory, $"{(name.Length > 0 ? name + "_" : "")}{target.Id:x16}.cut{MeshFile.Extension}");
+        return Path.Combine(directory, $"{(name.Length > 0 ? name + "_" : "")}{target.Id:x16}{(suffix != "" ? suffix : ".cut" + MeshFile.Extension)}");
     }
 
     static string Label(SceneEntity e) => e.Name.Length > 0 ? e.Name : $"{e.Id:x16}";

@@ -1,0 +1,37 @@
+# The doorway scene's dividing wall: a box 0.4 m thick, 2.6 m high and 12 m long along z, from the room's south
+# wall to its north wall. doorway_wall.mesh is the wall as it is edited, and the .cut.mesh beside the scene is it
+# with its door's opening cut (see docs/editor/mesh-editing.md#cut-meshes). The editor writes this file.
+mesh 1
+material 0 $7d2e4a9c1f6b4c3d8e5a2b7f9c0d1e64
+v -0.2 0 -6
+v 0.2 0 -6
+v 0.2 0 6
+v -0.2 0 6
+v -0.2 2.6 -6
+v 0.2 2.6 -6
+v 0.2 2.6 6
+v -0.2 2.6 6
+f 0 0 1 2 3
+map 1 0 0 0 0 -1 1 1 0 0 0
+f 0 4 7 6 5
+map 1 0 0 0 0 -1 1 1 0 0 0
+f 0 0 4 5 1
+map 1 0 0 0 -1 0 1 1 0 0 0
+f 0 2 6 7 3
+map 1 0 0 0 -1 0 1 1 0 0 0
+f 0 3 7 4 0
+map 0 0 1 0 -1 0 1 1 0 0 0
+f 0 1 5 6 2
+map 0 0 1 0 -1 0 1 1 0 0 0
+e 0 1 sharp
+e 1 2 sharp
+e 2 3 sharp
+e 3 0 sharp
+e 4 7 sharp
+e 7 6 sharp
+e 6 5 sharp
+e 5 4 sharp
+e 0 4 sharp
+e 5 1 sharp
+e 2 6 sharp
+e 7 3 sharp

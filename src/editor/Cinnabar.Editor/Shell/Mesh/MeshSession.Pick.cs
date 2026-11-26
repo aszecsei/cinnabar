@@ -16,19 +16,44 @@ namespace Cinnabar.Editor.Shell;
 /// </summary>
 public sealed partial class MeshSession
 {
+    // What the mouse is over in mesh mode: an element of an edited mesh, or a face that a cutter made on a cut wall,
+    // which cannot be selected. An element is the edited mesh's, so it holds while a cut wall's result changes under it.
+    abstract record MeshHover
+    {
+        public sealed record Element(MeshItem Item) : MeshHover;
+
+        public sealed record CutFace(string Cutter) : MeshHover;
+    }
+
+    // The mesh that draws an edited mesh: a cut wall's result, with its map onto the source, while the map is of the
+    // source as it is now. Else the edited mesh itself, as for a refused cut or a drag's step that is not cut yet.
+    (string Guid, MeshData Mesh, CutMap? Map) Drawn(string guid)
+    {
+        if (_shell.Scene is { } scene && _editedMeshes.TryGetValue(guid, out var id) && _shell.Cuts.MapOf(scene, id) is { } cut)
+        {
+            return (cut.Result, cut.Map.Result, cut.Map);
+        }
+        return (guid, FindMeshData(guid) ?? MeshData.Empty, null);
+    }
+
     /// <summary>The element under a pixel in the current kind, or null: the editor's own pick, synchronous.</summary>
-    public MeshItem? MeshElementAt(Vec2 pixel)
+    public MeshItem? MeshElementAt(Vec2 pixel) => HitAt(pixel) is MeshHover.Element e ? e.Item : null;
+
+    // What is under a pixel. On a cut wall the result is picked, and its element is mapped onto the source. A face that a
+    // cutter made, or a vertex or an edge that the cut made, is no element of the source.
+    MeshHover? HitAt(Vec2 pixel)
     {
         var (width, height) = _shell.FrameSize;
         var ray = _shell.Camera.Ray(pixel, width, height);
-        MeshItem? best = null;
+        MeshHover? best = null;
         var bestDistance = double.MaxValue;
         foreach (var guid in _editedMeshes.Keys)
         {
-            if (FindMeshData(guid) is not { } mesh || PlacementOf(guid) is not { } placement)
+            if (FindMeshData(guid) == null || PlacementOf(guid) is not { } placement)
             {
                 continue;
             }
+            var (_, mesh, map) = Drawn(guid);
             var hit = MeshPick.Face(mesh, placement, ray, SelectThrough);
             int? index = MeshElement switch
             {
@@ -36,7 +61,16 @@ public sealed partial class MeshSession
                 MeshElement.Edges => MeshPick.Edge(mesh, placement, _shell.Camera, pixel, width, height, hit?.Distance),
                 _ => hit?.Face,
             };
-            if (index is not { } i)
+            MeshHover? found = null;
+            if (map != null && MeshElement == MeshElement.Faces && hit is { } h && map.Cutter(h.Face) is { } cutter)
+            {
+                found = new MeshHover.CutFace(cutter);
+            }
+            else if (index is { } i && (map == null ? i : map.SourceOf(MeshElement, i)) is { } source)
+            {
+                found = new MeshHover.Element(new MeshItem(guid, source));
+            }
+            if (found == null)
             {
                 continue;
             }
@@ -44,7 +78,7 @@ public sealed partial class MeshSession
             var distance = hit?.Distance ?? 0;
             if (distance < bestDistance)
             {
-                best = new MeshItem(guid, i);
+                best = found;
                 bestDistance = distance;
             }
         }
@@ -59,11 +93,18 @@ public sealed partial class MeshSession
             return;
         }
         Tools.HoverCut(pixel);
-        var hovered = MeshElementAt(pixel);
-        if (hovered != _hovered)
+        var hovered = HitAt(pixel);
+        if (hovered == _hover)
         {
-            _hovered = hovered;
-            SendMeshOverlay();
+            return;
+        }
+        // The status bar says which cutter made a face under the mouse.
+        var status = _hover is MeshHover.CutFace || hovered is MeshHover.CutFace;
+        _hover = hovered;
+        SendMeshOverlay();
+        if (status)
+        {
+            MeshModeChanged?.Invoke();
         }
     }
 
@@ -89,9 +130,12 @@ public sealed partial class MeshSession
         var items = new List<MeshItem>();
         foreach (var guid in _editedMeshes.Keys)
         {
-            if (FindMeshData(guid) is { } mesh && PlacementOf(guid) is { } placement)
+            if (FindMeshData(guid) != null && PlacementOf(guid) is { } placement)
             {
-                items.AddRange(MeshPick.InBox(mesh, placement, _shell.Camera, MeshElement, min, max, width, height, SelectThrough).Select(i => new MeshItem(guid, i)));
+                var (_, mesh, map) = Drawn(guid);
+                var picked = MeshPick.InBox(mesh, placement, _shell.Camera, MeshElement, min, max, width, height, SelectThrough);
+                var sources = map == null ? picked : picked.Select(i => map.SourceOf(MeshElement, i)).OfType<int>().Distinct();
+                items.AddRange(sources.Select(i => new MeshItem(guid, i)));
             }
         }
         ApplyMeshPick(items, mode);
