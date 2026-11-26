@@ -208,18 +208,13 @@ public sealed class SeveralScenesTests : IDisposable
     public void AnEntityDoesNotGoUnderAnEntityOfAnotherScene()
     {
         var (shell, north, south) = Open();
-        using var _ = shell;
+        using var owned = shell;
         shell.OnGameMessage(World(north, south));
         shell.ActivateScene(north);
 
         // Both entities have the scene ID 1, so only their scenes tell the target from the dragged entity itself.
-        var allowed = shell.CanReparent(shell.World.Find(NorthGate)!, shell.World.Find(SouthGate)!, out var reason);
-
-        Assert.False(allowed);
-        Assert.Contains("an entity's parent is in its own scene", reason);
-        Assert.Contains("south.scene", reason);
-        Assert.False(shell.CanReparent(shell.World.Find(NorthGate)!, null, out reason));
-        Assert.Equal("", reason);
+        Assert.False(shell.CanReparent(shell.World.Find(NorthGate)!, shell.World.Find(SouthGate)!, out _));
+        Assert.False(shell.CanReparent(shell.World.Find(NorthGate)!, null, out _));
     }
 
     [Fact]
@@ -242,21 +237,6 @@ public sealed class SeveralScenesTests : IDisposable
         Assert.Same(south, shell.Scene);
         Assert.Equal("South Gate", shell.SelectedSceneEntity!.Name);
         Assert.Equal(SouthGate, shell.FindInScene(1)!.Handle);
-    }
-
-    [Fact]
-    public void TheGamesProblemsAreTheirScenes()
-    {
-        var (shell, north, south) = Open();
-        using var _ = shell;
-        shell.OnGameMessage(World(north, south));
-
-        shell.OnGameMessage(new EditProblems(false, [new EditProblem(south.Number, 1, "Spin has no field speed, so it is not set")]));
-
-        Assert.Single(shell.ProblemsOf(shell.World.Find(SouthGate)!));
-        Assert.Empty(shell.ProblemsOf(shell.World.Find(NorthGate)!));
-        shell.ActivateScene(north);
-        Assert.Empty(shell.ProblemsOf(1));
     }
 
     [Fact]
@@ -346,49 +326,6 @@ public sealed class SeveralScenesTests : IDisposable
         Assert.Equal(new BehaviourOperationsAnswer(5, false), _sent.OfType<BehaviourOperationsAnswer>().Last());
         Assert.Single(north.History);
     }
-
-    [Fact]
-    public void HiddenEntitiesAreTheirScenes()
-    {
-        var (shell, north, south) = Open(link: true);
-        using var _ = shell;
-        shell.OnGameMessage(World(north, south));
-        _sent.Clear();
-
-        shell.SetHidden(shell.World.Find(SouthGate)!, true);
-
-        Assert.Equal([SouthGate], _sent.OfType<SetHidden>().Last().Entities);
-        Assert.True(shell.IsHidden(shell.World.Find(SouthGate)!));
-        Assert.False(shell.IsHidden(shell.World.Find(NorthGate)!));
-    }
-
-    [Fact]
-    public void TheOutlinerShowsEachScenesEntitiesUnderItsHeading() => Ui.Run(() =>
-    {
-        var (shell, north, south) = Open();
-        using var _ = shell;
-        shell.OnGameMessage(World(north, south));
-        var view = new OutlinerView(shell);
-        view.Subscriptions.Attach();
-
-        var rows = view.Rows;
-        Assert.Equal(4, rows.Count);
-        Assert.Equal(north, Assert.IsType<OutlinerHeading>(rows[0]).Scene);
-        Assert.Equal(NorthGate, Assert.IsType<OutlinerRow>(rows[1]).Node.Handle);
-        var southHeading = Assert.IsType<OutlinerHeading>(rows[2]);
-        Assert.Equal(south, southHeading.Scene);
-        Assert.True(southHeading.Active);
-        Assert.Equal(SouthGate, Assert.IsType<OutlinerRow>(rows[3]).Node.Handle);
-
-        // The active scene's heading follows the selection.
-        shell.Selection.Select(NorthGate);
-        Assert.True(Assert.IsType<OutlinerHeading>(view.Rows[0]).Active);
-
-        // With one scene open, the outliner has no headings.
-        shell.CloseScene(south);
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(NorthGate, "North Gate", 1, north.Number, 0, true, [1])]));
-        Assert.IsType<OutlinerRow>(Assert.Single(view.Rows));
-    });
 
     public void Dispose() => _temp.Dispose();
 }

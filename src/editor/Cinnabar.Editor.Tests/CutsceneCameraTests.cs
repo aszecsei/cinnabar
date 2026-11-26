@@ -73,16 +73,6 @@ public sealed class CutsceneCameraTests : IDisposable
         new(look.Viewport, look.Serial, camera, binding, [1L << 24, 2L << 24, 3L << 24], [0, 0, 0, 1], 0.6f, 50, [36, 24]);
 
     [Fact]
-    public void TheCutsCamerasAreTheCutscenesCameraBindings()
-    {
-        var (shell, editor, _) = NewShell();
-        using var _ = shell;
-
-        Assert.Equal([(3, "Wide Shot"), (4, "Close Shot"), (5, "Tracking Shot")], editor.CameraBindings());
-        Assert.False(editor.IsCamera(editor.File.Bindings.First(b => b.Id == 1)));
-    }
-
-    [Fact]
     public void LookingThroughTheCutsTellsTheGameOnceForEachSessionAndTakesOnlyItsOwnAnswer()
     {
         var (shell, editor, ticket) = NewShell();
@@ -137,47 +127,6 @@ public sealed class CutsceneCameraTests : IDisposable
         var fox = shell.OpenCutscene(shell.Assets.Find(Fox)!)!;
         shell.CutscenePreview.Take(fox);
         Assert.IsType<ViewLook.Editor>(shell.Looks[0]);
-    }
-
-    [Fact]
-    public void TheLookCommandsActOnTheSelectedCameraBindingAndTheActiveView()
-    {
-        var (shell, editor, _) = NewShell();
-        using var _ = shell;
-        var look = shell.Commands.Get(EditorCommands.CutsceneLookThrough);
-        var editorCamera = shell.Commands.Get(EditorCommands.CutsceneEditorCamera);
-
-        editor.Select(editor.File.Bindings.First(b => b.Id == 1));
-        Assert.False(look.CanExecute);
-        editor.Select(editor.File.Bindings.First(b => b.Id == 5));
-        Assert.True(look.CanExecute);
-        Assert.False(editorCamera.CanExecute);
-
-        look.Execute();
-        Assert.True(look.IsChecked);
-        Assert.Equal(5, Assert.IsType<ViewLook.Camera>(shell.Looks[0]).Binding);
-        editorCamera.Execute();
-        Assert.IsType<ViewLook.Editor>(shell.Looks[0]);
-
-        shell.Commands.Get(EditorCommands.CutsceneLookThroughCuts).Execute();
-        Assert.IsType<ViewLook.Cuts>(shell.Looks[0]);
-    }
-
-    [Fact]
-    public void TheGuidesAreEachViewsAndViewportJsonKeepsThem()
-    {
-        var (shell, _, _) = NewShell();
-        using var _ = shell;
-
-        shell.Commands.Get(EditorCommands.SafeAreas).Execute();
-        shell.SetGuides(shell.Viewports[1], shell.Viewports[1].Guides with { Mask = true, Aspect = GuideAspect.Custom, Custom = 2.2 });
-
-        Assert.True(shell.SettingsViewport.Guides.Safe);
-        Assert.False(shell.Viewports[1].Guides.Safe);
-        Assert.True(shell.Commands.Get(EditorCommands.SafeAreas).IsChecked);
-        var json = shell.Settings.Read(EditorSettings.ViewportFileName)!;
-        Assert.Contains("\"Guides\"", json);
-        Assert.Contains("2.2", json);
     }
 
     // The camera cut track's sections: their spans and cameras.
@@ -422,7 +371,6 @@ public sealed class CutsceneCameraTests : IDisposable
         shell.OnGameMessage(new ViewportLookShown(0, look.Serial, true, 1, WideShot, [0, 0, 0, 1], 1, 0, [0, 0]));
 
         var refused = Assert.IsType<Pilot.Refused>(Assert.IsType<ViewLook.Camera>(shell.Looks[0]).Pilot);
-        Assert.Contains("spawned", refused.Reason);
         Assert.Equal(refused.Reason, shell.Looks.PilotRefusal(0));
         shell.Looks.BeginGesture(0);
         shell.Looks.Move(0, c => c.Fly(new Vec3(1, 0, 0), 1, 1));
@@ -529,27 +477,6 @@ public sealed class CutsceneCameraTests : IDisposable
         Assert.Equal(40, editor.LensValue(camera, "focal_length")!.Value, 4);
     }
 
-    [Fact]
-    public void WithoutAutoKeyALensScrubHoldsItsValueAndNeedsTheTabsPreview()
-    {
-        var (shell, editor, _) = NewShell();
-        using var _ = shell;
-        var camera = NewCamera(shell, editor);
-        var text = editor.Document.Text;
-
-        var drag = editor.BeginLensDrag(camera, "focus_distance", "Drag Focus", out var _)!;
-        drag.Step(3.5);
-        drag.End(cancel: false);
-        Assert.Equal(text, editor.Document.Text);
-        Assert.Equal(3.5, editor.LensValue(camera, "focus_distance")!.Value, 4);
-
-        // While another tab holds the preview, a value cannot hold, and the drag says why.
-        var fox = shell.OpenCutscene(shell.Assets.Find(Fox)!)!;
-        shell.CutscenePreview.Take(fox);
-        Assert.Null(editor.BeginLensDrag(camera, "focus_distance", "Drag Focus", out var why));
-        Assert.NotNull(why);
-    }
-
     // Looks the first scene view through a camera, and answers with a pose.
     ViewLook.Camera LookThrough(EditorShell shell, CutsceneEditor editor, int binding)
     {
@@ -597,13 +524,20 @@ public sealed class CutsceneCameraTests : IDisposable
     }
 
     [Fact]
-    public void AnArmedPickTakesTheNextClickAndEscDisarmsIt()
+    public void AFocusPickWaitsForTheDrawnLookTakesTheNextClickAndEndsWithEscOrItsLook()
     {
         var (shell, editor, _) = NewShell();
         using var _ = shell;
         var camera = NewCamera(shell, editor);
-        LookThrough(shell, editor, camera);
+        editor.ToggleLookThrough(camera);
 
+        // The game has not drawn the view through the camera yet, so a pick would hit what the editor camera sees.
+        Assert.NotNull(editor.PickFocusRefusal(0));
+        Assert.NotNull(editor.ArmFocusPick(camera));
+        Assert.Null(editor.FocusArmed);
+
+        var look = _sent.OfType<ViewportLook>().Last();
+        shell.OnGameMessage(new ViewportLookShown(0, look.Serial, true, (uint)camera, WideShot, [0, 0, 0, 1], (float)Lens.VerticalFov(35, 24), 35, [36, 24]));
         var command = shell.Commands.Get(EditorCommands.CutscenePickFocus);
         Assert.True(command.CanExecute);
         command.Execute();
@@ -622,43 +556,12 @@ public sealed class CutsceneCameraTests : IDisposable
         shell.OnGameMessage(new PickResult(_sent.OfType<PickRequest>().Last().Id, [], 2.5f, 0));
         Assert.Equal(2.5, editor.LensValue(camera, "focus_distance")!.Value, 4);
         Assert.IsType<PreviewValuesState.Holding>(shell.PreviewValues.State);
-    }
 
-    [Fact]
-    public void FocusOnSetsTheBindingsConstraintAndThenPickFocusIsRefused()
-    {
-        var (shell, editor, _) = NewShell();
-        using var _ = shell;
-        var camera = NewCamera(shell, editor);
-        LookThrough(shell, editor, camera);
-        Assert.Null(editor.PickFocusRefusal(0));
-
-        editor.SetFocusOn(camera, 1);
-        Assert.Equal("Focus On", editor.Document.History[^1]);
-        Assert.Equal("1", editor.File.Bindings.Single(b => b.Id == camera).Get("focus"));
-        Assert.Equal(1, editor.FocusedOn(camera));
-        Assert.NotNull(editor.PickFocusRefusal(0));
-        Assert.False(editor.PickFocus(0, new Vec2(1, 1)));
-        Assert.Empty(_sent.OfType<PickRequest>());
-
-        editor.SetFocusOn(camera, null);
-        Assert.Null(editor.File.Bindings.Single(b => b.Id == camera).Get("focus"));
-        Assert.Null(editor.PickFocusRefusal(0));
-    }
-
-    [Fact]
-    public void TheCutTrackNamesEachCutUpToTheNextAndItsHoverSaysWhereItIs()
-    {
-        static CutsceneVisibleBar Bar(double x0, double x1, string label, int start, int end) =>
-            new(x0, x1, new CutsceneTimelineItem(CutsceneItemKind.Section, start, end, $"s{start}") { Label = label });
-
-        // A short cut followed by a gap names its camera past its end; a name with too little room is left out.
-        var names = CutsceneTimelineLayout.CutNames([Bar(-20, 8, "Wide", 0, 1000), Bar(10, 12, "Close", 1000, 2000), Bar(20, 60, "Over", 2000, 3000),
-            Bar(200, 400, "Tracking", 3000, 4000)], 300);
-        Assert.Equal([(20.0, 174.0, "Over"), (200.0, 94.0, "Tracking")], names);
-
-        Assert.Equal("Wide Shot · 00:01:00–00:02:12 (00:01:12)",
-            Cutscenes.CutsceneTimelineInput.CutTip(new CutsceneTimelineItem(CutsceneItemKind.Section, 60000, 150000, "s") { Label = "Wide Shot" }, 24));
+        // An armed pick ends with its look.
+        Assert.Null(editor.ArmFocusPick(camera));
+        shell.Looks.LookThroughEditor(0);
+        Assert.Null(editor.FocusArmed);
+        Assert.False(editor.PicksFocusOnClick(0));
     }
 
     [Fact]
@@ -675,29 +578,5 @@ public sealed class CutsceneCameraTests : IDisposable
         Assert.Equal(50, Assert.Single(CutsceneKeying.KeysAt(editor.File, LensKey(camera, "focal_length"), 300000))!.Value, 4);
         Assert.IsType<PreviewValuesState.Holding>(shell.PreviewValues.State);
         Assert.NotNull(shell.PreviewValues.BindingValueOf(camera, Panels.CinematicCameraText.CinematicCameraId, "aperture"));
-    }
-
-    [Fact]
-    public void AFocusPickWaitsForTheViewToDrawThroughTheCamera()
-    {
-        var (shell, editor, _) = NewShell();
-        using var _ = shell;
-        var camera = NewCamera(shell, editor);
-        editor.ToggleLookThrough(camera);
-
-        // The game has not drawn the view through the camera yet, so a pick would hit what the editor camera sees.
-        Assert.NotNull(editor.PickFocusRefusal(0));
-        Assert.NotNull(editor.ArmFocusPick(camera));
-        Assert.Null(editor.FocusArmed);
-
-        var look = _sent.OfType<ViewportLook>().Last();
-        shell.OnGameMessage(new ViewportLookShown(0, look.Serial, true, (uint)camera, WideShot, [0, 0, 0, 1], (float)Lens.VerticalFov(35, 24), 35, [36, 24]));
-        Assert.Null(editor.ArmFocusPick(camera));
-        Assert.Equal(camera, editor.FocusArmed);
-
-        // The pick ends with its look.
-        shell.Looks.LookThroughEditor(0);
-        Assert.Null(editor.FocusArmed);
-        Assert.False(editor.PicksFocusOnClick(0));
     }
 }

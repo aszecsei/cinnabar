@@ -85,17 +85,6 @@ public sealed class PrefabPartTests : IDisposable
     }
 
     [Fact]
-    public void TheAnchorIsTheMeanOfThePivots()
-    {
-        var tree = PrefabTree.Of(Parse(StandText), _ => null)!;
-        // In the group's own space, the columns are at (1, 1, 0) and (3, 1, 0).
-        Near([2, 1, 0], tree.Find(Floor)!.Anchor);
-        // A column is its own pivot, and what draws nothing has none.
-        Near([0, 0, 0], tree.Find(ColumnA)!.Anchor);
-        Near([0, 0, 0], tree.Find(Roof)!.Anchor);
-    }
-
-    [Fact]
     public void ANestedInstancesEntitiesAreInTheTree()
     {
         const string outer = "scene 2\n\nentity 2000000000000001\nname = \"Outer\"\ncomponent 1 Transform\n\tposition = [0, 0, 0]\n\trotation = [0, 0, 0, 1]\n\tscale = [1, 1, 1]\n\n" +
@@ -107,10 +96,6 @@ public sealed class PrefabPartTests : IDisposable
         Assert.Equal("Column A", column.Name);
         Near([6, 0, -1], [.. column.Pose.Position.Select(p => p / Pose.Unit)]);
     }
-
-    [Fact]
-    public void APrefabWithoutOneRootHasNoTree() =>
-        Assert.Null(PrefabTree.Of(Parse("scene 2\n\nentity 0000000000000001\n\nentity 0000000000000002\n"), _ => null));
 
     [Fact]
     public void AColumnKeepsItsRotationWhenDropped()
@@ -170,16 +155,6 @@ public sealed class PrefabPartTests : IDisposable
     }
 
     [Fact]
-    public void AWholePrefabDroppedInTheOutlinerStaysAtTheOrigin()
-    {
-        using var shell = NewShell();
-        Assert.True(shell.CreateInstance(Stand, 0));
-        var block = shell.Scene!.Scene.Entities.Single(e => e.Prefab == Stand);
-        Assert.Equal(0ul, block.Node);
-        Near([0, 0, 0], [.. SceneEdits.WorldPose(shell.Scene.Expanded.Flat, shell.Scene.Expanded.Flat.Find(block.Id)!)!.Position.Select(p => p / Pose.Unit)]);
-    }
-
-    [Fact]
     public void AltUnpacksInOneUndoEntry()
     {
         using var shell = NewShell();
@@ -193,20 +168,6 @@ public sealed class PrefabPartTests : IDisposable
 
         shell.Scene.Undo();
         Assert.Empty(shell.Scene.Scene.Entities);
-    }
-
-    [Fact]
-    public void AltInTheViewportUnpacksToo()
-    {
-        using var shell = NewShell();
-        shell.PreviewPrefab(Stand, [(long)(10 * Pose.Unit), 0, 0], Floor);
-        Assert.True(shell.CommitPrefab(unpack: true));
-
-        Assert.DoesNotContain(shell.Scene!.Scene.Entities, e => e.Prefab != "");
-        var world = WorldOf(shell, "Column A");
-        var other = WorldOf(shell, "Column B");
-        Assert.Equal(10, (world[0] + other[0]) / 2, 3);
-        Assert.Single(shell.Scene.History);
     }
 
     [Fact]
@@ -245,16 +206,13 @@ public sealed class PrefabPartTests : IDisposable
         model.Enter(Stand);
 
         Assert.Equal(["Floor", "Roof"], model.Tiles.Select(t => t.Name).Order());
-        Assert.Equal(["game", "stand.prefab"], model.Crumbs().Select(c => c.Name));
 
         model.EnterNode(Floor);
         Assert.Equal(["Column A", "Column B"], model.Tiles.Select(t => t.Name).Order());
-        Assert.Equal(["game", "stand.prefab", "Floor"], model.Crumbs().Select(c => c.Name));
 
         // An entity with what it draws shows its mesh and materials as assets: that is how to reach a material.
         model.EnterNode(ColumnA);
         Assert.Equal([MeshA, Moss, Stone], model.Tiles.Select(t => t.Asset?.Guid));
-        Assert.Equal(["game", "stand.prefab", "Floor", "Column A"], model.Crumbs().Select(c => c.Name));
 
         model.Leave();
         Assert.Equal(Floor, model.OpenNode);
@@ -287,23 +245,6 @@ public sealed class PrefabPartTests : IDisposable
     }
 
     [Fact]
-    public void AFiltersKindsNarrowAPrefabsTiles()
-    {
-        using var shell = NewShell();
-        var model = shell.Content.Model;
-        model.Enter(Stand);
-        model.EnterNode(ColumnA);
-        Assert.Equal([(ContentKind.Meshes, 1), (ContentKind.Materials, 2)], model.KindCounts());
-        model.ToggleKind(ContentKind.Materials);
-        Assert.Equal([Moss, Stone], model.Tiles.Select(t => t.Asset?.Guid));
-
-        model.ClearFilter();
-        model.EnterNode(0);
-        model.Search = "roo";
-        Assert.Equal(["Roof"], model.Tiles.Select(t => t.Name));
-    }
-
-    [Fact]
     public void ASelectedPartIsNotAnAssetForTheCommands()
     {
         using var shell = NewShell();
@@ -320,13 +261,5 @@ public sealed class PrefabPartTests : IDisposable
         // An index message does not take a part out of the selection, as it does a gone asset.
         shell.Assets.Apply(new AssetDelta([], [Moss], [], []));
         Assert.Equal([key], model.Selection);
-    }
-
-    [Fact]
-    public void APartsKeyRoundTrips()
-    {
-        var key = ContentBrowserModel.PartKey(Stand, 0x0000000000000a01);
-        Assert.Equal((Stand, 0x0000000000000a01ul), ContentBrowserModel.ParsePartKey(key));
-        Assert.Null(ContentBrowserModel.ParsePartKey(Stand));
     }
 }

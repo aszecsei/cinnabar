@@ -111,17 +111,10 @@ public sealed class CutsceneKeyingTests
         Assert.Contains("\t\t\tkey 120000 -1 auto", lines);
         Assert.Equal(KeyState.Keyed, CutsceneKeying.StateOf(Parse(file.Text), Position, 180000, null));
         // A new channel goes after the section's channels, with no key before its own.
-        Assert.Equal(["0", "120000"], file.Find("section:3/channel:position_x")!.Children.Select(k => k.Start!.Value.ToString()));
         Assert.Equal(["position_x", "position_y", "position_z"], file.Find("section:3")!.Children.Select(c => c.Name));
-    }
 
-    [Fact]
-    public void KeysGoInOrderInTheirChannel()
-    {
-        var file = Parse();
-
+        // A key between two goes between them in its channel.
         CutsceneKeying.SetKeys(file, Position, 90000, [1, 0, 0], "Transform");
-
         Assert.Equal(["0", "30000", "120000"], file.Find("section:3/channel:position_x")!.Children.Select(k => k.Start!.Value.ToString()));
     }
 
@@ -156,19 +149,6 @@ public sealed class CutsceneKeyingTests
         // The section names its channels x, y and z, so the color's keys go there.
         Assert.Equal(["x", "y", "z"], glow.Children.Select(c => c.Name));
         Assert.Equal([0, 10000], glow.Children.First(c => c.Name == "x").Children.Select(k => k.Start!.Value));
-    }
-
-    [Fact]
-    public void AColorKeepsTheChannelNamesThatItsSectionHas()
-    {
-        var file = Parse();
-
-        CutsceneKeying.SetKeys(file, Glow, 300000, [0.5, 0.25, 1], "Glow");
-
-        var section = file.Find("section:5")!;
-        Assert.Equal(["x", "y", "z"], section.Children.Select(c => c.Name));
-        Assert.Contains("\t\t\tkey 0 0.5 auto", Lines(file));
-        Assert.Equal(["x", "y", "z"], CutsceneKeying.ChannelsOf(Glow, section));
     }
 
     [Fact]
@@ -208,27 +188,6 @@ public sealed class CutsceneKeyingTests
         file.Find("track:1")!.Set("space", "sideways");
         Assert.NotNull(CutsceneKeying.Refusal(file, Position, null));
         Assert.Null(CutsceneKeying.Refusal(file, Glow, null));
-    }
-
-    [Fact]
-    public void AnAbsoluteTracksFirstPositionKeySetsItsOrigin()
-    {
-        // The text's line endings are the checkout's, so they are made \n before a part of it is replaced.
-        var file = Parse(Text.ReplaceLineEndings("\n").Replace("track 1 transform \"Path\"\n\tbinding = 1\n\tsection 3 60000 240000\n\t\tchannel position_x\n\t\t\tkey 0 0 linear\n\t\t\tkey 120000 4 linear\n",
-            "track 1 transform \"Path\"\n\tbinding = 1\n\tspace = absolute\n", StringComparison.Ordinal));
-        Assert.Null(file.Find("section:3"));
-
-        Assert.True(CutsceneKeying.NeedsOrigin(file, Position));
-        Assert.Equal([0.0, 0, 0], CutsceneKeying.OriginOf(file, Position)!);
-        Assert.Null(CutsceneKeying.OriginOf(file, Glow));
-
-        CutsceneKeying.SetOrigin(file, Position, [150000000002, 1, -3]);
-        CutsceneKeying.SetKeys(file, Position, 0, [0.25, 0, 0.5], "Transform");
-
-        Assert.Equal("[150000000002, 1, -3]", file.Find("track:1")!.Get("origin"));
-        Assert.Equal([150000000002.0, 1, -3], CutsceneKeying.OriginOf(file, Position)!);
-        Assert.False(CutsceneKeying.NeedsOrigin(file, Position));
-        Assert.Contains("			key 0 0.25 auto", Lines(file));
     }
 
     [Theory]

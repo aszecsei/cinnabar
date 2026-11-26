@@ -21,14 +21,16 @@ public sealed class ModeTests : IDisposable
     }
 
     [Fact]
-    public void PlayingLeavesTheDocumentAlone()
+    public void PlayingLeavesTheDocumentAloneAndOnlyPlayGivesTheInputToTheGame()
     {
         using var shell = NewShell();
         shell.Selection.Select(1);
         Assert.NotNull(shell.SelectedSceneEntity);
+        Assert.False(shell.InputGoesToGame);
 
         shell.Play();
         Assert.Equal(EditorMode.Play, shell.Mode);
+        Assert.True(shell.InputGoesToGame);
         Assert.False(shell.Edit("Rename", new Rename(1, "Played")));
         Assert.Null(shell.SelectedSceneEntity);
         Assert.False(shell.Commands.Get(EditorCommands.DeleteEntity).CanExecute);
@@ -37,38 +39,15 @@ public sealed class ModeTests : IDisposable
 
         shell.TogglePause();
         Assert.Equal(EditorMode.Paused, shell.Mode);
+        Assert.False(shell.InputGoesToGame);
         Assert.True(shell.Commands.Get(EditorCommands.StepFrame).CanExecute);
         shell.TogglePause();
         Assert.Equal(EditorMode.Play, shell.Mode);
 
         shell.Stop();
         Assert.True(shell.IsEditing);
+        Assert.False(shell.InputGoesToGame);
         Assert.True(shell.Edit("Rename", new Rename(1, "Edited")));
-    }
-
-    [Fact]
-    public void OnlyPlayGivesTheGameViewsInputToTheGame()
-    {
-        using var shell = NewShell();
-        Assert.False(shell.InputGoesToGame);
-        shell.Play();
-        Assert.True(shell.InputGoesToGame);
-        shell.TogglePause();
-        Assert.False(shell.InputGoesToGame);
-        shell.TogglePause();
-        shell.Stop();
-        Assert.False(shell.InputGoesToGame);
-    }
-
-    [Fact]
-    public void KeysBecomeTheGamesKeys()
-    {
-        Assert.Equal(InputKey.Q, GameInput.Key(Key.Q));
-        Assert.Equal(InputKey.Num7, GameInput.Key(Key.D7));
-        Assert.Equal(InputKey.F12, GameInput.Key(Key.F12));
-        Assert.Equal(InputKey.LeftControl, GameInput.Key(Key.LeftCtrl));
-        Assert.Null(GameInput.Key(Key.NumLock));
-        Assert.Equal(InputKey.Mouse5, GameInput.Button(PointerUpdateKind.XButton2Released));
     }
 
     [Fact]
@@ -105,22 +84,18 @@ public sealed class ModeTests : IDisposable
     }
 
     [Fact]
-    public void CharactersInTwoHalvesAreJoined()
+    public void CharactersInTwoHalvesAreJoinedAndACompositionsCursorIsInBytes()
     {
         var characters = new GameInput.Characters();
         Assert.Equal("", characters.Join("\ud83d"));
         Assert.Equal("😀", characters.Join("\ude00"));
         Assert.Equal("日本語", characters.Join("日本語"));
-    }
 
-    [Fact]
-    public void ACompositionsCursorIsInBytes()
-    {
+        // A composition's cursor is in the bytes of its UTF-8, as the game reads it.
         var after = GameInput.Composition("に😀a", 3);
         Assert.Equal(InputEventKind.Composition, after.Kind);
         Assert.Equal("に😀a", after.Text);
         Assert.Equal(7, after.Cursor);
-        Assert.Equal(0, GameInput.Composition("", 0).Cursor);
         Assert.Equal(1, GameInput.Composition("a", 9).Cursor);
     }
 

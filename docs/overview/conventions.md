@@ -2,7 +2,7 @@
 
 A few rules appear in every document, because every part of the engine is shaped by them. Knowing them makes the rest predictable. Each links to the document that explains it.
 
-**In this document:** [Rules that cut across](#rules-that-cut-across) · [State with a lifecycle](#state-with-a-lifecycle)
+**In this document:** [Rules that cut across](#rules-that-cut-across) · [State with a lifecycle](#state-with-a-lifecycle) · [Tests](#tests)
 
 ## Rules that cut across
 
@@ -36,3 +36,17 @@ Some state changes over time: a connection, a load, a cook, a drag, a capture, a
 | **State for one connection, or for one game state, is one struct that one proc resets.** Caches of what the other side was last sent are part of it. A new link and a soft restart both go through that proc. | A feature that adds its own reset line in one handler, but not in the others, breaks after a reconnect or a soft restart. |
 | **One link's state has one owner and one lock.** Do not keep an atomic copy beside fields under a mutex, or a copy on another thread. | Copies under different rules disagree during a race. |
 | **An owner that closes cancels its work.** Disposing or closing ends its timers, delayed calls and requests in flight, and a closed owner sends nothing. | Work that finishes after the close otherwise acts for an owner that is gone. |
+
+## Tests
+
+A test pins behaviour, and pinned behaviour is hard to change. Write a test for behaviour that must not change by accident, and not for behaviour that should be easy to iterate on. These rules apply to Odin and C# alike.
+
+| Rule | Why |
+|---|---|
+| **Pin contracts, not incidentals.** File round-trips, undo and redo, the link's wire format, session state machines and geometry kernels are contracts. Panel layout, pixel sizes, colours, label text and the order of things that nothing depends on are not. | A test of an incidental fails at every redesign, and teaches nothing when it fails. |
+| **One test per behaviour.** A family of edits gets one undo test, not one for each field. Several near-identical cases are one `[Theory]` or one table. A case that another feature's test already covers is not tested again. | Duplicates multiply the cost of a change and add no confidence. |
+| **No test for straightforward code**: a getter, a one-line delegation, a direct mapping. | The test restates the code. |
+| **Test a unit at its own level.** A kernel is tested directly, not through the shell. A client of a process is tested over a fake link or a fake cooker (such as `PreviewCookTests.FakePreviewCooker`), not over the real process. | A test that goes through more than its unit fails for reasons that are not its own. |
+| **Unit tests start no process, open no device and do not wait on the clock.** No host, no cook daemon, no audio device, no GPU. No fixed `Task.Delay` or `time.sleep` to let something happen, and no assertion on how long something took: answer a fake at once, advance a test clock, or wait for a condition with a generous deadline. | Such tests are slow, flaky and machine-dependent, and they play sound. |
+| **No assertion on the output of a simulation**: where a physics body ends up, what an agent decides after some frames, the colour of a rendered pixel. Test the deterministic step or the contract instead. | Tolerances, timing and backends change the output without a bug. |
+| **The real processes are tested once, end to end.** `Cinnabar.Editor.EndToEnd` starts the null host with no audio and the cook daemon, and drives one editing session over the link. `just test-e2e` runs it; `just test` does not. | One test proves that the pieces connect. The units prove what each piece does. |

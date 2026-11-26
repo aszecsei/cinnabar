@@ -13,7 +13,7 @@ public sealed class Canvas2DViewTests
     }
 
     [Fact]
-    public void CanvasAndControlPointsMapBothWays()
+    public void CanvasAndControlPointsMapBothWaysAndADistanceScalesByTheZoom()
     {
         var view = new Canvas2DView(new Vec2(-200, -150), 2);
 
@@ -21,15 +21,8 @@ public sealed class Canvas2DViewTests
         Near(new Vec2(-200, -150), view.ToCanvas(0, 0));
         Near(new Vec2(-150, -100), view.ToCanvas(100, 100));
         Near(new Vec2(100, 100), view.ToView(new Vec2(-150, -100)));
-        var canvas = view.ToCanvas(37, 12);
-        Near(new Vec2(37, 12), view.ToView(canvas));
-    }
-
-    [Fact]
-    public void ADistanceInTheControlScalesByTheZoom()
-    {
-        var view = new Canvas2DView(new Vec2(5, 5), 0.5);
-        Near(new Vec2(20, 40), view.ToCanvasDelta(10, 20));
+        Near(new Vec2(37, 12), view.ToView(view.ToCanvas(37, 12)));
+        Near(new Vec2(20, 40), new Canvas2DView(new Vec2(5, 5), 0.5).ToCanvasDelta(10, 20));
     }
 
     [Fact]
@@ -45,54 +38,33 @@ public sealed class Canvas2DViewTests
     }
 
     [Fact]
-    public void ZoomingKeepsThePointUnderThePointer()
+    public void ZoomingKeepsThePointUnderThePointerAndStopsAtItsLimits()
     {
         var view = new Canvas2DView(new Vec2(-200, -150), 1);
         var zoomed = view.ZoomAbout(120, 80, Math.Pow(Canvas2DView.WheelStep, 3), 0.2, 2);
-
-        Assert.Equal(Math.Pow(1.15, 3), zoomed.Zoom, 9);
+        Assert.Equal(Math.Pow(Canvas2DView.WheelStep, 3), zoomed.Zoom, 9);
         Near(view.ToCanvas(120, 80), zoomed.ToCanvas(120, 80));
-    }
 
-    [Fact]
-    public void ZoomingStopsAtItsLimits()
-    {
-        var view = new Canvas2DView(new Vec2(0, 0), 1.9);
-        var closest = view.ZoomAbout(50, 50, 10, 0.2, 2);
+        var near = new Canvas2DView(new Vec2(0, 0), 1.9);
+        var closest = near.ZoomAbout(50, 50, 10, 0.2, 2);
         Assert.Equal(2, closest.Zoom);
-        Near(view.ToCanvas(50, 50), closest.ToCanvas(50, 50));
-
-        var farthest = view.ZoomAbout(50, 50, 0.001, 0.2, 2);
-        Assert.Equal(0.2, farthest.Zoom);
+        Near(near.ToCanvas(50, 50), closest.ToCanvas(50, 50));
+        Assert.Equal(0.2, near.ZoomAbout(50, 50, 0.001, 0.2, 2).Zoom);
     }
 
     [Fact]
-    public void FittingCentersTheExtentWithAMargin()
+    public void FittingCentersTheExtentAtTheTighterSidesZoomWithinTheLimits()
     {
-        var extent = new GraphRect(100, 50, 400, 200);
-        var view = Canvas2DView.Fit(extent, 520, 360, 40, 0.2, 1);
-
         // The width is the tighter fit: (520 - 80) / 400 = 1.1, and the zoom stops at 1.
+        var view = Canvas2DView.Fit(new GraphRect(100, 50, 400, 200), 520, 360, 40, 0.2, 1);
         Assert.Equal(1, view.Zoom);
-        var middle = view.ToView(new Vec2(300, 150));
-        Near(new Vec2(260, 180), middle);
-    }
-
-    [Fact]
-    public void FittingShrinksToTheTighterSide()
-    {
-        var extent = new GraphRect(0, 0, 1000, 100);
-        var view = Canvas2DView.Fit(extent, 540, 400, 20, 0.2, 1);
+        Near(new Vec2(260, 180), view.ToView(new Vec2(300, 150)));
 
         // (540 - 40) / 1000 = 0.5 along the width.
+        view = Canvas2DView.Fit(new GraphRect(0, 0, 1000, 100), 540, 400, 20, 0.2, 1);
         Assert.Equal(0.5, view.Zoom, 9);
         Near(new Vec2(270, 200), view.ToView(new Vec2(500, 50)));
-    }
 
-    [Fact]
-    public void FittingNeverZoomsOutPastTheMinimum()
-    {
-        var view = Canvas2DView.Fit(new GraphRect(0, 0, 100_000, 100_000), 400, 300, 40, 0.2, 1);
-        Assert.Equal(0.2, view.Zoom);
+        Assert.Equal(0.2, Canvas2DView.Fit(new GraphRect(0, 0, 100_000, 100_000), 400, 300, 40, 0.2, 1).Zoom);
     }
 }

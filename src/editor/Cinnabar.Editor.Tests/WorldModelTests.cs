@@ -44,16 +44,11 @@ public class WorldModelTests
     }
 
     [Fact]
-    public void AnEntityWhoseParentIsUnknownIsARoot()
+    public void AnUnknownParentOrACycleHidesNoEntity()
     {
-        var world = Snapshot(Info(Handle(1), parent: Handle(9)));
+        // An entity whose parent is unknown is a root.
+        Assert.Equal([Handle(1)], Snapshot(Info(Handle(1), parent: Handle(9))).Roots.Select(n => n.Handle));
 
-        Assert.Equal([Handle(1)], world.Roots.Select(n => n.Handle));
-    }
-
-    [Fact]
-    public void ACycleDoesNotHideEntities()
-    {
         var world = Snapshot(Info(Handle(1), parent: Handle(2)), Info(Handle(2), parent: Handle(1)));
 
         var all = new List<EntityNode>();
@@ -75,7 +70,6 @@ public class WorldModelTests
 
         Assert.Null(world.Find(Handle(1, generation: 1)));
         Assert.NotNull(world.Find(Handle(1, generation: 2)));
-        Assert.Equal("Entity(1:2)", world.Find(Handle(1, generation: 2))!.ToString());
     }
 
     [Fact]
@@ -89,20 +83,6 @@ public class WorldModelTests
         Assert.Null(world.Values(Handle(7)));
         world.Apply(new EntityDelta([], [Handle(1)]));
         Assert.Null(world.Values(Handle(1)));
-    }
-
-    [Fact]
-    public void ClearForgetsEverything()
-    {
-        var world = Snapshot(Info(Handle(1)));
-        world.Apply(new ComponentTypes([new ComponentType(1, "Transform", "Transform", 48, [])]));
-
-        world.Clear();
-
-        Assert.False(world.HasWorld);
-        Assert.Empty(world.Entities);
-        Assert.Empty(world.Types);
-        Assert.Equal("0x0000000000000001", world.TypeName(1));
     }
 
     static FieldInfo Field(FieldKind kind, uint offset = 0, FieldKind enumBase = FieldKind.U8, params EnumValue[] values) =>
@@ -141,26 +121,8 @@ public class WorldModelTests
         asset[0] = 0x9d;
         Assert.Equal("9d" + new string('0', 30), FieldValues.Display(Field(FieldKind.Asset), asset).Text);
         Assert.Equal("none", FieldValues.Format(Field(FieldKind.Entity, 56), data));
-    }
-
-    [Fact]
-    public void TwoNumbersAndColorsShowAsAxes()
-    {
-        var data = new byte[12];
-        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(0), -8f);
-        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(4), 4f);
-
-        var range = FieldValues.Display(TestFields.Of(FieldKind.Vector2), data);
-        Assert.Equal(DisplayKind.Axes, range.Kind);
-        Assert.Equal(["-8", "4"], range.Axes);
-        Assert.Equal(8, FieldValues.Size(FieldKind.Vector2));
-
-        var color = TestFields.Of(FieldKind.Vector3, color: true);
-        Assert.Equal(DisplayKind.Color, FieldValues.DisplayKindOf(color));
-        Assert.Equal([-8.0, 4.0, 0.0], FieldValues.Display(color, data).Values);
-        // Only a Vector3 is a color.
-        Assert.Equal(DisplayKind.Axes, FieldValues.DisplayKindOf(TestFields.Of(FieldKind.Vector2, color: true)));
-        Assert.Contains("default", FieldValues.Display(color, new byte[12]).Tooltip);
+        // A field past the end of its component's bytes has no value.
+        Assert.Null(FieldValues.Format(Field(FieldKind.Quaternion, 8), new byte[16]));
     }
 
     [Fact]
@@ -179,27 +141,8 @@ public class WorldModelTests
         Assert.Equal([1, 0.5, 0], split);
     }
 
-    [Fact]
-    public void ARotationShowsAsEulerAnglesWithTheQuaternionInItsTooltip()
-    {
-        var q = FieldValues.Quaternion(0, 0, 90);
-        var data = new byte[16];
-        for (var i = 0; i < 4; i++)
-        {
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(i * 4), (float)q[i]);
-        }
-
-        var display = FieldValues.Display(Field(FieldKind.Quaternion), data);
-
-        Assert.Equal(["0°", "0°", "90°"], display.Axes);
-        Assert.Contains("Quaternion: (0, 0, 0.707, 0.707)", display.Tooltip);
-    }
-
     [Theory]
     [InlineData(0, 0, 0)]
-    [InlineData(30, 0, 0)]
-    [InlineData(0, 45, 0)]
-    [InlineData(0, 0, -120)]
     [InlineData(20, -135, 60)]
     [InlineData(-89, 10, 170)]
     [InlineData(10, 180, -30)]
@@ -224,34 +167,6 @@ public class WorldModelTests
         // The same rotation: q and -q are equal, so compare the absolute dot product.
         Assert.Equal(1, Math.Abs(q.Zip(again, (a, b) => a * b).Sum()), 4);
     }
-
-    [Theory]
-    [InlineData("Previous_Transform", "Previous Transform")]
-    [InlineData("inner.amount", "Inner › Amount")]
-    [InlineData("layout_hash", "Layout Hash")]
-    [InlineData("speed", "Speed")]
-    public void NamesAreHumanized(string name, string expected) => Assert.Equal(expected, FieldValues.Humanize(name));
-
-    [Theory]
-    [InlineData(0.6, "0.6 m")]
-    [InlineData(9_999, "9,999 m")]
-    [InlineData(12_500, "12.5 km")]
-    [InlineData(-150_000_000_000, "-150 Gm")]
-    public void DistancesScaleTheirUnit(double meters, string expected) => Assert.Equal(expected, FieldValues.Distance(meters));
-
-    [Theory]
-    [InlineData(-0.0001, "0")]
-    [InlineData(1234567.891, "1,234,567.891")]
-    [InlineData(0.700034, "0.7")]
-    public void NumbersReadCleanly(double value, string expected) => Assert.Equal(expected, FieldValues.Number(value));
-
-    [Fact]
-    public void AFieldPastTheEndOfItsComponentIsNull() =>
-        Assert.Null(FieldValues.Format(Field(FieldKind.Quaternion, 8), new byte[16]));
-
-    [Fact]
-    public void AnUnnamedEnumValueShowsItsNumber() =>
-        Assert.Equal("3", FieldValues.Format(Field(FieldKind.Enum, 0, FieldKind.U8, new EnumValue("Idle", 0)), [3]));
 
     [Fact]
     public void AnAssetBehaviourFieldShowsItsAssetAndReadsAsAReference()

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Mesh;
@@ -7,7 +6,7 @@ using Cinnabar.Editor.Tools;
 namespace Cinnabar.Editor.Tests;
 
 /// <summary>The boolean kernel: Subtract, Union and Intersect, the poses between two meshes, and the moved mappings.</summary>
-public class MeshBooleanTests(ITestOutputHelper output)
+public class MeshBooleanTests
 {
     // A wall 4 m wide, 3 m high and 0.25 m thick, on the 0.25 m grid.
     static readonly MeshData Wall = Primitives.Block(Vec3.Zero, new Vec3(4, 3, 0.25));
@@ -228,29 +227,19 @@ public class MeshBooleanTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void SubtractFromAFiveThousandFaceMeshIsMeasured()
+    public void SubtractFromAFiveThousandFaceMeshAndADeepTreeStaysSolid()
     {
         // A 4 m box with each side cut into 29 by 29 quads: 5,046 faces.
         var grid = GridBox(29, 4);
-        Assert.Equal(5046, grid.Faces.Length);
         Assert.True(grid.IsSolid);
         var cutter = Primitives.Block(new Vec3(1.1, 1.3, -0.5), new Vec3(2.2, 2.6, 0.5));
-        Subtract(grid, cutter);
-        var clock = Stopwatch.StartNew();
-        var result = Subtract(grid, cutter);
-        clock.Stop();
-        AssertSolid(result, 64 - 1.1 * 1.3 * 0.5);
-        output.WriteLine($"Subtract of a box from {grid.Faces.Length} faces: {clock.Elapsed.TotalMilliseconds:0.0} ms, {result.Mesh.Faces.Length} faces after");
+        AssertSolid(Subtract(grid, cutter), 64 - 1.1 * 1.3 * 0.5);
 
         // A sphere is convex, so its tree is one chain as deep as its faces.
         var sphere = Primitives.Make(PrimitiveKind.Sphere, Vec3.Zero, new Vec3(4, 4, 4), 1, PrimitiveParameters.Default with { Segments = 64, Rings = 32 });
-        clock.Restart();
         var bitten = Subtract(sphere, Primitives.Block(new Vec3(1.5, 1.5, 1.5), new Vec3(5, 5, 5)));
-        clock.Stop();
         Assert.Null(bitten.Reason);
         Assert.True(bitten.Mesh.IsSolid);
-        output.WriteLine($"Subtract of a box from a sphere of {sphere.Faces.Length} faces: {clock.Elapsed.TotalMilliseconds:0.0} ms");
-        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10));
     }
 
     // A box from the origin with each side split into n by n quads, wound to front out, its vertices shared.

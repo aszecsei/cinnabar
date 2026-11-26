@@ -298,7 +298,7 @@ public sealed class CutsceneSubSequenceTests : IDisposable
         using var _s = shell;
 
         // A cutscene dropped on the parent plays as a sub-sequence of its range, on the Shots track past its section,
-        // as one undo entry, with the child's name on its bar.
+        // as one undo entry.
         var added = editor.DropClips([Third], null, 400000);
         var path = Assert.Single(added);
         var section = editor.File.Find(path)!;
@@ -306,8 +306,6 @@ public sealed class CutsceneSubSequenceTests : IDisposable
         Assert.Equal($"${Third}", section.Get("asset"));
         Assert.Equal("Shots", CutsceneEdits.TrackOf(section)!.Name);
         Assert.Single(editor.Document.History);
-        var bar = editor.Layout().Rows.SelectMany(r => r.Bars).Single(b => b.Path == path);
-        Assert.Equal("third", bar.Label);
         // One over the first section's span goes on a new track, since a sub-sequence track's sections do not overlap.
         var over = Assert.Single(editor.DropClips([Third], null, 100000));
         Assert.NotEqual(CutsceneEdits.TrackOf(editor.File.Find(path)!)!.Id, CutsceneEdits.TrackOf(editor.File.Find(over)!)!.Id);

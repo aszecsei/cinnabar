@@ -3,7 +3,6 @@ package jobs
 import "base:intrinsics"
 import "core:sync"
 import "core:testing"
-import "core:time"
 
 import "cinnabar:core/profile"
 
@@ -238,11 +237,23 @@ mutex_excludes_under_contention :: proc(t: ^testing.T) {
 @(private = "file")
 Zoned :: struct {
 	inner: profile.Name,
+	// The main fiber's counter, and the counter of the zone's job.
+	waits: [2]^Counter,
 }
 
+// until_waited returns once a fiber waits on each of the counters, so the waits that it holds up surely suspend.
 @(private = "file")
-sleep_briefly :: proc(data: rawptr) {
-	time.sleep(2 * time.Millisecond)
+until_waited :: proc(data: rawptr) {
+	counters := (^[2]^Counter)(data)
+	for {
+		sync.lock(&state.mutex)
+		waited := counters[0].waiters != nil && counters[1].waiters != nil
+		sync.unlock(&state.mutex)
+		if waited {
+			return
+		}
+		intrinsics.cpu_relax()
+	}
 }
 
 // zoned_wait waits inside a zone, so the zone is split where its fiber suspends.
@@ -251,7 +262,8 @@ zoned_wait :: proc(data: rawptr) {
 	z := (^Zoned)(data)
 	profile.zone(z.inner)
 	counter: Counter
-	run([]Job{{sleep_briefly, nil}}, &counter)
+	z.waits[1] = &counter
+	run([]Job{{until_waited, &z.waits}}, &counter)
 	wait(&counter)
 }
 
@@ -265,11 +277,14 @@ when profile.ENABLED {
 		defer shutdown()
 
 		parent := profile.intern("frame code", .Frame)
-		z := Zoned{profile.intern("inner", .User)}
+		counter: Counter
+		z := Zoned {
+			inner = profile.intern("inner", .User),
+			waits = {&counter, nil},
+		}
 		profile.frame_boundary()
 		frame := profile.current_frame()
 		profile.begin_zone(parent, 0)
-		counter: Counter
 		run([]Job{{zoned_wait, &z}}, &counter)
 		wait(&counter)
 		profile.end_zone()

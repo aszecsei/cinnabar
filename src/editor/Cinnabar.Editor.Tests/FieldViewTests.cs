@@ -26,26 +26,18 @@ public class FieldViewTests
     static FieldDisplay Number(string text) => new(DisplayKind.Number, text, [], false, 0, null);
 
     [Fact]
-    public void ShowingAValueOutsideTheSlidersRangeEditsNothing()
+    public void ASliderThatMovesWithoutTheUserEditsNothing()
     {
-        // A camera's vertical_fov is 0 for the default, below its slider's range, 0.1 to 3.
+        // A camera's vertical_fov is 0 for the default, below its slider's range, 0.1 to 3. Showing it edits nothing.
         var editor = new Recorder();
         var view = new BoxView(numeric: true, editor, (0.1, 3));
         view.Show(Number("0"));
         view.Show(Number("1.2"));
         view.Show(Number("0"));
         Assert.Empty(editor.Numbers);
-    }
 
-    [Fact]
-    public void ASliderThatMovesWithoutTheUserEditsNothing()
-    {
         // Avalonia moves a slider's value itself when it coerces it into the range, as when the properties panel's new
-        // views are laid out after Stop. The field keeps its own value, such as a camera's 0 for the default field of
-        // view, instead of taking the range's minimum.
-        var editor = new Recorder();
-        var view = new BoxView(numeric: true, editor, (0.1, 3));
-        view.Show(Number("0"));
+        // views are laid out after Stop. The field keeps its own value instead of taking the range's minimum.
         var slider = ((Avalonia.Controls.DockPanel)view.Control).Children.OfType<Avalonia.Controls.Slider>().Single();
         slider.Value = 0.1;
         slider.Value = 2;

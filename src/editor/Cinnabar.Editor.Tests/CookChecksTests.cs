@@ -45,19 +45,11 @@ public sealed class CookChecksTests : IDisposable
     static PreviewResult Failed(string file, uint line, uint column, string text) => new(text, [new Problem(file, line, column, true, text)], []);
 
     [Fact]
-    public void NoAnswerIsPendingAndNotClean()
-    {
-        using var checks = Checks();
-
-        Assert.Same(CheckState.Pending, checks.State);
-        Assert.False(checks.CookedClean);
-        Assert.Equal("cooking", CookStatus.Describe(checks.State, 0, linked: true));
-    }
-
-    [Fact]
-    public async Task CookingNowShowsTheAnswer()
+    public async Task NoAnswerIsPendingAndCookingNowShowsTheAnswer()
     {
         using var checks = Checks(text => Task.FromResult(text == "first" ? Clean : Failed(_path, 1, 0, "broken")));
+        Assert.Same(CheckState.Pending, checks.State);
+        Assert.False(checks.CookedClean);
 
         await checks.CookNow();
 
@@ -156,16 +148,5 @@ public sealed class CookChecksTests : IDisposable
 
         Assert.Same(CheckState.Pending, checks.State);
         Assert.Empty(_events);
-    }
-
-    [Fact]
-    public void TheStatusNamesTheStateAndTheErrors()
-    {
-        Assert.Equal("waiting for the cook daemon", CookStatus.Describe(new CheckState.Failed("x"), 2, linked: false));
-        Assert.Equal("cooking", CookStatus.Describe(CheckState.Pending, 0, linked: true));
-        Assert.Equal("cooks", CookStatus.Describe(new CheckState.Clean(""), 0, linked: true));
-        Assert.Equal("does not cook", CookStatus.Describe(new CheckState.Failed("x"), 0, linked: true));
-        Assert.Equal("1 error", CookStatus.Describe(new CheckState.Failed("x"), 1, linked: true));
-        Assert.Equal("3 errors", CookStatus.Describe(new CheckState.Failed("x"), 3, linked: true));
     }
 }

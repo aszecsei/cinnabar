@@ -48,7 +48,7 @@ To test a fallback path on hardware that has the capability, set `CINNABAR_DISAB
 |---|---|---|
 | `lib/core/gpu` | Both | Pure Odin. Handles, descriptions, enums, command packet definitions, `Command_Buffer` recording procedures, the format hash. |
 | `lib/core/gpu/d3d12` | Host | The D3D12 backend. The only package that imports `vendor:directx`. |
-| `lib/core/gpu/null` | Host | Validates command buffers and executes nothing. Used for headless tests, and by `null-host.exe`, the host that the editor's host tests run without a GPU (see [Editor: C# projects](../editor/processes-and-projects.md#host-tests)). |
+| `lib/core/gpu/null` | Host | Validates command buffers and executes nothing. Used for headless tests, and by `null-host.exe`, the host that the editor's end-to-end test runs without a GPU (see [Editor: The end-to-end test](../editor/processes-and-projects.md#the-end-to-end-test)). |
 | `lib/engine/render` | Game | Render graph (barriers, pass culling, transient textures), frame setup, render extraction. |
 
 The engine imports `lib/core/gpu` for types and recording only. It never imports a backend package.

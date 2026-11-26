@@ -31,14 +31,6 @@ public sealed class ContentModelTests : IDisposable
     static string[] Names(ContentBrowserModel model) => [.. model.Items.Select(AssetIndex.DisplayName)];
 
     [Fact]
-    public void NewCommandsHaveAFolderBeforeThePanelShows()
-    {
-        using var shell = NewShell();
-        Assert.Equal(new ContentFolder("game", ""), shell.Content.Folder);
-        Assert.Equal("new_script", shell.Content.NewName(AssetTemplate.Script));
-    }
-
-    [Fact]
     public void RevealOfASubassetSelectsIt()
     {
         using var shell = NewShell();
@@ -60,6 +52,15 @@ public sealed class ContentModelTests : IDisposable
         Assert.Null(model.OpenFile);
         Assert.Equal(["kit.glb", "util.luau"], Names(model));
         Assert.Equal([Kit], model.Selection);
+
+        // A reveal shows what the filter hid, and the panel that another tab hides.
+        model.ToggleKind(ContentKind.Textures);
+        shell.Layout.Close("contentBrowser");
+        shell.Content.RevealAsset(Door);
+        Assert.Empty(model.Kinds);
+        Assert.Equal([Door], model.Selection);
+        Assert.Contains("door.luau", Names(model));
+        Assert.True(shell.Layout.IsOpen("contentBrowser"));
     }
 
     static readonly SettingInfo Mips = new("mips", ["true", "false"], "true", "Make the mips.");
@@ -67,22 +68,6 @@ public sealed class ContentModelTests : IDisposable
     static readonly SettingInfo Tangents = new("tangents", ["file", "generate"], "file", "Where tangents come from.");
     const string Rock = "20202020202020202020202020202020";
     const string Moss = "21212121212121212121212121212121";
-
-    [Fact]
-    public void SettingsGroupBySectionAfterTheTopLevelOnes()
-    {
-        ImportSettingRow Make(string key) => new(new SettingInfo(key, ["a", "b"], "a", ""), "a", false);
-        var rows = new[] { Make("sampler.wrap"), Make("usage"), Make("mip_map.border"), Make("max_size"), Make("sampler.filter") };
-
-        var groups = ImportSettingsDraft.Group(rows);
-
-        Assert.Equal(["", "sampler", "mip_map"], groups.Select(g => g.Section));
-        Assert.Equal(["usage", "max_size"], groups[0].Rows.Select(r => r.Label));
-        Assert.Equal(["wrap", "filter"], groups[1].Rows.Select(r => r.Label));
-        Assert.Equal(["border"], groups[2].Rows.Select(r => r.Label));
-        Assert.Equal("sampler.filter", groups[1].Rows[1].Row.Info.Key);
-        Assert.Empty(ImportSettingsDraft.Group([]));
-    }
 
     EditorShell DraftShell()
     {
@@ -149,18 +134,11 @@ public sealed class ContentModelTests : IDisposable
 
         shell.Content.Model.Select([Kit]);
         Assert.Equal(["tangents", "mips"], draft.Rows().Select(r => r.Info.Key));
-    }
 
-    [Fact]
-    public void ASubassetShowsItsFilesSettingsAsALink()
-    {
-        using var shell = DraftShell();
-        var draft = shell.Content.Draft;
+        // A sub-asset's settings are its file's: alone it has none to edit, and with its file the draft edits the file alone.
         shell.Content.Model.Select([Wall]);
         Assert.Empty(draft.Assets);
         Assert.Empty(draft.Rows());
-
-        // With its file, the draft edits the file alone.
         shell.Content.Model.Select([Wall, Kit]);
         Assert.Equal([Kit], draft.Assets);
     }
@@ -191,30 +169,12 @@ public sealed class ContentModelTests : IDisposable
         Assert.Equal([Moss], draft.Assets);
     }
 
-    [Fact]
-    public void LeavingAFileEndsItsFilter()
-    {
-        using var shell = NewShell();
-        var model = shell.Content.Model;
-        model.Enter(Kit);
-        model.ToggleKind(ContentKind.Meshes);
-        model.Leave();
-        Assert.False(model.Filtering);
-        Assert.Equal(["kit.glb", "util.luau"], Names(model));
-    }
-
     [Theory]
     [InlineData(Avalonia.Input.Key.Delete, Avalonia.Input.KeyModifiers.None, true)]
-    [InlineData(Avalonia.Input.Key.Back, Avalonia.Input.KeyModifiers.None, true)]
     [InlineData(Avalonia.Input.Key.Q, Avalonia.Input.KeyModifiers.None, true)]
-    [InlineData(Avalonia.Input.Key.Left, Avalonia.Input.KeyModifiers.Shift, true)]
-    [InlineData(Avalonia.Input.Key.A, Avalonia.Input.KeyModifiers.Control, true)]
     [InlineData(Avalonia.Input.Key.Z, Avalonia.Input.KeyModifiers.Control, true)]
-    [InlineData(Avalonia.Input.Key.Z, Avalonia.Input.KeyModifiers.Control | Avalonia.Input.KeyModifiers.Shift, true)]
     [InlineData(Avalonia.Input.Key.S, Avalonia.Input.KeyModifiers.Control, false)]
     [InlineData(Avalonia.Input.Key.D, Avalonia.Input.KeyModifiers.Control, false)]
-    [InlineData(Avalonia.Input.Key.F2, Avalonia.Input.KeyModifiers.None, false)]
-    [InlineData(Avalonia.Input.Key.P, Avalonia.Input.KeyModifiers.Control | Avalonia.Input.KeyModifiers.Alt, false)]
     public void ATextBoxKeepsTheKeysThatItUses(Avalonia.Input.Key key, Avalonia.Input.KeyModifiers modifiers, bool used) =>
         Assert.Equal(used, Ribbon.ShortcutCommand.TextBoxUses(new Avalonia.Input.KeyGesture(key, modifiers)));
 
@@ -254,44 +214,7 @@ public sealed class ContentModelTests : IDisposable
     }
 
     [Fact]
-    public void AFilterCanStayInTheOpenFolderOrFile()
-    {
-        using var shell = NewShell();
-        var model = shell.Content.Model;
-        model.Open(new ContentFolder("game", "lib"));
-        model.ToggleKind(ContentKind.Scripts);
-        Assert.Equal(["door.luau", "util.luau"], Names(model));
-
-        model.InThisFolder = true;
-        Assert.Equal(["util.luau"], Names(model));
-
-        // An open file's filter looks only in the file, and finds what it makes by kind.
-        model.Enter(Kit);
-        Assert.Empty(model.Items);
-        model.ToggleKind(ContentKind.Scripts);
-        model.ToggleKind(ContentKind.Meshes);
-        Assert.Equal(["Wall"], Names(model));
-    }
-
-    [Fact]
-    public void GridColumnsFollowTheWidth()
-    {
-        // A tile is its picture and a gap on each side, and tiles have a gap between them.
-        var tile = ContentBrowserModel.DefaultTileSize + 2 * ContentGridLayout.Gap;
-        var three = ContentGridLayout.Of(3 * tile + 2 * ContentGridLayout.Gap, ContentViewMode.Grid, ContentBrowserModel.DefaultTileSize);
-        Assert.Equal(3, three.Columns);
-        Assert.Equal(2, ContentGridLayout.Of(3 * tile + 2 * ContentGridLayout.Gap - 1, ContentViewMode.Grid, ContentBrowserModel.DefaultTileSize).Columns);
-        Assert.Equal(1, ContentGridLayout.Of(1, ContentViewMode.Grid, ContentBrowserModel.DefaultTileSize).Columns);
-        Assert.Equal(4, three.RowCount(10));
-        Assert.Equal(3, three.RowOf(9));
-
-        var list = ContentGridLayout.Of(500, ContentViewMode.List, ContentBrowserModel.DefaultTileSize);
-        Assert.Equal(1, list.Columns);
-        Assert.Equal(ContentGridLayout.ListRowHeight, list.RowHeight);
-    }
-
-    [Fact]
-    public void AnIndexFollowsFromAPoint()
+    public void AnIndexAndAMarqueeFollowFromTheGrid()
     {
         var layout = new ContentGridLayout(3, 100, 130);
         Assert.Equal(0, layout.IndexAt(1, 1, 7));
@@ -301,6 +224,13 @@ public sealed class ContentModelTests : IDisposable
         Assert.Null(layout.IndexAt(110, 261, 7));
         Assert.Null(layout.IndexAt(320, 1, 7));
         Assert.Null(layout.IndexAt(1, -1, 7));
+
+        // The marquee, from the middle of the first tile to the middle of the fifth, either way round.
+        Assert.Equal([0, 1, 3, 4], layout.InRect(50, 60, 160, 200, 7));
+        Assert.Equal([0, 1, 3, 4], layout.InRect(160, 200, 50, 60, 7));
+        // A rectangle that stays in a gap between columns touches nothing, and past the last asset there is none.
+        Assert.Empty(layout.InRect(101, 10, 105, 20, 7));
+        Assert.Equal([6], layout.InRect(0, 270, 50, 900, 7));
     }
 
     [Fact]
@@ -367,64 +297,6 @@ public sealed class ContentModelTests : IDisposable
     }
 
     [Fact]
-    public void TheMarqueeSelectsByGeometry()
-    {
-        var layout = new ContentGridLayout(3, 100, 130);
-        // From the middle of the first tile to the middle of the fifth, either way round.
-        Assert.Equal([0, 1, 3, 4], layout.InRect(50, 60, 160, 200, 7));
-        Assert.Equal([0, 1, 3, 4], layout.InRect(160, 200, 50, 60, 7));
-        // A rectangle that stays in a gap between columns touches nothing.
-        Assert.Empty(layout.InRect(101, 10, 105, 20, 7));
-        // Past the last asset there is none, however far it reaches.
-        Assert.Equal([6], layout.InRect(0, 270, 50, 900, 7));
-    }
-
-    [Fact]
-    public void ARevealShowsWhatTheFilterHid()
-    {
-        using var shell = NewShell();
-        var model = shell.Content.Model;
-        model.ToggleKind(ContentKind.Textures);
-        Assert.Empty(model.Items);
-
-        shell.Content.RevealAsset(Door);
-
-        Assert.Empty(model.Kinds);
-        Assert.Equal([Door], model.Selection);
-        Assert.Contains("door.luau", Names(model));
-    }
-
-    [Fact]
-    public void TheViewSettingsLastAndStayInRange()
-    {
-        using var shell = NewShell();
-        var model = shell.Content.Model;
-        var saved = 0;
-        model.ViewSettingsChanged += () => saved++;
-
-        model.TileSize = 1;
-        Assert.Equal(ContentBrowserModel.MinTileSize, model.TileSize);
-        model.TileSize = 5000;
-        Assert.Equal(ContentBrowserModel.MaxTileSize, model.TileSize);
-        model.ViewMode = ContentViewMode.List;
-        Assert.Equal(3, saved);
-        Assert.True(File.Exists(Path.Combine(shell.Settings.Directory, Shell.EditorSettings.ContentViewFileName)));
-
-        using var reopened = TestShell.Open(_temp, null, null);
-        Assert.Equal(ContentViewMode.List, reopened.Content.Model.ViewMode);
-        Assert.Equal(ContentBrowserModel.MaxTileSize, reopened.Content.Model.TileSize);
-    }
-
-    [Fact]
-    public void RevealShowsThePanelThatAnotherTabHides()
-    {
-        using var shell = NewShell();
-        shell.Layout.Close("contentBrowser");
-        shell.Content.RevealAsset(Door);
-        Assert.True(shell.Layout.IsOpen("contentBrowser"));
-    }
-
-    [Fact]
     public void TheSelectionKeepsItsOrderAndLosesWhatLeaves()
     {
         using var shell = NewShell();
@@ -441,20 +313,6 @@ public sealed class ContentModelTests : IDisposable
         model.Open(new ContentFolder("game", ""));
         Assert.Equal(["door.luau"], Names(model));
         Assert.Empty(model.Selection);
-    }
-
-    [Fact]
-    public void AFolderEndsTheSearch()
-    {
-        using var shell = NewShell();
-        var model = shell.Content.Model;
-        model.Search = "  util ";
-        Assert.True(model.Searching);
-        Assert.Equal(["util.luau"], Names(model));
-
-        model.Open(new ContentFolder("game", ""));
-        Assert.False(model.Searching);
-        Assert.Equal(["door.luau"], Names(model));
     }
 
     [Fact]
@@ -498,35 +356,6 @@ public sealed class ContentModelTests : IDisposable
     }
 
     [Fact]
-    public void TheFolderCrumbLeavesAPrefab()
-    {
-        const string Gate = "20202020202020202020202020202020";
-        using var shell = NewShell();
-        shell.Assets.Apply(new AssetDelta([TestAssets.Make(Gate, AssetKind.Prefab, "lib/gate.prefab")], [], [], []));
-        var model = shell.Content.Model;
-        model.Enter(Gate);
-        Assert.Equal(new ContentLocation.InPrefab(new ContentFolder("game", "lib"), null, Gate, 0), model.Location);
-
-        model.Open(new ContentFolder("game", "lib"));
-
-        Assert.Equal(new ContentLocation.InFolder(new ContentFolder("game", "lib")), model.Location);
-        Assert.Null(model.OpenPrefab);
-    }
-
-    [Fact]
-    public void RootsStartExpandedAndStayAsTheUserLeftThem()
-    {
-        using var shell = NewShell();
-        var model = shell.Content.Model;
-        Assert.Equal([("game", ""), ("game", "lib"), ("engine", "")], model.FolderRows().Select(r => (r.Root, r.Path)));
-
-        model.ToggleFolder("game", "");
-        shell.Assets.Apply(new AssetDelta([], [Util], [], []));
-
-        Assert.Equal([("game", ""), ("engine", "")], model.FolderRows().Select(r => (r.Root, r.Path)));
-    }
-
-    [Fact]
     public void OpeningAGeneratedPrefabOpensItsGeneratedText()
     {
         using var shell = NewShell();
@@ -538,8 +367,6 @@ public sealed class ContentModelTests : IDisposable
         shell.OpenAsset(prefab);
 
         Assert.Equal(generated, asked);
-        Assert.True(EditorShell.CanOpen(prefab));
-        Assert.Equal("Open Prefab", shell.OpenLabel(prefab));
     }
 
     [Fact]

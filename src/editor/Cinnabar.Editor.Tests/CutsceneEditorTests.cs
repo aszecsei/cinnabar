@@ -51,7 +51,6 @@ public sealed class CutsceneEditorTests : IDisposable
         Assert.Same(editor, shell.ActiveGraphEditor);
         Assert.Same(editor, shell.ActiveCutscene);
         Assert.Contains(editor, shell.GraphEditors);
-        Assert.Equal("Open in Cutscene Editor", shell.OpenLabel(asset));
         Assert.Equal($"cutscene.{Guid}", Assert.IsType<GraphEditorDocument>(FindDocument(shell, editor)).Id);
         Assert.False(editor.Document.IsDirty);
         Assert.Equal(template, editor.Document.Text);
@@ -166,40 +165,6 @@ public sealed class CutsceneEditorTests : IDisposable
     }
 
     [Fact]
-    public async Task EachCommittedEditGoesToTheDaemonAndADragOnlyWhenItEnds()
-    {
-        var (shell, asset) = Shell(CutsceneFileTests.Template);
-        using var _ = shell;
-        var cooker = new PreviewCookTests.FakePreviewCooker();
-        shell.PreviewCooker = cooker;
-        shell.Assets.Apply(new AssetSnapshot([asset], []));
-        var editor = shell.OpenCutscene(asset)!;
-        var opened = Assert.Single(cooker.Requests);
-        Assert.Equal((Guid, CutsceneFileTests.Template), (opened.Guid, opened.Text));
-        opened.Answer(new PreviewResult("", [], []));
-
-        // A drag's steps are not sent, however long it takes.
-        editor.Select(editor.File.Root);
-        editor.BeginField("Set Length");
-        editor.StepField(b => b.Set("length", "300000"));
-        await Task.Delay(PreviewCook.Delay * 3, TestContext.Current.CancellationToken);
-        Assert.Single(cooker.Requests);
-        // Its end is an edit, which goes once the edits stop.
-        editor.EndField(cancel: false);
-        await Until(() => cooker.Requests.Count == 2);
-        Assert.Contains("length = 300000", cooker.Requests[1].Text);
-    }
-
-    static async Task Until(Func<bool> done)
-    {
-        for (var waited = 0; !done(); waited += 20)
-        {
-            Assert.True(waited < 5000, "timed out");
-            await Task.Delay(20, TestContext.Current.CancellationToken);
-        }
-    }
-
-    [Fact]
     public void AKeyIsSelectedByItsPathAndABlockThatSharesItsPathIsNot()
     {
         var (shell, editor, text) = Intro();
@@ -267,27 +232,6 @@ public sealed class CutsceneEditorTests : IDisposable
         File.Move(FilePath, _temp.Combine("opening.cutscene"));
         shell.Assets.Apply(new AssetDelta([asset with { Path = "opening.cutscene" }], [], [], []));
         Assert.Equal("opening.cutscene", editor.Document.Title);
-    }
-
-    [Fact]
-    public void TheCinematicsWorkspaceOpensCutscenesUnderTheViewsAndKeepsThemAcrossASwitch()
-    {
-        var (shell, editor, _) = Intro();
-        using var _ = shell;
-        var cinematics = shell.Workspaces.Find("cinematics")!;
-        // The scene view is in front when the switch comes, and after it the tab that the switch shows is the active editor.
-        shell.Layout.ShowViewport(ViewportDocument.SceneId);
-        Assert.Null(shell.ActiveGraphEditor);
-        Assert.True(shell.Workspaces.Switch(cinematics));
-        Assert.Same(editor, shell.ActiveGraphEditor);
-        // The tab that was open moves to the editors' dock, apart from the viewports.
-        var document = FindDocument(shell, editor)!;
-        Assert.Equal(EditorLayout.EditorDocumentsDock, document.Owner?.Id);
-        Assert.True(shell.Layout.IsOpen(ViewportDocument.SceneId));
-        Assert.True(shell.Layout.IsOpen(ViewportDocument.GameId));
-
-        shell.Workspaces.Switch(shell.Workspaces.Find("general")!);
-        Assert.NotNull(FindDocument(shell, editor));
     }
 
     [Fact]

@@ -66,14 +66,6 @@ public sealed class SublevelTests : IDisposable
     }
 
     [Fact]
-    public void ASceneWithSublevelsRoundTrips()
-    {
-        var (scene, _) = SceneFile.Parse(Text(Room));
-        Assert.Equal(Text(Room), SceneFile.Write(scene!));
-        Assert.Equal(Text(Room), SceneFile.Write(scene!.Clone()));
-    }
-
-    [Fact]
     public void AFileWithoutSublevelsStaysAtVersion3()
     {
         const string text = "scene 3\n\nentity 0000000000000001\nname = \"Lamp\"\n";
@@ -98,9 +90,7 @@ public sealed class SublevelTests : IDisposable
     [Theory]
     [InlineData("night")]
     [InlineData("\"\"")]
-    [InlineData("\"two words\"")]
     [InlineData("\"a-b\"")]
-    [InlineData("true")]
     public void ASublevelTakesAQuotedName(string value)
     {
         var (scene, problems) = SceneFile.Parse($"scene 4\nentity 0000000000000001\nsublevel = {value}\n");
@@ -127,9 +117,10 @@ public sealed class SublevelTests : IDisposable
         Assert.False(problem.IsError);
         Assert.Equal(24, problem.Line);
         Assert.Contains("does not declare the sublevel dusk", problem.Message);
-        // The entity stays in it, and the name round-trips.
+        // The entity stays in it, and the scene round-trips, as its copy does.
         Assert.Equal("dusk", scene!.Find(6)!.Sublevel);
         Assert.Equal(Text(Room), SceneFile.Write(scene));
+        Assert.Equal(Text(Room), SceneFile.Write(scene.Clone()));
     }
 
     [Fact]

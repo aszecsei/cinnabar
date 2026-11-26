@@ -45,8 +45,8 @@ fidelityfx_dir := "vendor/fidelityfx/" + fidelityfx_version
 physics_backend := "jolt"
 collections := "-collection:cinnabar=lib -collection:gpu_backend=lib/core/gpu/" + gpu_backend + " -collection:physics_backend=lib/core/physics/" + physics_backend
 dev_collections := "-collection:cinnabar=lib -collection:gpu_backend=lib/core/gpu/" + gpu_backend + " -collection:physics_backend=lib/core/physics/plugin"
-# The development host on the null GPU backend, which the editor's host tests run without a GPU (see
-# docs/editor/processes-and-projects.md#host-tests).
+# The development host on the null GPU backend, which the editor's end-to-end test runs without a GPU (see
+# docs/editor/processes-and-projects.md#the-end-to-end-test).
 null_dev_collections := "-collection:cinnabar=lib -collection:gpu_backend=lib/core/gpu/null -collection:physics_backend=lib/core/physics/plugin"
 # Luau's experimental direct field access for engine userdata (see docs/scripting/embedding.md#direct-field-access). Off unless
 # CINNABAR_DIRECT_ACCESS=true.
@@ -327,7 +327,7 @@ host: (agility-runtime dev_dir) (fidelityfx-runtime dev_dir) luau jolt opus lz4
     mkdir -p "{{dev_dir}}"
     odin build src/host {{dev_collections}} {{dev_defines}} -out:"{{dev_dir}}/host.exe" -debug
 
-# Build the development host on the null GPU backend, which runs the editor's host tests on a machine without a GPU. It
+# Build the development host on the null GPU backend, which runs the editor's end-to-end test on a machine without a GPU. It
 # runs the game's DLL and content beside it, as host.exe does.
 null-host: luau jolt opus lz4
     mkdir -p "{{dev_dir}}"
@@ -839,13 +839,19 @@ intel-report: cook
 # =================================
 
 # The cooker's tests compile shaders, so they need DXC.
-test: luau jolt opus lz4 vorbis audio-plugin compressonator meshoptimizer lightusd msdfgen recast link-schema install-dxc null-host
+test: luau jolt opus lz4 vorbis audio-plugin compressonator meshoptimizer lightusd msdfgen recast link-schema install-dxc
     for p in lib/core lib/core/testlog lib/core/layout lib/core/math lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/lz4 lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/streaming lib/engine/volume lib/engine/random lib/engine/nav lib/engine/ai lib/engine/ai/behavior_tree lib/engine/ai/utility lib/engine/ai/goap lib/engine/ai/htn lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/cutscene lib/engine/camera lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/save lib/engine/editor lib/engine/editor/link lib/engine/game src/host tools/cook tools/cinnabar tools/ltc_fit tools/cloud_scatter tools/stbn tools/flickerstat; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" -define:OPUS_VERSION="{{opus_version}}" -define:LZ4_VERSION="{{lz4_version}}" -define:VORBIS_VERSION="{{vorbis_version}}" -define:MSDFGEN_VERSION="{{msdfgen_version}}" -define:RECAST_VERSION="{{recast_version}}" -define:DXC_VERSION="{{dxc_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting/embedding.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     # Release builds have no profiler, and everything must still run (see docs/core/profiling.md#builds).
     for p in lib/core/profile lib/core/jobs; do odin test "$p" {{collections}} -define:PROFILE=false || exit 1; done
-    dotnet test src/editor
+    # The editor's unit tests start no process (see docs/overview/conventions.md#tests); just test-e2e runs the one that does.
+    dotnet test --project src/editor/Cinnabar.Editor.Tests
+
+# The editor's end-to-end test: the null host, with no audio, and the cook daemon, driven over their links (see
+# docs/editor/processes-and-projects.md#the-end-to-end-test). It needs the game, its content and the cooker built.
+test-e2e: build null-host cook
+    dotnet test --project src/editor/Cinnabar.Editor.EndToEnd
 
 # Time the creation of thousands of resources on the D3D12 device (see docs/gpu/resources-and-pipelines.md#memory). It needs
 # a GPU, so just test leaves it out. The Agility SDK sits beside the executable, as beside the host.

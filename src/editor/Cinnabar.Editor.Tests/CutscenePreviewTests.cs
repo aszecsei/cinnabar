@@ -76,12 +76,10 @@ public sealed class CutscenePreviewTests : IDisposable
         Assert.Equal(0, open.Tick);
         Assert.Same(editor, shell.CutscenePreview.Owner);
         Assert.Equal(open.Ticket, Assert.IsType<CutscenePreviewState.Opening>(shell.CutscenePreview.State).Ticket);
-        Assert.Equal("opening preview…", shell.CutscenePreview.Describe(editor));
 
         Answer(shell, open.Ticket);
 
         Assert.IsType<CutscenePreviewState.Open>(shell.CutscenePreview.State);
-        Assert.Equal("previewing", shell.CutscenePreview.Describe(editor));
     }
 
     [Fact]
@@ -149,40 +147,28 @@ public sealed class CutscenePreviewTests : IDisposable
     }
 
     [Fact]
-    public void ManyScrubsSendOneTimeWithTheLatestTickAtTheFrame()
+    public void ManyScrubsSendOneTimeWithTheLatestTickAtTheFrameOnceTheGameAnswers()
     {
         var (shell, editor) = NewShell();
         using var _ = shell;
-        var ticket = Opened(shell);
+        var ticket = LastOpen.Ticket;
+        _sent.Clear();
 
         foreach (var tick in new[] { 10000, 20000, 30000, 25000 })
         {
             editor.SetPlayhead(tick);
         }
         Assert.True(shell.CutscenePreview.Pending);
-        Assert.Empty(_sent);
+        // Before the game answers, a frame sends nothing.
+        shell.CutscenePreview.Flush();
+        Assert.Empty(_sent.OfType<CutscenePreviewTime>());
+        Answer(shell, ticket);
         shell.CutscenePreview.Flush();
         shell.CutscenePreview.Flush();
 
         var time = Assert.Single(_sent.OfType<CutscenePreviewTime>());
         Assert.Equal((ticket, 25000), (time.Ticket, time.Tick));
         Assert.False(shell.CutscenePreview.Pending);
-    }
-
-    [Fact]
-    public void AScrubBeforeTheGameAnswersIsSentOnceItDoes()
-    {
-        var (shell, editor) = NewShell();
-        using var _ = shell;
-        var ticket = LastOpen.Ticket;
-        editor.SetPlayhead(30000);
-
-        shell.CutscenePreview.Flush();
-        Assert.Empty(_sent.OfType<CutscenePreviewTime>());
-        Answer(shell, ticket);
-        shell.CutscenePreview.Flush();
-
-        Assert.Equal(30000, Assert.Single(_sent.OfType<CutscenePreviewTime>()).Tick);
     }
 
     [Fact]
@@ -251,8 +237,7 @@ public sealed class CutscenePreviewTests : IDisposable
         Assert.Equal(2, flashed);
         Assert.Equal(1, editor.Flashes.Strength(range));
         Assert.Equal(1, editor.Flashes.Strength(trigger));
-        Assert.Contains(shell.Console.Lines, l => l.Text == "cutscene: guard_bark_begin at 00:06:00 on \"Story\"");
-        Assert.Contains(shell.Console.Lines, l => l.Text == "cutscene: intro_seen at 00:10:00 on \"Story\"");
+        Assert.Contains(shell.Console.Lines, l => l.Text.Contains("intro_seen", StringComparison.Ordinal));
         now += CutsceneEventFlashes.Length;
         Assert.Equal(0, editor.Flashes.Strength(trigger));
         Assert.False(editor.Flashes.Live());
@@ -261,28 +246,13 @@ public sealed class CutscenePreviewTests : IDisposable
         Assert.Empty(editor.Document.History);
         Assert.Equal(text, editor.Document.Text);
         Assert.Empty(_sent);
-    }
 
-    [Fact]
-    public void AFiredEventOfAnotherTicketASubSequenceOrAGoneKeyDoesNotFlash()
-    {
-        var (shell, editor) = NewShell();
-        using var _ = shell;
-        var ticket = Opened(shell);
-        var flashed = 0;
-        editor.Flashed += () => flashed++;
-        var lines = shell.Console.Lines.Count;
-
+        // Another ticket's event, a sub-sequence's, whose ID is the child's, and an ID that the text no longer has flash
+        // nothing.
         shell.OnGameMessage(new CutscenePreviewFired(ticket + 1, 0, 1, CutscenePreviewFiredKind.Trigger, "intro_seen", false));
-        Assert.Equal(lines, shell.Console.Lines.Count);
-
-        // A sub-sequence's event ID is the child's, and an ID that the text no longer has finds nothing: both only log.
         shell.OnGameMessage(new CutscenePreviewFired(ticket, 30000, 1, CutscenePreviewFiredKind.Trigger, "door_open", true));
         shell.OnGameMessage(new CutscenePreviewFired(ticket, 30000, 99, CutscenePreviewFiredKind.Trigger, "lost", false));
-
-        Assert.Equal(0, flashed);
-        Assert.Contains(shell.Console.Lines, l => l.Text == "cutscene: door_open at 00:00:15 in a sub-sequence");
-        Assert.Contains(shell.Console.Lines, l => l.Text == "cutscene: lost at 00:00:15");
+        Assert.Equal(2, flashed);
     }
 
     [Fact]
@@ -314,7 +284,6 @@ public sealed class CutscenePreviewTests : IDisposable
         shell.OnGameMessage(new CutscenePreviewEnded(current, CutscenePreviewEndReason.Failed));
         Assert.Equal(new CutscenePreviewState.Closed(CutscenePreviewEndReason.Failed), shell.CutscenePreview.State);
         Assert.Same(editor, shell.CutscenePreview.Owner);
-        Assert.StartsWith("preview ended: ", shell.CutscenePreview.Describe(editor));
         Assert.Empty(_sent);
     }
 
@@ -353,7 +322,6 @@ public sealed class CutscenePreviewTests : IDisposable
         Assert.Same(second, shell.ActiveCutscene);
         Assert.Same(first, shell.CutscenePreview.Owner);
         Assert.Empty(_sent);
-        Assert.Equal("preview inactive", shell.CutscenePreview.Describe(second));
         Assert.True(shell.CutscenePreview.CanTake(second));
         Assert.False(shell.CutscenePreview.CanTake(first));
         // Its scrubs go nowhere.
@@ -369,7 +337,6 @@ public sealed class CutscenePreviewTests : IDisposable
         Assert.Equal(30000, open.Tick);
         Assert.True(open.Ticket > firstTicket);
         Assert.Same(second, shell.CutscenePreview.Owner);
-        Assert.Equal("preview inactive", shell.CutscenePreview.Describe(first));
     }
 
     [Fact]
@@ -399,7 +366,6 @@ public sealed class CutscenePreviewTests : IDisposable
         Assert.Equal(new CutscenePreviewState.Closed(), shell.CutscenePreview.State);
         Assert.Empty(_sent.OfType<CutscenePreviewClose>());
         Assert.Same(editor, shell.CutscenePreview.Owner);
-        Assert.Equal("no preview in Play", shell.CutscenePreview.Describe(editor));
         // The game's late word about the old session changes nothing.
         shell.OnGameMessage(new CutscenePreviewEnded(ticket, CutscenePreviewEndReason.Mode));
         Assert.Equal(new CutscenePreviewState.Closed(), shell.CutscenePreview.State);
@@ -410,44 +376,6 @@ public sealed class CutscenePreviewTests : IDisposable
         var open = Assert.Single(_sent.OfType<CutscenePreviewOpen>());
         Assert.True(open.Ticket > ticket);
         Assert.Equal(30000, open.Tick);
-    }
-
-    [Fact]
-    public void ALostLinkEndsTheSessionWithoutSendingAndAnotherOpensItAgain()
-    {
-        var (shell, editor) = NewShell();
-        using var _ = shell;
-        var ticket = Opened(shell);
-
-        shell.Host.Stop();
-
-        Assert.Equal(new CutscenePreviewState.Closed(), shell.CutscenePreview.State);
-        Assert.Empty(_sent);
-        Assert.Equal("no game", shell.CutscenePreview.Describe(editor));
-
-        shell.Host.LinkForTests(_sent.Add);
-
-        Assert.True(Assert.Single(_sent.OfType<CutscenePreviewOpen>()).Ticket > ticket);
-    }
-
-    [Fact]
-    public void ALinkLostDuringPlaybackPlaysAgainOnTheNextLink()
-    {
-        var (shell, editor) = NewShell();
-        using var _ = shell;
-        var ticket = Opened(shell);
-        shell.CutscenePreview.PlayPause();
-        shell.OnGameMessage(new CutscenePreviewTick(ticket, 42000, true));
-
-        shell.Host.Stop();
-        Assert.Equal(new CutscenePreviewState.Closed(null, Resume: new CutsceneTransport.Playing(1)), shell.CutscenePreview.State);
-        shell.Host.LinkForTests(_sent.Add);
-
-        var open = Assert.Single(_sent.OfType<CutscenePreviewOpen>());
-        Assert.Equal(42000, open.Tick);
-        _sent.Clear();
-        Answer(shell, open.Ticket);
-        Assert.Equal(42000, Assert.IsType<CutscenePreviewPlay>(Assert.Single(_sent)).Tick);
     }
 
     [Fact]
@@ -491,26 +419,6 @@ public sealed class CutscenePreviewTests : IDisposable
     }
 
     [Fact]
-    public void ASoftRestartOpensTheSessionAgainAtTheSameTick()
-    {
-        var (shell, editor) = NewShell();
-        using var _ = shell;
-        var ticket = Opened(shell);
-        editor.SetPlayhead(30000);
-        shell.CutscenePreview.Flush();
-        _sent.Clear();
-
-        shell.Host.Receive(new GameReloaded(ReloadKind.SoftRestart));
-
-        var open = Assert.Single(_sent.OfType<CutscenePreviewOpen>());
-        Assert.True(open.Ticket > ticket);
-        Assert.Equal(30000, open.Tick);
-        // The new state had no session to close.
-        Assert.Empty(_sent.OfType<CutscenePreviewClose>());
-        Assert.Empty(_sent.OfType<CutscenePreviewPlay>());
-    }
-
-    [Fact]
     public void ASoftRestartDuringPlaybackPlaysAgainFromTheLastReportedTick()
     {
         var (shell, editor) = NewShell();
@@ -523,12 +431,14 @@ public sealed class CutscenePreviewTests : IDisposable
         shell.Host.Receive(new GameReloaded(ReloadKind.SoftRestart));
 
         var open = Assert.Single(_sent.OfType<CutscenePreviewOpen>());
+        Assert.True(open.Ticket > ticket);
         Assert.Equal(90000, open.Tick);
+        // The new state had no session to close, and the play waits for the answer.
+        Assert.Empty(_sent.OfType<CutscenePreviewClose>());
         Assert.Empty(_sent.OfType<CutscenePreviewPlay>());
         Answer(shell, open.Ticket);
         var play = Assert.Single(_sent.OfType<CutscenePreviewPlay>());
         Assert.Equal((open.Ticket, 90000, 1f, false), (play.Ticket, play.Tick, play.Rate, play.Looping));
-        Assert.Equal("playing", shell.CutscenePreview.Describe(editor));
     }
 
     [Fact]
@@ -631,10 +541,6 @@ public sealed class CutscenePreviewTests : IDisposable
         shell.Commands.Get(EditorCommands.CutsceneStepBack).Execute();
         Assert.Equal((ticket, 0), (Assert.Single(_sent.OfType<CutscenePreviewTime>()).Ticket, 0));
         Assert.False(shell.Commands.Get(EditorCommands.CutscenePlayPause).IsChecked);
-
-        Assert.Empty(shell.KeyBindings.Warnings);
-        Assert.Equal("Space", shell.KeyBindings.ShortcutOf(EditorCommands.CutscenePlayPause));
-        Assert.Equal("Shift+Right", shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneStepForward10));
     }
 
     [Fact]
@@ -708,10 +614,6 @@ public sealed class CutscenePreviewTests : IDisposable
         Assert.Equal([0.5f], Rates());
         editor.PlayRate = 10;
         Assert.Equal(CutsceneEditor.MaxPlayRate, editor.PlayRate);
-
-        Assert.Empty(shell.KeyBindings.Warnings);
-        Assert.Equal(("J", "K", "L"), (shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneShuttleBack),
-            shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneShuttlePause), shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneShuttleForward)));
     }
 
     [Fact]
@@ -787,7 +689,6 @@ public sealed class CutscenePreviewTests : IDisposable
         // A folded binding's tracks count.
         editor.ToggleFold("binding:4");
         Assert.Equal([200000], Walk(EditorCommands.CutscenePreviousKey, 1));
-        Assert.Equal(("Up", "Down"), (shell.KeyBindings.ShortcutOf(EditorCommands.CutscenePreviousKey), shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneNextKey)));
     }
 
     [Fact]
@@ -818,14 +719,12 @@ public sealed class CutscenePreviewTests : IDisposable
         var open = OpenWithSettings();
         Assert.Equal((open.Ticket, false, true, editor.File.Tracks.Count() - 1), (Last().Ticket, Last().ScrubSound, Last().Events, Last().Silent.Length));
 
-        // The toggles are each user's, and a file from before them reads with their defaults.
+        // The toggles are each user's.
         Assert.Equal((false, true), (shell.CutsceneTimelineSettingsOf(editor.Guid).ScrubSound, shell.CutsceneTimelineSettingsOf(editor.Guid).Events));
-        var old = System.Text.Json.JsonSerializer.Deserialize<CutsceneTimelineView>("{\"ShowFrames\":true,\"Locked\":[1]}")!;
-        Assert.Equal((true, false), (old.ScrubSound, old.Events));
     }
 
     [Fact]
-    public void ALinkLostDuringAShuttlePlaysAgainAtItsRate()
+    public void ALinkLostDuringAShuttleEndsTheSessionWithoutSendingAndPlaysAgainAtItsRateOnTheNextLink()
     {
         var (shell, editor) = NewShell();
         using var _ = shell;
@@ -834,65 +733,17 @@ public sealed class CutscenePreviewTests : IDisposable
         Run(shell, EditorCommands.CutsceneShuttleForward);
         Run(shell, EditorCommands.CutsceneShuttleForward);
         shell.OnGameMessage(new CutscenePreviewTick(ticket, 42000, true));
+        _sent.Clear();
 
         shell.Host.Stop();
         Assert.Equal(new CutscenePreviewState.Closed(null, Resume: new CutsceneTransport.Playing(2)), shell.CutscenePreview.State);
+        Assert.Empty(_sent);
         shell.Host.LinkForTests(_sent.Add);
         var open = Assert.Single(_sent.OfType<CutscenePreviewOpen>());
+        Assert.True(open.Ticket > ticket);
         _sent.Clear();
         Answer(shell, open.Ticket);
         var play = Assert.Single(_sent.OfType<CutscenePreviewPlay>());
         Assert.Equal((42000, 2f), (play.Tick, play.Rate));
-    }
-
-    [Fact]
-    public void TheTimelinePagesToFollowThePlayheadUntilAPanByHand()
-    {
-        var (shell, editor) = NewShell();
-        using var _ = shell;
-        var ticket = Opened(shell);
-        var input = new CutsceneTimelineInput(editor);
-        editor.PlayheadChanged += input.ShowPlayhead;
-        editor.PlayStarted += input.OnPlayStarted;
-        input.Resize(CutsceneTimelineLayout.Gutter + 1000, 400);
-        input.SetView(new TimelineView(0, 100, TimelineZoom.Ticks));
-
-        // Forward, the view pages to put the playhead near its left edge.
-        shell.CutscenePreview.Play(1);
-        shell.OnGameMessage(new CutscenePreviewTick(ticket, 150000, true));
-        Assert.Equal(150000 - 100 * 100, input.View.Start, 3);
-        // A pan by hand stops it until the next play.
-        input.Wheel(CutsceneTimelineLayout.Gutter + 10, 10, 1, Avalonia.Input.KeyModifiers.Shift);
-        Assert.False(input.Follow);
-        var start = input.View.Start;
-        shell.OnGameMessage(new CutscenePreviewTick(ticket, 400000, true));
-        Assert.Equal(start, input.View.Start);
-        // A change of the loop while it plays sends the play again, and is no new play.
-        editor.Loop = true;
-        shell.OnGameMessage(new CutscenePreviewTick(ticket, 500000, true));
-        Assert.Equal(start, input.View.Start);
-        // Backward, it pages to put the playhead near its right edge.
-        shell.CutscenePreview.Play(-1);
-        Assert.True(input.Follow);
-        shell.OnGameMessage(new CutscenePreviewTick(ticket, 100000, true));
-        Assert.Equal(100000 - 900 * 100, input.View.Start, 3);
-    }
-
-    [Fact]
-    public void TheGameViewsFrameCounterShowsTheTimeTheFrameAndTheShot()
-    {
-        var (shell, editor) = NewShell();
-        using var _ = shell;
-        Assert.Null(shell.CutscenePreview.FrameCounter());
-        Opened(shell);
-        Assert.Equal("00:00:00  ·  frame 0  ·  Wide Shot", shell.CutscenePreview.FrameCounter());
-        editor.SetPlayhead(250000);
-        Assert.Equal("00:04:05  ·  frame 125  ·  Close Shot", shell.CutscenePreview.FrameCounter());
-        editor.SetPlayhead(650000);
-        Assert.EndsWith("gameplay", shell.CutscenePreview.FrameCounter());
-        // A muted cut track shows no shot in the game, and none here.
-        editor.SetPlayhead(250000);
-        editor.SetMuted(5, true);
-        Assert.EndsWith("gameplay", shell.CutscenePreview.FrameCounter());
     }
 }

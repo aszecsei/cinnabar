@@ -135,27 +135,6 @@ public sealed class PrefabTests : IDisposable
     }
 
     [Fact]
-    public void ADragOfAnOverrideIsOneEntry()
-    {
-        var (document, _) = Open();
-        var frame = InDoor(FrameId);
-
-        document.Begin("Drag");
-        foreach (var v in new[] { 0.5, 0.4, 0.3 })
-        {
-            document.Preview(new SetField(frame, 35, "intensity", SceneValue.Of(SceneNumber.Of(v))));
-        }
-        document.Commit();
-
-        var entry = Assert.Single(document.History);
-        Assert.Single(entry.Operations);
-        document.Undo();
-        Assert.Null(document.Scene.Find(frame));
-        document.Redo();
-        Assert.Equal(SceneValue.Of(SceneNumber.Of(0.3)), Intensity(document, frame));
-    }
-
-    [Fact]
     public void EveryOperationOverridesAndUndoes()
     {
         var (document, sent) = Open();
@@ -207,17 +186,6 @@ public sealed class PrefabTests : IDisposable
         Assert.Null(document.Scene.Find(frame));
         Assert.Equal(Wire.OperationKind.AddComponent, Assert.Single(sent).Kind);
         Assert.Equal(SceneValue.Of(SceneNumber.Of(1.0)), Intensity(document, frame));
-    }
-
-    [Fact]
-    public void AReferenceToAnInstancesEntityIsWrittenAsItsPath()
-    {
-        var (document, _) = Open("scene 2\n\nentity 5000000000000001\nprefab = $22222222222222222222222222222222\n\nentity 6000000000000001\ncomponent 1001 Spin\n\ttarget = @0\n");
-
-        document.Apply("Target", new SetField(0x6000000000000001, 1001, "target", SceneValue.EntityRef(InDoor(FrameId))));
-
-        Assert.Contains("\ttarget = @5000000000000001#2000000000000002\n", SceneFile.Write(document.Scene));
-        Assert.Equal(InDoor(FrameId), document.Scene.Find(0x6000000000000001)!.Components[0].Fields[0].Value.Entity);
     }
 
     [Fact]

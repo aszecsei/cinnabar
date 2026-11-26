@@ -19,30 +19,19 @@ public class RibbonLayoutTests
             [new RibbonTab("home", "Home", [new RibbonGroup("Host", items)])]);
 
     [Fact]
-    public void AValidLayoutHasNoErrors() =>
+    public void AValidLayoutHasNoErrorsAndEachMistakeIsOne()
+    {
         Assert.Empty(Layout(
             new SplitButton("host.restart", ["host.restart", "host.stop"]),
             new SmallStack(["host.stop"]),
             new ComboBox("viewport.scale")).Validate(Commands()));
 
-    [Fact]
-    public void AnUnknownCommandIsAnError() =>
         Assert.Contains(Layout(new LargeButton("no.such")).Validate(Commands()), e => e.Contains("no.such"));
-
-    [Fact]
-    public void ASmallStackHoldsAtMostThree() =>
+        // A small stack holds at most three.
         Assert.NotEmpty(Layout(new SmallStack(["host.stop", "host.stop", "host.stop", "host.stop"])).Validate(Commands()));
-
-    [Fact]
-    public void AComboBoxNeedsAChoiceCommand() =>
         Assert.Contains(Layout(new ComboBox("host.stop")).Validate(Commands()), e => e.Contains("choice"));
-
-    [Fact]
-    public void ATabMustNameAKnownCategory()
-    {
-        var layout = new RibbonLayout([], [new RibbonTab("home", "Home", []) { Category = "art" }]);
-
-        Assert.Contains(layout.Validate(Commands()), e => e.Contains("art"));
+        var unknownCategory = new RibbonLayout([], [new RibbonTab("home", "Home", []) { Category = "art" }]);
+        Assert.Contains(unknownCategory.Validate(Commands()), e => e.Contains("art"));
     }
 
     [Fact]

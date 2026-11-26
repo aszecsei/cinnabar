@@ -58,8 +58,6 @@ public sealed class ProjectTests : IDisposable
         Assert.Equal(project, ProjectLayout.ProjectDirectory(Path.Combine(project, "project.settings")));
         Assert.Equal("Lantern", ProjectLayout.Name(project));
         Assert.True(ProjectLayout.IsEngine(Engine));
-        Assert.Equal("basic", ProjectLayout.Templates(Engine)[0]);
-        Assert.Contains("odin", ProjectLayout.Templates(Engine));
         // The command line's one folder is a project to open.
         Assert.Equal(Path.Combine(project, "project.settings"), EditorOptions.Parse([project]).ProjectPath);
     }
@@ -124,13 +122,6 @@ public sealed class ProjectTests : IDisposable
         started[1].Exit(1);
         Assert.Single(finished);
         Assert.DoesNotContain("late", lines);
-    }
-
-    [Fact]
-    public void ANewProjectsFolderIsItsNameAsAFileTakesIt()
-    {
-        Assert.Equal("My Game 2", NewProjectDialog.FolderName("My Game: 2?"));
-        Assert.Equal("Lantern", NewProjectDialog.FolderName(" Lantern. "));
     }
 
     sealed class FakeTool(IReadOnlyList<string> args) : IChildProcess

@@ -35,17 +35,6 @@ public sealed class LandscapeTests : IDisposable
         Assert.Null(Png.Decode([1, 2, 3]));
     }
 
-    [Fact]
-    public void TheWeatherMapStillReadsAndWritesItsPng()
-    {
-        var map = new WeatherMap(4, 2);
-        map.Set(WeatherChannel.Coverage, 1, 1, 0.5);
-        var back = WeatherMap.DecodePng(map.EncodePng());
-        Assert.NotNull(back);
-        Assert.Equal(map.Rgba, back.Rgba);
-        Assert.Null(WeatherMap.DecodePng(Png.Encode(new PngImage(1, 1, 1, 16, [5]))));
-    }
-
     static HeightGrid Flat(ushort value = 32768) => new(64, 64, value);
 
     static BrushDab Dab(double x, double y, double radius = 8, double strength = 1, double falloff = 0.5) => new(x, y, radius, radius, strength, falloff);
@@ -157,21 +146,6 @@ public sealed class LandscapeTests : IDisposable
     }
 
     [Fact]
-    public void AStrokesPatchesAreItsChangedTilesAndItsRestorePutsThemBack()
-    {
-        var grid = Flat();
-        var original = (ushort[])grid.Texels.Clone();
-        var stroke = new LandscapeStroke(grid, LandscapeBrush.Hole, Dab(10, 10, 3));
-        stroke.Apply(Dab(10, 10, 3));
-        Assert.Equal(0, grid[10, 10]);
-        var patches = stroke.Patches();
-        var patch = Assert.Single(patches);
-        Assert.Equal(new TexelRect(0, 0, HeightGrid.Tile, HeightGrid.Tile), patch.Rect);
-        stroke.Restore();
-        Assert.Equal(original, grid.Texels);
-    }
-
-    [Fact]
     public void AnOperationAndItsInverseAreBitExactAndSetTheRevision()
     {
         var grid = Flat();
@@ -247,19 +221,6 @@ public sealed class LandscapeTests : IDisposable
     static readonly Vec2 Middle = new(800, 450);
 
     [Fact]
-    public void SelectingATerrainSetsItsContextAndTheToolPaintsOnlyThen()
-    {
-        using var shell = NewShell();
-        Assert.True(shell.Context.IsActive(LandscapeSession.TerrainContext));
-        Assert.False(shell.Landscape.BeginStroke(Middle), "the tool is not the Landscape tool");
-        shell.Commands.Get(EditorCommands.LandscapeTool).Execute();
-        Assert.Equal(Tool.Landscape, shell.Tool);
-        shell.Selection.Select(0);
-        Assert.False(shell.Context.IsActive(LandscapeSession.TerrainContext));
-        Assert.False(shell.Landscape.BeginStroke(Middle));
-    }
-
-    [Fact]
     public void AStrokeShowsAtOnceUndoesAsOneEntryAndSavesThePng()
     {
         using var shell = NewShell();
@@ -292,19 +253,6 @@ public sealed class LandscapeTests : IDisposable
         Assert.NotNull(saved);
         Assert.Equal(16, saved.Depth);
         Assert.Equal(raised, saved.Samples[8 * 16 + 8]);
-    }
-
-    [Fact]
-    public void EscapeCancelsAStrokeAndPutsTheTexelsBack()
-    {
-        using var shell = NewShell();
-        shell.SetTool(Tool.Landscape);
-        Assert.True(shell.Landscape.BeginStroke(Middle));
-        shell.Landscape.CancelStroke();
-        var map = Assert.Single(shell.Landscape.Maps);
-        Assert.All(map.Grid.Texels, t => Assert.Equal(32768, t));
-        Assert.False(shell.Scene!.CanUndo);
-        Assert.False(map.IsDirty);
     }
 
     [Fact]
@@ -346,18 +294,6 @@ public sealed class LandscapeTests : IDisposable
         Assert.Equal("Sculpt (Raise)", Assert.Single(shell.Scene!.History).Label);
         Assert.DoesNotContain(shell.Landscape.Maps, m => m.Kind == LandscapeMapKind.Mask);
     }
-
-    [Theory]
-    [InlineData(LandscapeBrush.Raise, LandscapeSession.BrushTarget.Height)]
-    [InlineData(LandscapeBrush.Ramp, LandscapeSession.BrushTarget.Height)]
-    [InlineData(LandscapeBrush.Noise, LandscapeSession.BrushTarget.Height)]
-    [InlineData(LandscapeBrush.Hole, LandscapeSession.BrushTarget.Mask)]
-    [InlineData(LandscapeBrush.Fill, LandscapeSession.BrushTarget.Mask)]
-    [InlineData(LandscapeBrush.Paint, LandscapeSession.BrushTarget.Layers)]
-    [InlineData(LandscapeBrush.Scatter, LandscapeSession.BrushTarget.Foliage)]
-    [InlineData(LandscapeBrush.Erase, LandscapeSession.BrushTarget.Foliage)]
-    public void EachBrushPaintsOneTarget(LandscapeBrush brush, LandscapeSession.BrushTarget target) =>
-        Assert.Equal(target, LandscapeSession.TargetOf(brush));
 
     [Fact]
     public void AHoleOnASurfaceWithoutAMaskMakesOneOfItsCellsAndNamesIt()

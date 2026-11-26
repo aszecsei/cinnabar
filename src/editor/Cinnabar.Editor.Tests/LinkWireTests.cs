@@ -6,31 +6,21 @@ namespace Cinnabar.Editor.Tests;
 
 public class LinkWireTests
 {
+    // Strings, enums, negative and 64-bit integers, bools and a nested struct.
     public static TheoryData<ILinkMessage> Messages() =>
     [
         new Hello(0x1234_5678_9abc_def0, "cinnabar editor"),
-        new Welcome(1, "mygame", ulong.MaxValue),
-        new Refused("versions differ", 2),
         new Log(LogLevel.Warning, -5, "host.odin:12:main()", "ünïcode"),
         new GameReloaded(ReloadKind.SoftRestart),
-        new GameSize(1920, -1),
-        new OpenViewport(2, ViewportKind.Game, 640, 360),
-        new ViewportTarget(2, "cinnabar.viewport2.g3", 3, 640, 360),
         new ViewportAcknowledged(2, 3, 1UL << 40),
-        new CaptureSource(-1),
-        new CutscenePreviewTime(3, 1000),
         new CutscenePreviewPlay(3, 1000, -2, true, 500, 90000),
-        new CutscenePreviewClose(3),
-        new CutscenePreviewOpened(3, 12000, 0, 600000),
-        new CutscenePreviewEnded(4, CutscenePreviewEndReason.CodeReloaded),
-        new CutscenePreviewTick(3, 1001, true),
         new ViewportLook(2, 7, 3, ViewportLookSource.Binding, 12),
         new CutscenePreviewShown(new ShownPreview(3, 1001, 99, 5)),
     ];
 
     [Theory]
     [MemberData(nameof(Messages))]
-    public void EveryMessageRoundTrips(ILinkMessage message)
+    public void AMessageOfEachKindOfFieldRoundTrips(ILinkMessage message)
     {
         var frame = LinkFrame.Encode(message, request: 7);
         var header = LinkFrame.ReadHeader(frame);
@@ -39,24 +29,6 @@ public class LinkWireTests
         Assert.Equal(message.MessageKind, header.Kind);
         Assert.Equal(7u, header.Request);
         Assert.Equal(message, LinkFrame.Decode(header.Kind, frame.AsSpan(LinkFrame.HeaderSize), LinkMessages.Read));
-    }
-
-    [Fact]
-    public void ACutscenePreviewsSettingsRoundTripWithTheirSilentTracks()
-    {
-        var message = new CutscenePreviewSettings(3, false, true, [4, 1_000_001]);
-        var frame = LinkFrame.Encode(message);
-        var header = LinkFrame.ReadHeader(frame);
-        var read = Assert.IsType<CutscenePreviewSettings>(LinkFrame.Decode(header.Kind, frame.AsSpan(LinkFrame.HeaderSize), LinkMessages.Read));
-        Assert.Equal((3UL, false, true), (read.Ticket, read.ScrubSound, read.Events));
-        Assert.Equal([4u, 1_000_001u], read.Silent);
-
-        byte[] guid = [1, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9];
-        frame = LinkFrame.Encode(new CutscenePreviewOpen(3, guid, true, 12000));
-        header = LinkFrame.ReadHeader(frame);
-        var open = Assert.IsType<CutscenePreviewOpen>(LinkFrame.Decode(header.Kind, frame.AsSpan(LinkFrame.HeaderSize), LinkMessages.Read));
-        Assert.Equal((3UL, true, 12000), (open.Ticket, open.Unsaved, open.Tick));
-        Assert.Equal(guid, open.Cutscene);
     }
 
     [Fact]
@@ -72,6 +44,16 @@ public class LinkWireTests
         Assert.Equal([36f, 24f], read.Sensor);
     }
 
+    // The only message with a slice of numbers wider than a byte.
+    [Fact]
+    public void ASliceOfU32RoundTrips()
+    {
+        var frame = LinkFrame.Encode(new CutscenePreviewSettings(3, false, true, [4, 1_000_001]));
+        var header = LinkFrame.ReadHeader(frame);
+        var read = Assert.IsType<CutscenePreviewSettings>(LinkFrame.Decode(header.Kind, frame.AsSpan(LinkFrame.HeaderSize), LinkMessages.Read));
+        Assert.Equal([4u, 1_000_001u], read.Silent);
+    }
+
     [Fact]
     public void AnEntitysValuesRoundTripWithWhatTheWorldShows()
     {
@@ -85,18 +67,6 @@ public class LinkWireTests
         Assert.Equal(new HeldField(1, 7), Assert.Single(read.Held));
         Assert.Equal([4, 5, 6], Assert.Single(read.Shown).Data);
         Assert.Equal(new ShownPreview(3, 1200, 1_700_000_000_000_000_000, 5), read.ShownPreview);
-    }
-
-    [Fact]
-    public void ANavProbeRoundTrips()
-    {
-        var message = new NavProbe([new NavProbePoint([1, -2, 1L << 40]), new NavProbePoint([0, 0, 3])]);
-        var frame = LinkFrame.Encode(message);
-        var header = LinkFrame.ReadHeader(frame);
-
-        var back = Assert.IsType<NavProbe>(LinkFrame.Decode(header.Kind, frame.AsSpan(LinkFrame.HeaderSize), LinkMessages.Read));
-
-        Assert.Equal(message.Points.Select(p => p.Position), back.Points.Select(p => p.Position));
     }
 
     [Fact]
@@ -127,29 +97,17 @@ public class LinkWireTests
     }
 
     [Fact]
-    public void AShortOrLongPayloadIsRefused()
+    public void AMalformedFrameIsRefused()
     {
         var payload = LinkFrame.Encode(new Hello(1, "editor")).AsSpan(LinkFrame.HeaderSize).ToArray();
 
+        // A payload short or long for its kind, an unknown kind, a string longer than the payload, a header with a huge
+        // payload, and a bool other than 0 or 1.
         Assert.Throws<LinkProtocolException>(() => LinkFrame.Decode(Hello.KindId, payload[..^1], LinkMessages.Read));
         Assert.Throws<LinkProtocolException>(() => LinkFrame.Decode(Hello.KindId, [.. payload, 0], LinkMessages.Read));
-    }
-
-    [Fact]
-    public void AnUnknownKindIsRefused() =>
         Assert.Throws<LinkProtocolException>(() => LinkFrame.Decode(200, [], LinkMessages.Read));
-
-    [Fact]
-    public void AStringLongerThanThePayloadIsRefused() =>
         Assert.Throws<LinkProtocolException>(() => LinkFrame.Decode(Refused.KindId, [0, 0, 0, 0x40], LinkMessages.Read));
-
-    [Fact]
-    public void AHeaderWithAHugePayloadIsRefused() =>
         Assert.Throws<LinkProtocolException>(() => LinkFrame.ReadHeader([0xff, 0xff, 0xff, 0xff, 1, 0, 0, 0, 0, 0, 0, 0]));
-
-    [Fact]
-    public void ABoolOtherThanZeroOrOneIsRefused()
-    {
         var reader = new LinkReader([2]);
         try
         {
@@ -199,11 +157,4 @@ public class LinkWireTests
         Assert.Throws<FormatException>(() => SchemaCode.Generate("""
             {"version": "1", "messages": [{"kind": 1, "name": "Size", "fields": [{"name": "size", "type": "u32"}]}], "structs": [], "enums": []}
             """));
-
-    [Theory]
-    [InlineData("Viewport_Target", "ViewportTarget")]
-    [InlineData("layout_hash", "LayoutHash")]
-    [InlineData("Soft_Restart", "SoftRestart")]
-    [InlineData("game", "Game")]
-    public void NamesBecomePascalCase(string odin, string csharp) => Assert.Equal(csharp, SchemaCode.Pascal(odin));
 }

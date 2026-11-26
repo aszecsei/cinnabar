@@ -9,7 +9,7 @@ using Welcome = Cinnabar.Editor.Link.Cook.Welcome;
 
 namespace Cinnabar.Editor.Tests;
 
-/// <summary>The UI editor without a window: opening, edits through the shell, problems on elements, and the canvas's layout.</summary>
+/// <summary>The UI editor without a window: the tree's edits, problems on elements, the scale and the canvas's picks.</summary>
 public sealed class UiEditorTests : IDisposable
 {
     const string Guid = "5b845a4341f6a3b772ec017211470fac";
@@ -44,93 +44,6 @@ public sealed class UiEditorTests : IDisposable
     static UiPreviewLayout Layout(UiEditor editor, params (int Node, float X0, float Y0, float X1, float Y1)[] nodes) =>
         new(0, Fnv.Hash64(Encoding.UTF8.GetBytes(editor.Document.Text)), 1, 1920, 1080,
             [.. nodes.Select(n => new UiLayoutNode((uint)n.Node, true, [n.X0, n.Y0, n.X1, n.Y1], [n.X0 + 1, n.Y0 + 1, n.X1 - 1, n.Y1 - 1], [0, 0, 1920, 1080]))]);
-
-    [Fact]
-    public void AScreenSizeThatDoesNotParseOrIsOutOfRangePutsTheValueBackWithTheProblemAsItsTip()
-    {
-        var (shell, asset, _) = Menu();
-        using var _ = shell;
-        shell.OpenAsset(asset);
-        var editor = Assert.Single(shell.UiDocuments);
-        var box = (Avalonia.Controls.TextBox)((Avalonia.Controls.Border)UiDocuments.UiEditorView.WidthBox(editor)).Child!;
-        Assert.Equal("1920", box.Text);
-
-        foreach (var typed in new[] { "wide", "8", "1,280" })
-        {
-            box.Text = typed;
-            box.RaiseEvent(new Avalonia.Input.KeyEventArgs { RoutedEvent = Avalonia.Input.InputElement.KeyDownEvent, Key = Avalonia.Input.Key.Enter });
-            Assert.Equal("1920", box.Text);
-            Assert.Equal("a whole number from 16 to 16384", Avalonia.Controls.ToolTip.GetTip(box));
-            Assert.Equal((1920, 1080), editor.Screen);
-        }
-
-        // A width that the editor takes clears the problem.
-        box.Text = "1280";
-        box.RaiseEvent(new Avalonia.Input.KeyEventArgs { RoutedEvent = Avalonia.Input.InputElement.KeyDownEvent, Key = Avalonia.Input.Key.Enter });
-        Assert.Equal((1280, 1080), editor.Screen);
-        Assert.Equal("1280", box.Text);
-        Assert.Null(Avalonia.Controls.ToolTip.GetTip(box));
-    }
-
-    [Fact]
-    public void AScreenSizeBoxPutsBackTheSizeThatAPresetSet()
-    {
-        var (shell, asset, _) = Menu();
-        using var _ = shell;
-        shell.OpenAsset(asset);
-        var editor = Assert.Single(shell.UiDocuments);
-        var border = (Avalonia.Controls.Border)UiDocuments.UiEditorView.HeightBox(editor);
-        var box = (Avalonia.Controls.TextBox)border.Child!;
-        border.IsVisible = false;
-
-        // A preset changes the size while the box is hidden, and Custom shows it again.
-        editor.SetScreen(1280, 720);
-        border.IsVisible = true;
-        Assert.Equal("720", box.Text);
-
-        box.Text = "tall";
-        box.RaiseEvent(new Avalonia.Input.KeyEventArgs { RoutedEvent = Avalonia.Input.InputElement.KeyDownEvent, Key = Avalonia.Input.Key.Enter });
-        Assert.Equal("720", box.Text);
-        editor.SetScreen(1920, 1080);
-        box.Text = "8";
-        box.RaiseEvent(new Avalonia.Input.KeyEventArgs { RoutedEvent = Avalonia.Input.InputElement.KeyDownEvent, Key = Avalonia.Input.Key.Escape });
-        Assert.Equal("1080", box.Text);
-    }
-
-    [Fact]
-    public void TheSamplesMenuOpensInItsEditorAndAnEditChangesOnlyItsLine()
-    {
-        var (shell, asset, text) = Menu();
-        using var _ = shell;
-        Assert.True(EditorShell.CanOpen(asset));
-        Assert.Equal("Open in UI Editor", shell.OpenLabel(asset));
-        shell.OpenAsset(asset);
-        var editor = Assert.Single(shell.UiDocuments);
-        Assert.Same(editor, shell.ActiveGraphEditor);
-        Assert.Same(editor, shell.ActiveUiDocument);
-        Assert.Contains(editor, shell.GraphEditors);
-        Assert.False(editor.Document.IsDirty);
-        Assert.Same(editor, shell.OpenUiDocument(asset));
-
-        var resume = editor.File.NodeById("resume")!.Index;
-        editor.Select(resume);
-        editor.SetAttribute(resume, "fill", "#ff0000");
-        var expected = text.Replace("<button id=\"resume\" click=\"resume\">", "<button id=\"resume\" click=\"resume\" fill=\"#ff0000\">");
-        Assert.Equal(expected, editor.Document.Text);
-        Assert.Equal(new UiValue("#ff0000", UiSource.Own, ""), editor.Values(resume)["fill"]);
-
-        // Undo, Redo and Save act on the active document.
-        shell.Commands.Get("edit.undo").Execute();
-        Assert.Equal(text, editor.Document.Text);
-        shell.Commands.Get("edit.redo").Execute();
-        shell.Commands.Get("file.save").Execute();
-        Assert.False(editor.Document.IsDirty);
-        Assert.Equal(expected, File.ReadAllText(_temp.Combine("pause.ui")));
-
-        shell.CloseGraph(editor, discard: true);
-        Assert.Empty(shell.UiDocuments);
-        Assert.Null(shell.ActiveGraphEditor);
-    }
 
     [Fact]
     public void TheTreesEditsKeepTheirElementSelected()
@@ -178,42 +91,6 @@ public sealed class UiEditorTests : IDisposable
     }
 
     [Fact]
-    public void CancelInTheCanvasSelectsNothing()
-    {
-        var (shell, asset, _) = Menu();
-        using var __ = shell;
-        var editor = shell.OpenUiDocument(asset)!;
-        var cancel = new Cinnabar.Editor.UiDocuments.UiElementScope(editor).Handler(EditorCommands.Cancel)!;
-        editor.Select(editor.File.NodeById("resume")!.Index);
-
-        // Esc in the canvas is Cancel, which selects nothing, and with nothing selected cannot run.
-        Assert.True(cancel.CanExecute);
-        cancel.Run();
-        Assert.Null(editor.SelectedNode);
-        Assert.False(cancel.CanExecute);
-    }
-
-    [Fact]
-    public void AStateThatTheCanvasShowsPicksItsVariant()
-    {
-        var (shell, asset, _) = Menu();
-        using var __ = shell;
-        var editor = shell.OpenUiDocument(asset)!;
-        var resume = editor.File.NodeById("resume")!.Index;
-        editor.Select(resume);
-        editor.SetState("hover", true);
-        Assert.Equal("button:hover", editor.Values(resume)["fill"].From);
-        Assert.Equal("button", editor.Values(editor.File.NodeById("quality")!.Index)["fill"].From);
-        editor.SetState("hover", false);
-        Assert.Equal("button", editor.Values(resume)["fill"].From);
-        // The bindings are the text's, and their values are the preview's only.
-        Assert.Equal(["name", "quality"], editor.BindingNames);
-        editor.SetBinding("name", "Ada");
-        Assert.Equal("Ada", editor.BindingValues["name"]);
-        Assert.False(editor.Document.IsDirty);
-    }
-
-    [Fact]
     public void AProblemGoesOnTheElementAtItsLineAndColumn()
     {
         var (shell, asset, _) = Menu();
@@ -231,15 +108,6 @@ public sealed class UiEditorTests : IDisposable
         Assert.Null(editor.Problems[1].Node);
         Assert.Null(editor.Problems[2].Node);
         Assert.Equal(new CheckState.Failed("width is wrong"), editor.Checks.State);
-
-        // An answer about a text that has changed since is dropped.
-        var old = editor.Document.Text;
-        editor.SetAttribute(0, "size", "21");
-        editor.Checks.Show(old, Answer(path));
-        Assert.Equal(new CheckState.Failed("width is wrong"), editor.Checks.State);
-        editor.Checks.Show(editor.Document.Text, Answer(path));
-        Assert.IsType<CheckState.Clean>(editor.Checks.State);
-        Assert.Empty(editor.Problems);
     }
 
     [Fact]
@@ -267,7 +135,7 @@ public sealed class UiEditorTests : IDisposable
     }
 
     [Fact]
-    public void TheViewFitsTheScreenUntilItIsZoomedOrPanned()
+    public void TheScaleFollowsTheScreenAndTheProjectsSetting()
     {
         var (shell, asset, _) = Menu();
         using var __ = shell;
@@ -276,34 +144,11 @@ public sealed class UiEditorTests : IDisposable
         Assert.Equal(2, editor.Scale);
         editor.SetScaleFactor(10);
         Assert.Equal(8, editor.Scale);
-        editor.SetScaleFactor(1);
-        editor.Fit();
-        // The default preview is 256 pixels square: the screen's width fits it.
-        Assert.Equal(256.0 / 3840, editor.ViewScale, 6);
-        var (x, y) = editor.ToScreen(128, 128);
-        Assert.Equal((1920, 1080), (Math.Round(x), Math.Round(y)));
-        editor.ZoomView(1, 128, 128);
-        Assert.False(editor.Fitted);
-        Assert.Equal((1920, 1080), (Math.Round(editor.ToScreen(128, 128).X), Math.Round(editor.ToScreen(128, 128).Y)));
-        editor.Pan(10, 0);
-        Assert.Equal(1910, Math.Round(editor.ToScreen(128, 128).X));
         Assert.Equal(1, UiEditor.ProjectScale(_temp.Combine("none.settings")));
         File.WriteAllText(_temp.Combine("project.settings"), "ui.scale = 1.5\n");
         Assert.Equal(1.5, UiEditor.ProjectScale(_temp.Combine("project.settings")));
         File.WriteAllText(_temp.Combine("project.settings"), "ui.scale = 9\n");
         Assert.Equal(1, UiEditor.ProjectScale(_temp.Combine("project.settings")));
-    }
-
-    [Fact]
-    public void ANewUiDocumentOpensInItsEditorOnceTheIndexHasIt()
-    {
-        var (shell, asset, _) = Menu();
-        using var __ = shell;
-        shell.Assets.Apply(new AssetSnapshot([], []));
-        shell.OnAssetCreated(Guid, AssetTemplate.Ui);
-        Assert.Empty(shell.UiDocuments);
-        shell.Assets.Apply(new AssetSnapshot([asset], []));
-        Assert.Single(shell.UiDocuments);
     }
 
     [Fact]

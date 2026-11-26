@@ -359,8 +359,18 @@ main_lane :: proc() -> u8 {
 	return state.main_lane
 }
 
+// Tests set the clock, so what they measure does not depend on how fast the machine runs. Zero reads the real clock. Only
+// a test build reads it, but every build declares it, as odin build compiles the package's tests too.
+@(private)
+test_clock: u64
+
 @(private = "file")
 now :: #force_inline proc() -> u64 {
+	when ODIN_TEST {
+		if t := sync.atomic_load(&test_clock); t != 0 {
+			return t
+		}
+	}
 	return u64(time.tick_now()._nsec)
 }
 

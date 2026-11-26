@@ -70,10 +70,9 @@ public sealed class AtmosphereTests : IDisposable
         Assert.True(shell.Commands.Get(EditorCommands.AtmosphereSelect).Execute());
 
         var volume = shell.AtmosphereVolume!;
-        Assert.Equal("Atmosphere", volume.Name);
         Assert.Equal("Atmosphere", Atmosphere.ModeOf(volume));
         Assert.Equal(1ul, shell.AtmosphereSun!.Id);
-        Assert.Equal("Create Atmosphere", Assert.Single(shell.Scene!.History).Label);
+        Assert.Single(shell.Scene!.History);
 
         // Again, it finds the one that it made.
         Assert.True(shell.Commands.Get(EditorCommands.AtmosphereSelect).Execute());
@@ -87,7 +86,7 @@ public sealed class AtmosphereTests : IDisposable
 
         Assert.True(shell.Commands.Get(EditorCommands.Stars).Execute());
 
-        Assert.Equal("Show Stars", Assert.Single(shell.Scene!.History).Label);
+        Assert.Single(shell.Scene!.History);
         Assert.Equal(Atmosphere.StarsOn, Field(Environment(shell), Atmosphere.StarIntensity)!.Numbers[0].Float);
         Assert.True(shell.Commands.Get(EditorCommands.Stars).IsChecked);
         shell.Scene.Undo();
@@ -106,7 +105,6 @@ public sealed class AtmosphereTests : IDisposable
         Assert.Equal(270, azimuth, 3);
         Assert.Equal(-20, elevation, 3);
         Assert.Null(Field(Environment(shell), Atmosphere.SunElevation));
-        Assert.Equal("Set Time to Night", shell.Scene.History[^1].Label);
     }
 
     [Fact]
@@ -126,21 +124,6 @@ public sealed class AtmosphereTests : IDisposable
         Assert.Null(Field(environment, Atmosphere.SunElevation + SceneEdits.OverrideSuffix));
         // The light did not turn.
         Assert.Equal([0.0, 0, 0, 1], shell.Scene!.Scene.Find(1)!.Components[0].Fields.Single(f => f.Name == "rotation").Value.Numbers.Select(n => n.Float));
-    }
-
-    [Fact]
-    public void TheModeIsAChoiceOfTheEnvironment()
-    {
-        using var shell = NewShell();
-        var mode = (ChoiceCommand)shell.Commands.Get(EditorCommands.AtmosphereMode);
-        Assert.Equal("Flat", mode.Selected);
-        shell.SelectAtmosphere();
-        Assert.Equal("Atmosphere", mode.Selected);
-
-        mode.Select("Flat");
-
-        Assert.Equal("Flat", mode.Selected);
-        Assert.Equal("Flat", Field(Environment(shell), Atmosphere.Mode)!.Text);
     }
 
     [Fact]

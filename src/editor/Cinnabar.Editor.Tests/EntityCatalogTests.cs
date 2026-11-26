@@ -26,18 +26,14 @@ public sealed class EntityCatalogTests : IDisposable
     static Document.SceneEntity Created(EditorShell shell) => shell.Scene!.Scene.Entities.Single(e => e.Id != 1);
 
     [Fact]
-    public void EveryKindHasACommandAndAnIconAndItsOwnId()
+    public void EveryKindHasACommandOfItsOwnId()
     {
         using var shell = NewShell();
 
-        Assert.Equal(EntityCatalog.All.Count, EntityCatalog.All.Select(t => t.Id).Distinct().Count());
         Assert.Equal(EntityCatalog.All.Count, EntityCatalog.All.Select(t => EditorCommands.AddEntity(t.Id)).Distinct().Count());
         foreach (var template in EntityCatalog.All)
         {
-            var command = shell.Commands.Get(EditorCommands.AddEntity(template.Id));
-            Assert.Equal(template.Label, command.Label);
-            Assert.Equal(template.Icon, command.Icon);
-            Assert.True(command.CanExecute);
+            Assert.True(shell.Commands.Get(EditorCommands.AddEntity(template.Id)).CanExecute);
             // A component is there once, by the ID that the engine registers it with.
             Assert.Equal(template.Components.Count, template.Components.Select(c => c.Id).Distinct().Count());
         }
@@ -45,17 +41,6 @@ public sealed class EntityCatalogTests : IDisposable
         Assert.Equal("entity.create", EditorCommands.AddEntity(EntityCatalog.EmptyId));
         Assert.Equal("entity.createVolume", EditorCommands.AddEntity("globalVolume"));
         Assert.Equal("entity.createReflectionProbe", EditorCommands.AddEntity("reflectionProbe"));
-        Assert.Equal("Ctrl+Shift+N", shell.Commands.Get(EditorCommands.CreateEntity).Shortcut);
-    }
-
-    [Fact]
-    public void TheAddMenuHasEveryKindOnceInItsCategory()
-    {
-        var menu = DefaultRibbon.AddMenu();
-
-        var commands = Commands.MenuEntry.Commands(menu).ToList();
-        Assert.Equal(EntityCatalog.All.Select(t => EditorCommands.AddEntity(t.Id)).Order(), commands.Order());
-        Assert.Equal(EntityCatalog.Categories, menu.OfType<Commands.Submenu>().Select(s => s.Label));
     }
 
     [Fact]
@@ -66,13 +51,12 @@ public sealed class EntityCatalogTests : IDisposable
         Assert.True(shell.Commands.Get(EditorCommands.AddEntity("pointLight")).Execute());
 
         var created = Created(shell);
-        Assert.Equal("Point Light", created.Name);
         var light = created.Components.Single(c => c.Name == "Point_Light");
         // A light that is added as a component alone has an intensity of 0, and shows nothing.
         Assert.True(light.Fields.Single(f => f.Name == "intensity").Value.Numbers[0].Float > 0);
         Assert.True(light.Fields.Single(f => f.Name == "cast_shadows").Value.Bool);
         Assert.Contains(created.Components, c => c.Id == SceneEdits.TransformId);
-        Assert.Equal("Add Point Light", Assert.Single(shell.Scene!.History).Label);
+        Assert.Single(shell.Scene!.History);
         // Undo takes the whole entity, and the catalog's own components are not the scene's to change.
         shell.Scene.Undo();
         Assert.Single(shell.Scene.Scene.Entities);

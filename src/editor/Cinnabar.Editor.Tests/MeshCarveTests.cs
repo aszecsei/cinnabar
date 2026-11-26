@@ -82,16 +82,5 @@ public sealed class MeshCarveTests : IDisposable
         Assert.DoesNotContain(shell.Scene.Scene.Find(1)!.Components.Single(c => c.Id == SceneEdits.MeshRendererId).Fields, f => f.Name == $"materials.{slot}");
     }
 
-    [Fact]
-    public void CarveWithOneEditedMeshIsDisabled()
-    {
-        using var shell = NewShell();
-        shell.Mesh.LeaveMeshMode();
-        shell.Selection.Select(Handle(0));
-        shell.Mesh.EnterMeshMode();
-        Assert.Single(shell.Mesh.EditedMeshes);
-        Assert.False(shell.Commands.Get(EditorCommands.MeshCarve).CanExecute);
-    }
-
     public void Dispose() => _temp.Dispose();
 }

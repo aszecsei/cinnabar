@@ -73,21 +73,6 @@ public sealed class GizmoControllerTests : IDisposable
     }
 
     [Fact]
-    public void AnEmptyStepOrAFailedPreviewIsNotPreviewed()
-    {
-        using var shell = NewShell();
-        var gizmo = Controller(shell);
-        var target = new Target(_calls) { Steps = [] };
-        gizmo.Start(Drag(), target, "Move");
-        gizmo.Drag(new Vec2(810, 450), snap: false);
-        // An entity that the document does not have does not fit.
-        target.Steps = [new Rename(99, "Gone")];
-        gizmo.Drag(new Vec2(820, 450), snap: false);
-
-        Assert.Equal(["begin Move", "sent", "drag False", "drag False"], _calls);
-    }
-
-    [Fact]
     public void ADragDoesNotStartWhileAnotherEditIsOpen()
     {
         using var shell = NewShell();

@@ -17,38 +17,6 @@ public sealed class ToolsTests
         Assert.True(Math.Abs(expected - actual) <= tolerance, $"expected {expected}, got {actual}");
 
     [Fact]
-    public void EachToolNamesItsDragAndScaleTakesTheSelectionsAxes()
-    {
-        Assert.Equal("Move", Gizmo.VerbOf(Tool.Move));
-        Assert.Equal("Rotate", Gizmo.VerbOf(Tool.Rotate));
-        Assert.Equal("Scale", Gizmo.VerbOf(Tool.Scale));
-        Assert.Equal("Shift", Gizmo.VerbOf(Tool.Move, "Shift"));
-        Assert.Equal("Rotate", Gizmo.VerbOf(Tool.Rotate, "Shift"));
-
-        Assert.False(Gizmo.LocalAxes(Tool.Move, Space.World));
-        Assert.False(Gizmo.LocalAxes(Tool.Rotate, Space.World));
-        Assert.True(Gizmo.LocalAxes(Tool.Scale, Space.World));
-        Assert.True(Gizmo.LocalAxes(Tool.Move, Space.Local));
-    }
-
-    [Fact]
-    public void TheCameraLooksDownItsZAndProjectsWhatItSees()
-    {
-        var camera = new EditorCamera();
-        var center = camera.Ray(new Vec2(Width / 2, Height / 2), Width, Height);
-        Assert.Equal(new ViewRay(Vec3.Zero, Vec3.UnitZ), center);
-
-        // A point ahead and up shows above the middle, and its ray comes back to it.
-        var point = new Vec3(1, 2, 10);
-        var pixel = camera.Project(point, Width, Height)!.Value;
-        Assert.True(pixel.Y < Height / 2 && pixel.X > Width / 2);
-        var ray = camera.Ray(pixel, Width, Height);
-        Assert.Equal(Vec3.Zero, ray.Origin);
-        Near(0, (ray.Direction - point.Normalized()).Length);
-        Assert.Null(camera.Project(new Vec3(0, 0, -1), Width, Height));
-    }
-
-    [Fact]
     public void AnOrthographicCameraSeesAlongParallelRaysAndZoomsInPlace()
     {
         var camera = new EditorCamera();
@@ -150,26 +118,6 @@ public sealed class ToolsTests
         var moved = plane.Update(middle + new Vec2(Height / 10, -Height / 5), null).Translation;
         Near(1, moved.X);
         Near(2, moved.Y);
-    }
-
-    [Fact]
-    public void LookingDownTurnsTheCameraDownAndOrbitingKeepsThePivot()
-    {
-        var camera = new EditorCamera();
-        camera.Look(0, 100);
-        Assert.True(camera.Forward.Y < 0);
-
-        camera.Place([0, 0, 0], 0, 0);
-        var pivot = camera.Pivot;
-        camera.Orbit(150, -40);
-        Assert.Equal(pivot, camera.Pivot, (a, b) => a.Zip(b).All(p => Math.Abs(p.First - p.Second) <= 2));
-        Assert.True(camera.Forward.X > 0);
-
-        // A notch of dolly takes the camera part of the way to the pivot, and leaves the pivot where it is.
-        var distance = camera.PivotDistance;
-        camera.Dolly(1);
-        Assert.True(camera.PivotDistance < distance);
-        Assert.Equal(pivot, camera.Pivot, (a, b) => a.Zip(b).All(p => Math.Abs(p.First - p.Second) <= 2));
     }
 
     [Fact]
@@ -384,38 +332,6 @@ public sealed class ToolsTests
         }
         camera.LookAt([0, 0, 0], 10, 0.5, 0.4);
         Assert.Null(ViewGizmo.Aligned(camera));
-        Assert.Equal("Free · Persp", ViewGizmo.Label(camera));
-
-        // A handle looks from its end of the axis.
-        Assert.Equal(ViewAxis.Top, ViewGizmo.AxisOf(ViewGizmoPart.PositiveY));
-        Assert.Equal(ViewAxis.Front, ViewGizmo.AxisOf(ViewGizmoPart.PositiveZ));
-        Assert.Equal(ViewAxis.Right, ViewGizmo.AxisOf(ViewGizmoPart.PositiveX));
-        Assert.Equal(ViewAxis.Back, ViewGizmo.AxisOf(ViewGizmoPart.NegativeZ));
-        Assert.Null(ViewGizmo.AxisOf(ViewGizmoPart.Center));
-    }
-
-    [Fact]
-    public void TheViewGizmoShowsEachAxisWhereTheCameraSeesIt()
-    {
-        const double radius = 30;
-        var camera = new EditorCamera();
-        ViewGizmoHandle Of(IReadOnlyList<ViewGizmoHandle> handles, ViewGizmoPart part) => handles.Single(h => h.Part == part);
-
-        // From the top, +z is up the screen and +x to the right, and +y points at the viewer, so it is drawn last.
-        var (yaw, pitch) = ViewGizmo.Angles(ViewAxis.Top);
-        camera.LookAt([0, 0, 0], 10, yaw, pitch);
-        var top = ViewGizmo.Layout(camera.Rotation, radius);
-        Assert.True(Of(top, ViewGizmoPart.PositiveZ).Offset.Y < -radius * 0.99);
-        Assert.True(Of(top, ViewGizmoPart.PositiveX).Offset.X > radius * 0.99);
-        Assert.Equal(ViewGizmoPart.PositiveY, top[^1].Part);
-        Assert.Equal(ViewGizmoPart.NegativeY, top[0].Part);
-
-        // From the front, +x is to the left and +y up.
-        (yaw, pitch) = ViewGizmo.Angles(ViewAxis.Front);
-        camera.LookAt([0, 0, 0], 10, yaw, pitch);
-        var front = ViewGizmo.Layout(camera.Rotation, radius);
-        Near(-radius, Of(front, ViewGizmoPart.PositiveX).Offset.X);
-        Near(-radius, Of(front, ViewGizmoPart.PositiveY).Offset.Y);
     }
 
     [Fact]

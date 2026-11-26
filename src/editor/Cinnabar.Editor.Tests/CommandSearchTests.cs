@@ -21,18 +21,16 @@ public class CommandSearchTests
     }
 
     [Fact]
-    public void EveryWordMustMatch() =>
+    public void EveryWordMustMatchTheLabelOrTheId()
+    {
         Assert.Equal(["host.restart"], CommandSearch.Find(Commands(), "host res").Select(c => c.Id));
-
-    [Fact]
-    public void LabelPrefixRanksFirstThenWordPrefix() =>
-        Assert.Equal(["view.resetLayout", "host.restart"], CommandSearch.Find(Commands(), "re").Select(c => c.Id).Take(2));
-
-    [Fact]
-    public void IdsMatchToo() =>
         Assert.Equal(["host.restart", "host.stop"], CommandSearch.Find(Commands(), "host.").Select(c => c.Id));
+    }
 
     [Fact]
-    public void AnEmptyQueryListsEverythingAlphabetically() =>
+    public void ALabelPrefixRanksBeforeAWordPrefixAndAnEmptyQueryListsEverythingAlphabetically()
+    {
+        Assert.Equal(["view.resetLayout", "host.restart"], CommandSearch.Find(Commands(), "re").Select(c => c.Id).Take(2));
         Assert.Equal(["Outliner", "Reset Layout", "Restart Host", "Stop Host"], CommandSearch.Find(Commands(), " ").Select(c => c.Label));
+    }
 }

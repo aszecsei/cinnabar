@@ -19,6 +19,22 @@ find_zone :: proc(zones: []Zone, name: Name) -> (Zone, int) {
 	return {}, -1
 }
 
+// use_test_clock stops the profiler's clock at the real time, so a test moves it with advance and does not sleep.
+@(private = "file")
+use_test_clock :: proc() {
+	sync.atomic_store(&test_clock, u64(time.tick_now()._nsec))
+}
+
+@(private = "file")
+advance :: proc(d: time.Duration) {
+	sync.atomic_add(&test_clock, u64(d))
+}
+
+@(private = "file")
+real_clock :: proc() {
+	sync.atomic_store(&test_clock, 0)
+}
+
 @(private = "file")
 find_cost :: proc(s: Summary, key: Cost_Key) -> (Summary_Cost, bool) {
 	for c in s.costs {
@@ -152,6 +168,8 @@ when ENABLED {
 		sync.guard(&recorder_lock)
 		testing.expect(t, init())
 		defer shutdown()
+		use_test_clock()
+		defer real_clock()
 
 		outer, inner, system :=
 			intern("Outer", .Script), intern("Inner", .Script), intern("spin", .System)
@@ -159,13 +177,13 @@ when ENABLED {
 		frame_boundary()
 		begin_zone(outer, u16(Callback.Update))
 		begin_zone(inner, u16(Callback.On_Enable))
-		time.sleep(4 * time.Millisecond)
+		advance(4 * time.Millisecond)
 		end_zone()
 		end_zone()
 		begin_zone(system, 0)
 		end_zone()
 		begin_zone(wait, 0)
-		time.sleep(2 * time.Millisecond)
+		advance(2 * time.Millisecond)
 		end_zone()
 		frame_boundary()
 
@@ -178,11 +196,11 @@ when ENABLED {
 		)
 		_, has_system := find_cost(s, {kind = .System, name = system})
 		testing.expect(t, has_outer && has_inner && has_system)
-		testing.expect(t, i.average >= f64(4 * time.Millisecond))
-		testing.expect(t, o.average < f64(2 * time.Millisecond))
+		testing.expect_value(t, i.average, f64(4 * time.Millisecond))
+		testing.expect_value(t, o.average, 0)
 		testing.expect_value(t, o.calls, 1)
-		testing.expect(t, s.wait_max >= u64(2 * time.Millisecond))
-		testing.expect(t, s.cpu_max >= u64(4 * time.Millisecond))
+		testing.expect_value(t, s.wait_max, u64(2 * time.Millisecond))
+		testing.expect_value(t, s.cpu_max, u64(4 * time.Millisecond))
 		testing.expect_value(t, take_summary(context.temp_allocator).frames, 0)
 	}
 
@@ -227,12 +245,14 @@ when ENABLED {
 		sync.guard(&recorder_lock)
 		testing.expect(t, init())
 		defer shutdown()
+		use_test_clock()
+		defer real_clock()
 
 		slow := intern("slow", .Frame)
 		frame_boundary()
 		worst := current_frame()
 		begin_zone(slow, 0)
-		time.sleep(3 * time.Millisecond)
+		advance(3 * time.Millisecond)
 		end_zone()
 		frame_boundary()
 		s := take_summary(context.temp_allocator)

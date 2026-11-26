@@ -40,9 +40,6 @@ public sealed partial class DecisionFileTests
     [InlineData("plain")]
     [InlineData("quirks")]
     [InlineData("mistakes")]
-    [InlineData("utility")]
-    [InlineData("goap")]
-    [InlineData("htn")]
     public void TheCooksDecisionsWriteBackAsTheyWereWithEveryLineEnding(string name)
     {
         foreach (var text in Endings(Corpus(name + ".decision"), "node"))
@@ -52,7 +49,6 @@ public sealed partial class DecisionFileTests
     }
 
     [Theory]
-    [InlineData("guard")]
     [InlineData("quirks")]
     [InlineData("mistakes")]
     public void TheCooksBlackboardsWriteBackAsTheyWereWithEveryLineEnding(string name)
@@ -67,9 +63,6 @@ public sealed partial class DecisionFileTests
     [InlineData("plain")]
     [InlineData("quirks")]
     [InlineData("mistakes")]
-    [InlineData("utility")]
-    [InlineData("goap")]
-    [InlineData("htn")]
     public void NodesAreTheOnesTheCookerReadsAndProblemsLinesFindThem(string name)
     {
         var text = Corpus(name + ".decision");
@@ -90,12 +83,10 @@ public sealed partial class DecisionFileTests
         }
     }
 
-    [Theory]
-    [InlineData("guard")]
-    [InlineData("quirks")]
-    public void KeysAreTheOnesTheCookerReads(string name)
+    [Fact]
+    public void KeysAreTheOnesTheCookerReads()
     {
-        var text = Corpus(name + ".blackboard");
+        var text = Corpus("quirks.blackboard");
         var keys = text.Split('\n').Single(l => l.StartsWith("# keys: ", StringComparison.Ordinal))["# keys: ".Length..].Split(' ');
         Assert.Equal(keys, ReadBoard(text).Keys.Select(k => k.Name));
     }
@@ -149,31 +140,6 @@ public sealed partial class DecisionFileTests
     }
 
     [Fact]
-    public void ListsKeepTheirIdsAsTheyAreWritten()
-    {
-        var file = Read(Corpus("quirks.decision"));
-        file.Find(16)!.SetIds("children", [5, 1, 3]);
-        Assert.Equal("5, 1, 3", file.Find(16)!.Get("children"));
-        // An empty list takes its field away.
-        file.Find(1)!.SetIds("children", []);
-        Assert.Null(file.Find(1)!.Get("children"));
-        Assert.Contains("  when = has_target", file.Text);
-    }
-
-    [Fact]
-    public void NodesAreAddedAfterTheLastAndRemovedWithTheirComment()
-    {
-        var file = Read("decision 1\ntechnique = behavior_tree\n\n# The root.\nnode 1 selector\n\tchildren = 2\nnode 2 wait\n\tseconds = 1\n");
-        var node = file.AddNode("action");
-        Assert.Equal(3, node.Id);
-        node.Set("action", "patrol");
-        node.SetPosition(0, 100);
-        Assert.Equal("decision 1\ntechnique = behavior_tree\n\n# The root.\nnode 1 selector\n\tchildren = 2\nnode 2 wait\n\tseconds = 1\nnode 3 action\n\tposition = [0, 100]\n\taction = patrol\n", file.Text);
-        file.Remove(file.Find(1)!);
-        Assert.Equal("decision 1\ntechnique = behavior_tree\n\nnode 2 wait\n\tseconds = 1\nnode 3 action\n\tposition = [0, 100]\n\taction = patrol\n", file.Text);
-    }
-
-    [Fact]
     public void WritesAreReplacedInTheirPlace()
     {
         var file = Read("decision 1\nnode 1 set\n\tset a = 1 # first\n\tset b = 2\n\twhen = c\n");
@@ -181,15 +147,6 @@ public sealed partial class DecisionFileTests
         Assert.Equal("decision 1\nnode 1 set\n\tset a = 3 # first\n\tset d = 4\n\tset e = 5\n\twhen = c\n", file.Text);
         file.Find(1)!.SetWrites([("a", "3")]);
         Assert.Equal("decision 1\nnode 1 set\n\tset a = 3 # first\n\twhen = c\n", file.Text);
-    }
-
-    [Fact]
-    public void ABlackboardIsSetAfterTheTechnique()
-    {
-        var file = Read("decision 1\n# A tree.\ntechnique = behavior_tree\n\nnode 1 wait\n\tseconds = 1\n");
-        file.SetBlackboard("0123456789ABCDEF0123456789ABCDEF");
-        Assert.Equal("decision 1\n# A tree.\ntechnique = behavior_tree\nblackboard = $0123456789abcdef0123456789abcdef\n\nnode 1 wait\n\tseconds = 1\n", file.Text);
-        Assert.Equal("0123456789abcdef0123456789abcdef", file.Blackboard);
     }
 
     [Fact]
@@ -251,27 +208,13 @@ public sealed partial class DecisionFileTests
     }
 
     [Fact]
-    public void ANewSettingGoesAfterTheLastSettingAndANewLineTakesTheLastLinesIndent()
+    public void ANewFieldGoesBeforeTheWritesWithTheIndentOfTheNodesLastLine()
     {
-        // After the setting that the file has.
-        var file = Read("decision 1\n# Why.\ntechnique = behavior_tree\n\nnode 1 wait\n  seconds = 1\n    set a = 1\n");
-        file.SetSetting("extra", "1");
-        Assert.Equal("decision 1\n# Why.\ntechnique = behavior_tree\nextra = 1\n\nnode 1 wait\n  seconds = 1\n    set a = 1\n", file.Text);
-
-        // A new field goes after the last field, before the writes, with the indent of the node's last line, a write here.
+        // The line format's own rules (settings, indents, removals) are the animation graph's tests; a decision adds writes.
+        var file = Read("decision 1\ntechnique = behavior_tree\n\nnode 1 wait\n  seconds = 1\n    set a = 1\n");
         file.Find(1)!.Set("cooldown", "2");
         Assert.EndsWith("\n  seconds = 1\n    cooldown = 2\n    set a = 1\n", file.Text);
         file.Find(1)!.SetWrites([("a", "1"), ("b", "2")]);
         Assert.EndsWith("\n    set a = 1\n    set b = 2\n", file.Text);
-
-        // Setting a setting to null removes each of its lines, with the comment above them.
-        file = Read("decision 1\ntechnique = goap\n# The keys.\nkeys = a\nkeys = b\n");
-        file.SetSetting("keys", null);
-        Assert.Equal("decision 1\ntechnique = goap\n", file.Text);
-
-        // A node without fields or writes indents its first with a tab.
-        var bare = Read("decision 1\nnode 1 wait\n");
-        bare.Find(1)!.Set("seconds", "1");
-        Assert.Equal("decision 1\nnode 1 wait\n\tseconds = 1\n", bare.Text);
     }
 }

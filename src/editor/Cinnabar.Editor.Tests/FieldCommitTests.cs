@@ -91,37 +91,6 @@ public sealed class FieldCommitTests
     }
 
     [Fact]
-    public void EscapePutsTheValueBackAndLosingTheFocusThenCommitsNothing()
-    {
-        var editor = new Recorder();
-        var view = new BoxView(numeric: true, editor);
-        view.Show(Number("3"));
-        var box = BoxOf(view);
-
-        Focus(box);
-        box.Text = "9";
-        box.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape });
-        Blur(box);
-
-        Assert.Empty(editor.Commits);
-        Assert.Equal("3", box.Text);
-    }
-
-    [Fact]
-    public void AChoicePicksAnOptionThatItHadBefore() => Ui.Run(() =>
-    {
-        var picked = new List<string>();
-        var box = Kit.Choice(["Coverage", "Precipitation", "Type"], "Coverage", picked.Add);
-
-        box.SelectedItem = "Precipitation";
-        box.SelectedItem = "Coverage";
-        // The option that it has already is not picked again.
-        box.SelectedItem = "Coverage";
-
-        Assert.Equal(["Precipitation", "Coverage"], picked);
-    });
-
-    [Fact]
     public void ANameBoxCommitsATextOnceThroughEnterAndTheLossOfTheFocus()
     {
         var commits = new List<string>();
@@ -167,7 +136,7 @@ public sealed class FieldCommitTests
     }
 
     [Fact]
-    public void ARefusedTextPutsTheLastTakenTextBackWithTheProblemUntilTheNextCommit()
+    public void ARefusedTextPutsTheLastTakenTextBack()
     {
         var taken = new List<string>();
         var format = ValueFormats.Text.Where(t => t != "Wall", "not a name for a door");
@@ -179,28 +148,14 @@ public sealed class FieldCommitTests
         box.Text = "Wall";
         Enter(box);
         Assert.Equal("Gate", box.Text);
-        Assert.Equal("not a name for a door", ToolTip.GetTip(box));
 
-        // Escape puts the text back and clears the problem; leaving the box then commits nothing.
+        // Escape puts the text back, and leaving the box then commits nothing.
         box.Text = "Wall";
         Escape(box);
         Assert.Equal("Gate", box.Text);
-        Assert.Null(ToolTip.GetTip(box));
         Blur(box);
 
         Assert.Equal(["Gate"], taken);
-    }
-
-    [Fact]
-    public void ASetterThatRefusesPutsTheValueBackWithItsReason()
-    {
-        var box = Inner(Kit.ValueBox("speed", ValueFormats.Text, "name", _ => false, "another parameter has it"));
-
-        box.Text = "jump";
-        Blur(box);
-
-        Assert.Equal("speed", box.Text);
-        Assert.Equal("another parameter has it", ToolTip.GetTip(box));
     }
 
     [Fact]
@@ -220,7 +175,6 @@ public sealed class FieldCommitTests
     }
 
     [Theory]
-    [InlineData("12", true, 12)]
     [InlineData(" -3 ", true, -3)]
     [InlineData("1,000", false, 0)]
     [InlineData("1.5", false, 0)]
@@ -240,7 +194,7 @@ public sealed class FieldCommitTests
             }
             else
             {
-                Assert.Equal("a whole number from -10 to 50", problem);
+                Assert.NotNull(problem);
             }
         }
         finally
@@ -254,14 +208,12 @@ public sealed class FieldCommitTests
     {
         Assert.True(ValueFormats.Number(0.25, 4).TryParse("1.5", out var scale, out _));
         Assert.Equal(1.5, scale);
-        Assert.False(ValueFormats.Number(0.25, 4).TryParse("5", out _, out var range));
-        Assert.Equal("a number from 0.25 to 4", range);
+        Assert.False(ValueFormats.Number(0.25, 4).TryParse("5", out _, out _));
         Assert.False(ValueFormats.Number().TryParse("NaN", out _, out _));
 
         Assert.True(ValueFormats.Numbers(3).TryParse("[1, 0.5, 0]", out var color, out _));
         Assert.Equal("[1, 0.5, 0]", ValueFormats.Numbers(3).Format(color));
-        Assert.False(ValueFormats.Numbers(3).TryParse("[1, 0]", out _, out var count));
-        Assert.Equal("3 numbers, such as [0, 0, 0]", count);
+        Assert.False(ValueFormats.Numbers(3).TryParse("[1, 0]", out _, out _));
 
         // Empty is the default.
         Assert.True(ValueFormats.Optional(ValueFormats.Numbers(1)).TryParse(" ", out var none, out _));

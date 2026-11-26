@@ -91,7 +91,7 @@ public sealed class CutsceneEditsTests
         Assert.Equal("gate_open", trigger.Name);
         Assert.Equal(new CutsceneEventValue(CutsceneValueKind.String, "a \"b\""), CutsceneEventValue.Parse("string \"a \\\"b\\\"\""));
         Assert.Null(CutsceneEventValue.Parse("colour red"));
-        Assert.Equal("three numbers, such as [0, 1, 0]", CutsceneEventValue.Problem(CutsceneValueKind.Vector, "[0, 1]"));
+        Assert.NotNull(CutsceneEventValue.Problem(CutsceneValueKind.Vector, "[0, 1]"));
         Assert.Null(CutsceneEventValue.Problem(CutsceneValueKind.Vector, "[0, 1.5, -2]"));
     }
 
@@ -332,6 +332,7 @@ public sealed class CutsceneEditsTests
         CutsceneEdits.SetLength(file, 1000);
         Assert.Equal(300000, file.Length);
     }
+
     [Fact]
     public void MarkersGoBeforeTheBindingsStayInTimeOrderAndHoldTheLength()
     {

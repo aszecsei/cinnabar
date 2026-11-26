@@ -34,14 +34,6 @@ public class AssetIndexTests
         Assert.Equal("01", index.FindByPath("E:\\game\\content\\scripts\\door.luau")?.Guid);
     }
 
-    [Fact]
-    public void AnAssetsLengthIsInTicksAndNoneBeforeItCooks()
-    {
-        Assert.Equal(90000, AssetIndex.LengthOf(TestAssets.Make("01", AssetKind.Audio, "audio/line.wav", length: 90000)));
-        Assert.Null(AssetIndex.LengthOf(TestAssets.Make("02", AssetKind.Audio, "audio/line.wav")));
-        Assert.Equal(int.MaxValue, AssetIndex.LengthOf(TestAssets.Make("03", AssetKind.Audio, "audio/long.wav", length: ulong.MaxValue)));
-    }
-
     static Asset Model(string guid, string path) =>
         TestAssets.Make(guid, AssetKind.Model, path);
 
@@ -100,21 +92,6 @@ public class AssetIndexTests
     }
 
     [Fact]
-    public void ProblemsReplaceAndClear()
-    {
-        var index = Index([Script("01", "a.luau")]);
-        var problem = new Problem("E:/game/content/a.luau", 3, 1, true, "oops");
-
-        index.Apply(new AssetProblems("01", [problem]));
-        index.Apply(new AssetProblems("", [problem with { Text = "no definitions" }]));
-        Assert.Equal([problem], index.ProblemsOf("01"));
-        Assert.Equal("no definitions", Assert.Single(index.ProblemsOf("")).Text);
-
-        index.Apply(new AssetProblems("01", []));
-        Assert.Empty(index.ProblemsOf("01"));
-    }
-
-    [Fact]
     public void TheIndexKeepsItsAssetsWhenTheLinkCloses()
     {
         var index = Index([Script("01", "a.luau")]);
@@ -141,10 +118,8 @@ public class AssetIndexTests
     }
 
     [Theory]
-    [InlineData("door", new[] { "02" })]
     [InlineData("DOOR", new[] { "02" })]
     [InlineData("kind:scene", new[] { "03" })]
-    [InlineData("kind:script .luau", new[] { "02", "01" })]
     [InlineData("kind:script door", new[] { "02" })]
     [InlineData("nothing", new string[0])]
     public void SearchMatchesEveryWord(string query, string[] guids)

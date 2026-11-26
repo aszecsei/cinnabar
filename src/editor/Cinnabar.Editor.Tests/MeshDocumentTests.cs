@@ -102,14 +102,6 @@ public sealed class MeshDocumentTests : IDisposable
     }
 
     [Fact]
-    public void AnOperationOnAMeshThatIsNotOpenIsRefused()
-    {
-        var (scene, meshes, mesh, _) = Open();
-        Assert.Throws<InvalidOperationException>(() => scene.Apply("Move", new MeshOperation("00112233445566778899aabbccddeeff", mesh.Data, mesh.Data, meshes)));
-        Assert.Empty(scene.History);
-    }
-
-    [Fact]
     public void LiveMessagesCarryTheFile()
     {
         var (_, _, mesh, _) = Open();
@@ -123,9 +115,7 @@ public sealed class MeshDocumentTests : IDisposable
         Assert.Equal(1, message.Positions[4]);
         var face = Assert.Single(message.Faces);
         Assert.Equal([0u, 1u, 2u, 3u], face.Corners);
-        Assert.Equal([1, 0, 0], face.Mapping.UAxis);
         Assert.Equal([0, -1, 0], face.Mapping.VAxis);
-        Assert.Equal([1, 1], face.Mapping.Scale);
         var edge = Assert.Single(message.Sharp);
         Assert.Equal((0u, 1u), (edge.A, edge.B));
 

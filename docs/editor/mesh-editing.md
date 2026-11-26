@@ -155,7 +155,7 @@ Each tool is a pure function in `Cinnabar.Editor.Mesh` (`MeshTools.cs`, `MeshToo
   4. A new vertex that lies on a straight line in every face around it is dissolved, as Clean does. The target's own vertices are not.
   5. The target's sharp edges are kept, split where vertices were put into them, and the edges of the new faces are marked sharp beyond 30°, as Bridge and Cap do.
 - **Refusals.** The result must pass validation and be solid. Otherwise it is refused with the reason, and the mesh does not change. A Subtract that leaves nothing is refused, because the cutter contains the target. An Intersect of meshes that do not meet is refused. A Subtract by a cutter that does not meet the target gives the target itself, and a Union of two meshes that do not meet is the two together.
-- **Cost.** A Subtract of a box from a box of 5,046 faces takes about 80 ms, and from a sphere of 2,048 faces, whose tree is a chain, about 180 ms, in a Release build (`MeshBooleanTests`).
+- **Cost.** A Subtract of a box from a box of 5,046 faces takes about 80 ms, and from a sphere of 2,048 faces, whose tree is a chain, about 180 ms, as measured in a Release build. `MeshBooleanTests` checks that both stay solid, and does not time them.
 
 ## Primitives and Draw
 

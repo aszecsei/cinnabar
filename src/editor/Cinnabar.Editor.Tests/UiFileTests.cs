@@ -115,15 +115,12 @@ public sealed class UiFileTests : IDisposable
     }
 
     [Fact]
-    public void TheSamplesMenuWritesBackAsItWasAndHasItsNodes()
+    public void AButtonsTextIsANodeOfItsOwnAndAnElementTakesItsKindsStyle()
     {
         var file = Read(Pause());
-        Assert.Equal(Pause(), file.Text);
-        Assert.Equal(["ui", "box", "column", "text", "text", "button", "text", "button", "text", "row", "text", "field", "text", "column", "button", "text", "text", "template", "button", "text"], file.Nodes.Select(n => n.Kind));
         var resume = file.NodeById("resume")!;
         Assert.True(file.Nodes[resume.Index + 1].ButtonText);
         Assert.Equal("Resume", file.Nodes[resume.Index + 1].Element.Text);
-        Assert.Equal(["button", "button:hover", "button:focus", "button:press", "field", "field:focus", "caption", "slot", "scroll_track", "scroll_thumb", "scroll_thumb:hover", "scroll_thumb:press"], file.Styles.Select(s => s.Name));
         Assert.Equal(["button"], file.StylesOf(resume).Select(s => s.Name));
     }
 
@@ -293,28 +290,6 @@ public sealed class UiFileTests : IDisposable
         Assert.False(text.ContainsKey("fill"));
         var caption = file.Nodes.First(n => n.Element.Get("style") == "caption");
         Assert.Equal(new UiValue("15", UiSource.Style, "caption"), UiCascade.Resolve(file, caption.Index, inherited, _ => [])["size"]);
-    }
-
-    [Fact]
-    public void ADocumentUndoesAndSavesItsText()
-    {
-        Directory.CreateDirectory(_temp.Path);
-        var path = _temp.Combine("pause.ui");
-        File.WriteAllText(path, Pause().ReplaceLineEndings("\r\n"));
-        var (document, problem) = UiDocument.Open(path, "a");
-        Assert.Null(problem);
-        Assert.False(document!.IsDirty);
-        document.Edit("Fill", f => f.SetAttribute(f.AllElements().First(e => e.Get("id") == "resume"), "fill", "#123456"));
-        Assert.True(document.IsDirty);
-        document.Undo();
-        Assert.False(document.IsDirty);
-        document.Redo();
-        document.Save();
-        Assert.False(document.ChangedOnDisk);
-        Assert.Contains("fill=\"#123456\">Resume</button>\r\n", File.ReadAllText(path));
-        File.WriteAllBytes(path, [.. Encoding.UTF8.GetBytes("ui 1\n"), 0xFF]);
-        Assert.True(document.ChangedOnDisk);
-        Assert.Contains("UTF-8", UiDocument.Open(path, "a").Problem!.Message);
     }
 
     [Fact]

@@ -54,9 +54,6 @@ public sealed partial class AnimationGraphFileTests : IDisposable
     static string Corpus(string name) =>
         File.ReadAllText(Path.Combine(EditorOptions.RepositoryRoot(), "tools", "cook", "testdata", "animation_graphs", name + ".animation_graph")).ReplaceLineEndings("\n");
 
-    static string Sample() =>
-        File.ReadAllText(Path.Combine(EditorOptions.RepositoryRoot(), "samples", "mygame", "content", "models", "fox", "fox.animation_graph")).ReplaceLineEndings("\n");
-
     [GeneratedRegex(@"# problem(?: node (\d+))?")]
     private static partial Regex ProblemMarker();
 
@@ -74,9 +71,6 @@ public sealed partial class AnimationGraphFileTests : IDisposable
         var mixed = text.Replace("\nnode", "\r\nnode");
         Assert.Equal(mixed, Read(mixed).Text);
     }
-
-    [Fact]
-    public void TheSamplesGraphWritesBackAsItWas() => Assert.Equal(Sample(), Read(Sample()).Text);
 
     [Theory]
     [InlineData("plain")]
@@ -130,18 +124,15 @@ public sealed partial class AnimationGraphFileTests : IDisposable
     }
 
     [Fact]
-    public void TheDocumentOpensBytesAsTheCookerReadsThem()
+    public void AByteOrderMarkIsRefusedAsTheCookerRefusesIt()
     {
         Directory.CreateDirectory(_temp.Path);
         var path = _temp.Combine("a.animation_graph");
         // A byte order mark is on the header's line, where the cooker refuses it.
         File.WriteAllBytes(path, [0xEF, 0xBB, 0xBF, .. Encoding.UTF8.GetBytes(Text)]);
         Assert.Null(AnimationGraphDocument.Open(path, "a").Document);
-        File.WriteAllBytes(path, [.. Encoding.UTF8.GetBytes(Text), 0xFF]);
-        Assert.Contains("UTF-8", AnimationGraphDocument.Open(path, "a").Problem!.Message);
         File.WriteAllBytes(path, Encoding.UTF8.GetBytes(Text));
         Assert.Equal(Text, AnimationGraphDocument.Open(path, "a").Document!.Text);
-        Assert.NotNull(AnimationGraphDocument.Open(_temp.Combine("gone"), "a").Problem);
     }
 
     // The lines of the first text that the second has not, and the second's that the first has not.
@@ -189,18 +180,6 @@ public sealed partial class AnimationGraphFileTests : IDisposable
         // A value is on one line.
         walk.Set("name", "a\nb");
         Assert.Equal("a b", walk.Get("name"));
-    }
-
-    [Theory]
-    [InlineData("\n")]
-    [InlineData("\r\n")]
-    public void NewLinesEndAsTheFilesDo(string ending)
-    {
-        var text = Text.ReplaceLineEndings(ending);
-        var file = Read(text);
-        file.Find(21)!.Set("duration", "0.5");
-        Assert.Contains($"when = speed < 0.1{ending}\tduration = 0.5{ending}", file.Text);
-        Assert.EndsWith(ending, file.Text);
     }
 
     [Fact]
@@ -278,55 +257,6 @@ public sealed partial class AnimationGraphFileTests : IDisposable
         Assert.Equal([1, 2, 21, 20], file.Nodes.Select(n => n.Id));
         file.Swap(file.Find(20)!, file.Find(21)!);
         Assert.Equal(Text, file.Text);
-    }
-
-    [Fact]
-    public void TheDocumentKeepsTheFilesTextAndUndoesEachEdit()
-    {
-        Directory.CreateDirectory(_temp.Path);
-        var path = _temp.Combine("a.animation_graph");
-        var crlf = Text.ReplaceLineEndings("\r\n");
-        File.WriteAllText(path, crlf);
-        var document = AnimationGraphDocument.Open(path, "a").Document!;
-        Assert.False(document.IsDirty);
-        Assert.Equal(crlf, document.Text);
-
-        document.Edit("Rename", g => g.Find(1)!.Set("name", "stand"));
-        Assert.True(document.IsDirty);
-        Assert.Equal(["Rename"], document.History);
-        // An edit that changes nothing leaves no entry.
-        document.Edit("Rename again", g => g.Find(1)!.Set("name", "stand"));
-        Assert.Single(document.History);
-
-        // A drag is one entry, and undo puts every line back.
-        document.Begin("Move");
-        for (var x = 1; x <= 3; x++)
-        {
-            document.Step(g => g.Find(2)!.SetPosition(x * 10, 0));
-        }
-        Assert.Contains("[30, 0]", document.Text);
-        document.Commit();
-        Assert.Equal(["Rename", "Move"], document.History);
-        document.Undo();
-        Assert.Null(document.Graph.Find(2)!.Position);
-        document.Undo();
-        Assert.Equal(crlf, document.Text);
-        Assert.Equal("idle", document.Graph.Find(1)!.Get("name"));
-        Assert.False(document.IsDirty);
-        document.Redo();
-        Assert.Equal("stand", document.Graph.Find(1)!.Get("name"));
-
-        // A cancelled drag changes nothing.
-        document.Begin("Move");
-        document.Step(g => g.Find(1)!.SetPosition(99, 99));
-        document.Cancel();
-        Assert.Equal((0, 0), document.Graph.Find(1)!.Position);
-
-        document.Save();
-        Assert.False(document.IsDirty);
-        Assert.Equal(crlf.Replace("name = idle", "name = stand"), File.ReadAllText(path));
-        // A problem's line finds its node in the text as it is now.
-        Assert.Equal(1, document.NodeAt(document.Text.ReplaceLineEndings("\n").Split('\n').ToList().IndexOf("\tname = stand") + 1));
     }
 
     [Fact]

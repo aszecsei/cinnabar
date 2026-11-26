@@ -256,7 +256,6 @@ public sealed class DocumentTests : IDisposable
     public void ReparentingKeepsTheWorldPose()
     {
         var (document, _) = Open();
-        var door = document.Scene.Find(1)!;
         // Turn the door a quarter about y and double its size.
         document.Apply("Turn", new AddComponent(1, new SceneComponent(1, "Transform", SceneEdits.TransformFields(
             new Pose([16777216, 0, 0], new Quat(0, Math.Sqrt(0.5), 0, Math.Sqrt(0.5)), [2, 2, 2])))));
@@ -271,7 +270,6 @@ public sealed class DocumentTests : IDisposable
         document.Apply("Reparent", SceneEdits.Reparent(document.Scene, 2, 1));
         Assert.Equal(1UL, root.Parent);
         AssertSame(before, SceneEdits.WorldPose(document.Scene, root)!);
-        _ = door;
     }
 
     static void AssertSame(Pose expected, Pose actual)

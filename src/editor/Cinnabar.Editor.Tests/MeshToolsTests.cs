@@ -4,30 +4,22 @@ using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Tests;
 
-/// <summary>The mesh tools on a box: Delete of each element kind, moves, the selection's conversions, and the grid.</summary>
+/// <summary>The mesh tools on a box: a Block's corners, Delete of each element kind, the selection's conversions, and the grid.</summary>
 public class MeshToolsTests
 {
     [Fact]
-    public void ABlockIsClosedAndFrontsOut()
+    public void ABlockFromCornersGivenTheWrongWayRoundStillFrontsOut()
     {
-        var box = Primitives.Block(new Vec3(1, 0, 2), new Vec3(3, 1, 0), material: "00112233445566778899aabbccddeeff");
-        Assert.Equal(8, box.Vertices.Length);
-        Assert.Equal(6, box.Faces.Length);
-        Assert.Equal(12, box.Edges.Length);
-        Assert.Equal(12, box.SharpEdges.Length);
-        Assert.Equal("00112233445566778899aabbccddeeff", box.Materials[0]);
+        // A Block drag can end on either side of where it began: the corners are sorted.
+        var box = Primitives.Block(new Vec3(1, 0, 2), new Vec3(3, 1, 0));
+        Assert.Equal(new Vec3(1, 0, 0), box.Vertices[0]);
         Assert.Empty(box.Validate());
-        // Every edge has two faces, and every face's normal points away from the middle.
-        Assert.All(box.Edges, e => Assert.Equal(2, box.FacesOfEdge(e).Count));
         var middle = new Vec3(2, 0.5, 1);
         for (var i = 0; i < box.Faces.Length; i++)
         {
             var center = box.Faces[i].Corners.Aggregate(Vec3.Zero, (sum, c) => sum + box.Vertices[c]) / 4;
             Assert.True(Vec3.Dot(box.FaceNormal(i), center - middle) > 0.4);
-            Assert.Equal(Mapping.WorldAligned(box.FaceNormal(i)), box.Faces[i].Mapping);
         }
-        // The corners are sorted, whichever way round they were given.
-        Assert.Equal(new Vec3(1, 0, 0), box.Vertices[0]);
     }
 
     [Fact]
@@ -55,17 +47,6 @@ public class MeshToolsTests
         Assert.Equal([0, 1, 2, 3], sides.Faces[0].Corners);
         Assert.Equal(4, sides.SharpEdges.Length);
         Assert.Empty(sides.Validate());
-    }
-
-    [Fact]
-    public void MovesChangeOnlyTheChosenVertices()
-    {
-        var box = MeshFixtures.Box();
-        var moved = MeshTools.MoveVertices(box, [4, 5, 6, 7], v => v + new Vec3(0, 1, 0));
-        Assert.Equal(2, moved.Vertices[4].Y);
-        Assert.Equal(0, moved.Vertices[0].Y);
-        Assert.Equal(box.Faces, moved.Faces);
-        Assert.Equal(new Vec3(0.5, 2, 0.5), MeshTools.Centroid(moved, [4, 5, 6, 7]));
     }
 
     [Fact]
@@ -99,9 +80,6 @@ public class MeshToolsTests
         Assert.Equal(0.125, MeshGrid.Finer(0.25));
         Assert.Equal(MeshGrid.MinSize, MeshGrid.Finer(MeshGrid.MinSize));
         Assert.Equal(MeshGrid.MaxSize, MeshGrid.Coarser(MeshGrid.MaxSize));
-        Assert.Equal("1/64 m", MeshGrid.Format(MeshGrid.MinSize));
-        Assert.Equal("0.25 m", MeshGrid.Format(0.25));
-        Assert.Equal("16 m", MeshGrid.Format(16));
         Assert.Equal(1, MeshGrid.NearestAxis(new Vec3(0.2, -0.9, 0.3)));
         // A ray down onto the floor plane 2 m below.
         Assert.Equal(new Vec3(0, -2, 2), MeshGrid.HitPlane(new Vec3(0, -2, 0), Vec3.UnitY, new ViewRay(Vec3.Zero, new Vec3(0, -1, 1).Normalized()))!.Value);

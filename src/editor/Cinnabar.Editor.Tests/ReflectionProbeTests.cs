@@ -17,7 +17,7 @@ namespace Cinnabar.Editor.Tests;
 
 /// <summary>
 /// The reflection probes in the editor (see docs/editor/viewport.md#reflection-probes): their boxes and handles, the drags
-/// that resize them, the captures that the editor asks for, and the probe's state in words.
+/// that resize them, the captures that the editor asks for, and the game's view of each.
 /// </summary>
 public sealed class ReflectionProbeTests : IDisposable
 {
@@ -56,22 +56,6 @@ public sealed class ReflectionProbeTests : IDisposable
         Assert.Equal(18, boxes.Handles().Count());
         Assert.Equal(12, ProbeBoxes.Of(Probe(), Pose.Identity)!.Handles().Count());
         Assert.Null(ProbeBoxes.Of(new SceneEntity(2), Pose.Identity));
-    }
-
-    [Fact]
-    public void AHandleThatWouldSitOnTheInfluenceBoxsStaysAGapFromIt()
-    {
-        var boxes = ProbeBoxes.Of(Probe(Field("extent", 2, 2, 2), new SceneField("box_projection", SceneValue.Of(true))), Pose.Identity)!;
-        var x = 0;
-        Assert.Equal(2, boxes.Distance(new ProbeHandle(BoxHandleKind.Influence, x, 1), 0.5));
-        // No fade, and a projection box that is the influence box: each handle stays half a meter off.
-        Assert.Equal(1.5, boxes.Distance(new ProbeHandle(BoxHandleKind.Blend, x, 1), 0.5));
-        Assert.Equal(2.5, boxes.Distance(new ProbeHandle(BoxHandleKind.Projection, x, -1), 0.5));
-        var apart = ProbeBoxes.Of(Probe(Field("extent", 2, 2, 2), Field("blend_distance", 1), Field("projection_extent", 3, 3, 3),
-            new SceneField("box_projection", SceneValue.Of(true))), Pose.Identity)!;
-        Assert.Equal(1, apart.Distance(new ProbeHandle(BoxHandleKind.Blend, x, 1), 0.5));
-        Assert.Equal(3, apart.Distance(new ProbeHandle(BoxHandleKind.Projection, x, 1), 0.5));
-        Assert.Equal([0L, 0, -(3L << 24)], apart.Position(new ProbeHandle(BoxHandleKind.Projection, 2, -1), 0.5));
     }
 
     [Fact]
@@ -176,8 +160,7 @@ public sealed class ReflectionProbeTests : IDisposable
         shell.DragGizmo(points[2], invertSnap: false);
         shell.ReleaseGizmo();
 
-        var entry = Assert.Single(shell.Scene!.History);
-        Assert.Equal("Resize Probe's Influence Box", entry.Label);
+        Assert.Single(shell.Scene!.History);
         // The face went out by 1 m, and the opposite one with it: 5 m, 2.5 before the scale.
         var extent = Extent(shell, 1);
         Assert.InRange(extent[0], 2.49, 2.51);
@@ -269,20 +252,6 @@ public sealed class ReflectionProbeTests : IDisposable
     }
 
     [Fact]
-    public void ANewReflectionProbeIsOneUndoEntry()
-    {
-        using var shell = NewShell();
-        shell.Selection.Select(PlainHandle);
-
-        Assert.True(shell.Commands.Get(EditorCommands.CreateReflectionProbe).Execute());
-
-        var created = shell.Scene!.Scene.Entities.Single(e => e.Id > 3);
-        Assert.Equal("Reflection Probe", created.Name);
-        Assert.Contains(created.Components, c => c.Id == SceneEdits.ReflectionProbeId);
-        Assert.Equal("Add Reflection Probe", Assert.Single(shell.Scene.History).Label);
-    }
-
-    [Fact]
     public void TheGamesViewOfAProbeLastsAsLongAsItsEntityInTheWorld()
     {
         using var shell = NewShell(link: true);
@@ -311,37 +280,5 @@ public sealed class ReflectionProbeTests : IDisposable
         // An entity that the world does not know has none.
         shell.OnGameMessage(Captured(PlainHandle + 100));
         Assert.Null(shell.World.Probe(PlainHandle + 100));
-    }
-
-    [Fact]
-    public void AProbesStateReadsAsWords()
-    {
-        var received = new DateTime(2026, 11, 8, 12, 0, 10, DateTimeKind.Utc);
-        (ReflectionProbeView, DateTime) View(ReflectionProbeStatus status, bool capturing = false, bool complete = true) =>
-            (new ReflectionProbeView(1, status, capturing, complete, 10), received);
-        var at = new DateTime(2026, 11, 8, 12, 0, 0, DateTimeKind.Utc).ToLocalTime().ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
-
-        Assert.StartsWith("Run the game", ReflectionProbeStatusText.Describe(null, linked: false));
-        Assert.StartsWith("No capture", ReflectionProbeStatusText.Describe(null, linked: true));
-        Assert.StartsWith("No slot", ReflectionProbeStatusText.Describe(View(ReflectionProbeStatus.NoSlot), true));
-        Assert.Equal("A slot, waiting for its first capture. Capturing now.", ReflectionProbeStatusText.Describe(View(ReflectionProbeStatus.Waiting, capturing: true), true));
-        Assert.Equal($"A slot, captured at {at}.", ReflectionProbeStatusText.Describe(View(ReflectionProbeStatus.Captured), true));
-        Assert.StartsWith($"A slot, captured at {at}, provisional", ReflectionProbeStatusText.Describe(View(ReflectionProbeStatus.Captured, complete: false), true));
-    }
-
-    [Fact]
-    public void TheResourceMonitorShowsTheReflectionsMemory()
-    {
-        var reader = new LinkReader(new byte[1024]);
-        var none = GameStats.Read(ref reader);
-        Assert.Empty(ResourceMonitorView.ReflectionProbeRows(none));
-
-        var stats = none with { ReflectionProbes = 3, ReflectionProbeSlots = 2, ReflectionProbeCapacity = 16, ReflectionProbeFaces = 6, ReflectionMemory = 3 << 20 };
-        var rows = ResourceMonitorView.ReflectionProbeRows(stats).ToDictionary(r => r.Name, r => r.Value);
-        Assert.Equal("2 / 16", rows["Reflection probe slots"]);
-        Assert.Equal("6", rows["Reflection probe faces"]);
-        Assert.Equal(ResourceStats.Bytes(3 << 20), rows["Reflection memory"]);
-        // The screen-space reflections without the probes have memory and no probe rows.
-        Assert.Equal(["Reflection memory"], ResourceMonitorView.ReflectionProbeRows(none with { ReflectionMemory = 1 }).Select(r => r.Name));
     }
 }

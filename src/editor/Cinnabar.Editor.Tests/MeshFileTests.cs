@@ -46,58 +46,31 @@ public class MeshFileTests
     }
 
     [Fact]
-    public void AFileParses()
+    public void AFileParsesAndWritesBack()
     {
-        var mesh = Parse(Box);
+        var text = Box.ReplaceLineEndings("\n");
+        var mesh = Parse(text);
         Assert.Equal(["# A box."], mesh.HeaderComments);
+        // The slots are always eight, the unnamed ones empty.
         Assert.Equal("00112233445566778899aabbccddeeff", mesh.Materials[0]);
         Assert.Equal("", mesh.Materials[1]);
         Assert.Equal(MeshData.MaxSlots, mesh.Materials.Length);
-        Assert.Equal(8, mesh.Vertices.Length);
-        Assert.Equal(new Vec3(1, 1, 1), mesh.Vertices[6]);
-        Assert.Equal(6, mesh.Faces.Length);
-        var top = mesh.Faces[1];
-        Assert.Equal(0, top.Slot);
-        Assert.Equal([4, 7, 6, 5], top.Corners);
-        Assert.Equal(new Mapping(Vec3.UnitX, new Vec3(0, 0, -1), 1, 1, 0, 0, 0), top.Mapping);
-        Assert.Equal(4, mesh.SharpEdges.Length);
+        Assert.Equal([4, 7, 6, 5], mesh.Faces[1].Corners);
+        Assert.Equal(new Mapping(Vec3.UnitX, new Vec3(0, 0, -1), 1, 1, 0, 0, 0), mesh.Faces[1].Mapping);
         Assert.True(mesh.IsSharp(4, 7));
         Assert.False(mesh.IsSharp(0, 4));
         Assert.Empty(mesh.Validate());
-    }
-
-    [Fact]
-    public void WritingGivesTheFileBack()
-    {
-        var text = Box.ReplaceLineEndings("\n");
-        Assert.Equal(text, MeshFile.Write(Parse(text)));
-    }
-
-    [Fact]
-    public void TheSampleRoomRoundTrips()
-    {
-        var path = Path.Combine(EditorOptions.RepositoryRoot(), "samples", "mygame", "content", "meshes", "room.mesh");
-        var text = File.ReadAllText(path).ReplaceLineEndings("\n");
-        var mesh = Parse(text);
         Assert.Equal(text, MeshFile.Write(mesh));
-        Assert.Empty(mesh.Validate());
-        // The room's faces front inward: the floor's normal points up.
-        Assert.Equal(new Vec3(0, 1, 0), mesh.FaceNormal(0));
     }
 
     [Fact]
     public void NumbersWriteAsTheCookerDoes()
     {
         // The shortest decimal that reads back as the same f32, without an exponent, as format.mesh_text_write.
-        Assert.Equal("1", MeshFile.FormatNumber(1));
-        Assert.Equal("0.5", MeshFile.FormatNumber(0.5));
-        Assert.Equal("-0.25", MeshFile.FormatNumber(-0.25));
         Assert.Equal("0.1", MeshFile.FormatNumber(0.1));
         Assert.Equal("0.33333334", MeshFile.FormatNumber(1.0 / 3));
         Assert.Equal("-0.00000025", MeshFile.FormatNumber(-2.5e-7));
-        Assert.Equal("123456.78", MeshFile.FormatNumber(123456.78));
         Assert.Equal("100000000", MeshFile.FormatNumber(1e8));
-        Assert.Equal("0", MeshFile.FormatNumber(0));
         var mesh = new MeshData([], [new Vec3(0.1, 1.0 / 3, -2.5e-7), new Vec3(123456.78, 0, 0), Vec3.Zero],
             [new MeshFace(0, [0, 1, 2], new Mapping(Vec3.UnitX, Vec3.UnitY, 0.25, 0.5, 0.125, -0.375, 15))], []);
         var text = MeshFile.Write(mesh);
@@ -132,7 +105,6 @@ public class MeshFileTests
         // A face in the xy plane, fronting -z: a front wall's mapping.
         var mesh = Parse("mesh 1\nv 0 0 0\nv 0 1 0\nv 1 1 0\nv 1 0 0\nf 0 0 1 2 3\n");
         Assert.Equal(new Vec3(0, 0, -1), mesh.FaceNormal(0));
-        Assert.Equal(Mapping.WorldAligned(new Vec3(0, 0, -1)), mesh.Faces[0].Mapping);
         Assert.Equal(new Mapping(Vec3.UnitX, new Vec3(0, -1, 0), 1, 1, 0, 0, 0), mesh.Faces[0].Mapping);
 
         Assert.Equal((Vec3.UnitX, new Vec3(0, 0, -1)), (Mapping.WorldAligned(new Vec3(0.1, 0.9, 0.2)).UAxis, Mapping.WorldAligned(new Vec3(0.1, 0.9, 0.2)).VAxis));

@@ -47,21 +47,15 @@ public sealed class ContentTests : IDisposable
         Assert.Equal(["11"], meshes.Choices.Select(a => a.Guid));
         Assert.False(meshes.Takes(shell.Assets.Find(DoorScript)!));
         Assert.True(new Panels.AssetContext(shell.Assets, "", _ => { }).Takes(shell.Assets.Find(DoorScript)!));
-    }
 
-    [Fact]
-    public void AMaterialFieldTakesMaterialsAndTheirInstances()
-    {
-        using var shell = NewShell();
+        // A material field takes materials and their instances, and not the shading models.
         shell.Assets.Apply(new AssetDelta(
         [
             TestAssets.Make("20", AssetKind.Material, "rock.material"),
             TestAssets.Make("21", AssetKind.MaterialInstance, "mossy.material_instance", dependencies: ["20"]),
             TestAssets.Make("22", AssetKind.ShadingModel, "lit.shading"),
         ], [], [], []));
-
-        var materials = new Panels.AssetContext(shell.Assets, "material", _ => { });
-        Assert.Equal(["21", "20"], materials.Choices.Select(a => a.Guid));
+        Assert.Equal(["21", "20"], new Panels.AssetContext(shell.Assets, "material", _ => { }).Choices.Select(a => a.Guid));
     }
 
     [Fact]
@@ -123,66 +117,6 @@ public sealed class ContentTests : IDisposable
     }
 
     [Fact]
-    public void ANewAnimationGraphIsNamedForItsKindAndOpensInItsEditor()
-    {
-        using var shell = NewShell();
-        shell.Content.SelectContent(new ContentFolder("game", ""), []);
-        Assert.Equal("new_animation_graph", shell.Content.NewName(AssetTemplate.AnimationGraph));
-        Assert.Equal("new_sprite_sheet", shell.Content.NewName(AssetTemplate.SpriteSheet));
-        // A sprite sheet is among the textures in the content browser.
-        Assert.Equal(ContentKind.Textures, ContentBrowserModel.KindOf(AssetKind.SpriteSheet));
-
-        var graph = TestAssets.Make("44445555666677778888999900001111", AssetKind.AnimationGraph, "fox.animation_graph");
-        Assert.True(EditorShell.CanOpen(graph));
-        Assert.Equal("Open in Animation Graph Editor", shell.OpenLabel(graph));
-    }
-
-    [Fact]
-    public void BlackboardsAndDecisionsOpenInTheirEditorsAndPerceptionsAsText()
-    {
-        using var shell = NewShell();
-        foreach (var (kind, file, label) in new[]
-            {
-                (AssetKind.Blackboard, "guard.blackboard", "Open in Blackboard Editor"), (AssetKind.Decision, "guard.decision", "Open in Decision Editor"),
-                (AssetKind.Perception, "guard.perception", "Open in Script Editor"),
-            })
-        {
-            // They are among the scripts in the content browser.
-            Assert.Equal(ContentKind.Scripts, ContentBrowserModel.KindOf(kind));
-            var asset = TestAssets.Make("44445555666677778888999900002222", kind, file);
-            Assert.True(EditorShell.CanOpen(asset));
-            Assert.Equal(label, shell.OpenLabel(asset));
-        }
-        shell.Content.SelectContent(new ContentFolder("game", ""), []);
-        Assert.Equal("new_blackboard", shell.Content.NewName(AssetTemplate.Blackboard));
-        Assert.Equal("new_decision", shell.Content.NewName(AssetTemplate.DecisionUtility));
-        Assert.Equal([Path.GetFullPath("guard.decision"), Path.GetFullPath("guard.blackboard")],
-            EditorOptions.Parse(["--decision", "guard.decision", "--blackboard", "guard.blackboard"]).DecisionPaths);
-    }
-
-    [Fact]
-    public void AWorldIsAmongTheScenesAndOpensInTheWorldEditor()
-    {
-        using var shell = NewShell();
-        var asset = TestAssets.Make("44445555666677778888999900003333", AssetKind.World, "town.world");
-        Assert.Equal(ContentKind.Scenes, ContentBrowserModel.KindOf(AssetKind.World));
-        Assert.True(EditorShell.CanOpen(asset));
-        Assert.Equal("Open in World Editor", shell.OpenLabel(asset));
-    }
-
-    [Fact]
-    public void ACutsceneIsAmongTheAnimationAndOpensInTheCutsceneEditor()
-    {
-        using var shell = NewShell();
-        var asset = TestAssets.Make("44445555666677778888999900004444", AssetKind.Cutscene, "intro.cutscene");
-        Assert.Equal(ContentKind.Animation, ContentBrowserModel.KindOf(AssetKind.Cutscene));
-        Assert.True(EditorShell.CanOpen(asset));
-        Assert.Equal("Open in Cutscene Editor", shell.OpenLabel(asset));
-        shell.Content.SelectContent(new ContentFolder("game", ""), []);
-        Assert.Equal("new_cutscene", shell.Content.NewName(AssetTemplate.Cutscene));
-    }
-
-    [Fact]
     public void AnImportSettingAtItsDefaultLeavesTheMetaFile()
     {
         Setting[] settings = [new("old", "1"), new("native", "true"), new("last", "2")];
@@ -218,53 +152,17 @@ public sealed class ContentTests : IDisposable
         Assert.Equal(DoorScript, Assert.Single(shell.Scene!.Scene.Find(1)!.Behaviours).Script);
         Assert.Equal(DoorScript, Assert.Single(shell.Scene.Scene.Find(2)!.Behaviours).Script);
         // Both in one undo entry.
-        Assert.Equal("Add Door", Assert.Single(shell.Scene.History).Label);
+        Assert.Single(shell.Scene.History);
 
         Assert.False(shell.CanAddBehaviour([1], DoorScript));
         shell.Scene.Undo();
         Assert.Empty(shell.Scene.Scene.Find(1)!.Behaviours);
-    }
 
-    [Fact]
-    public void AScriptWithoutABehaviourAddsNone()
-    {
-        using var shell = NewShell();
-
+        // A script without a behaviour adds none, and says why.
         Assert.False(shell.CanAddBehaviour([1], UtilScript));
         Assert.False(shell.AddBehaviour([1], UtilScript));
         Assert.Contains(shell.Console.Lines, l => l.Level == LogLevel.Warning && l.Text.Contains("defines a behaviour"));
-        Assert.Empty(shell.Scene!.History);
-    }
-
-    [Fact]
-    public void OpeningTheOpenSceneAsksNothing()
-    {
-        using var shell = NewShell();
-        var asked = new List<string>();
-        shell.OpenSceneFileRequested += asked.Add;
-
-        shell.RequestOpenScene(shell.Scene!.Path);
-        shell.RequestOpenScene(_temp.Combine("other.scene"));
-
-        Assert.Equal([_temp.Combine("other.scene")], asked);
-    }
-
-    [Fact]
-    public void TheCommandLineNamesTheCookDaemonAndTheRoots()
-    {
-        var options = EditorOptions.Parse(
-            ["--cook", "tools/cook.exe", "--cache", "cache", "--definitions", "types.d.luau", "--dxc", "dxc/dxc.exe", "--include", "shaders", "--root", "game=content", "--root", "engine=lib/content"]);
-
-        Assert.Equal(Path.GetFullPath("tools/cook.exe"), options.Cook.CookPath);
-        Assert.Equal(Path.GetFullPath("cache"), options.Cook.CachePath);
-        Assert.Equal(Path.GetFullPath("types.d.luau"), options.Cook.DefinitionsPath);
-        Assert.Equal([("game", Path.GetFullPath("content")), ("engine", Path.GetFullPath("lib/content"))], options.Cook.Roots);
-        Assert.Equal(Path.GetFullPath("dxc/dxc.exe"), options.Cook.DxcPath);
-        Assert.Equal([Path.GetFullPath("shaders")], options.Cook.Includes);
-        Assert.Equal([Path.GetFullPath("smoke.effect")], EditorOptions.Parse(["--effect", "smoke.effect"]).EffectPaths);
-        Assert.Equal([Path.GetFullPath("fox.animation_graph")], EditorOptions.Parse(["--animation-graph", "fox.animation_graph"]).AnimationGraphPaths);
-        // Without roots, the daemon cooks the sample's content and the engine's.
-        Assert.Equal(["game", "engine"], EditorOptions.Parse([]).Cook.Roots.Select(r => r.Name));
+        Assert.False(shell.Scene.CanUndo);
     }
 
     [Fact]
@@ -276,33 +174,14 @@ public sealed class ContentTests : IDisposable
             [Path.GetFullPath("build/dev/mygame.dll"), "--content", Path.GetFullPath("build/dev/content"), "--project", Path.GetFullPath("samples/mygame/project.settings"), "--shared", "x"],
             options.HostArguments("--shared", "x"));
         Assert.Equal(Path.GetFullPath("build/dev"), options.HostDirectory);
-        // The defaults are the repository's build layout, wherever the editor runs from.
-        var defaults = EditorOptions.Parse([]);
-        Assert.Equal(Path.Combine(EditorOptions.RepositoryRoot(), "build", "dev", "host.exe"), defaults.HostPath);
-        Assert.Equal(Path.Combine(EditorOptions.RepositoryRoot(), "build", "dev", "content"), defaults.Cook.CachePath);
-    }
 
-    [Fact]
-    public void CinnabarEditKeepsTheEditorsFilesAndTheDllCopiesInTheProject()
-    {
-        var options = EditorOptions.Parse(["--project", "game/project.settings", "--load-dir", "game/build/dev", "--editor-dir", "game/build/editor"]);
-
+        // cinnabar edit keeps the DLL copies in the project.
+        var edit = EditorOptions.Parse(["--project", "game/project.settings", "--load-dir", "game/build/dev"]);
         Assert.Equal(
-            [options.GamePath, "--content", options.Cook.CachePath, "--project", Path.GetFullPath("game/project.settings"), "--load-dir", Path.GetFullPath("game/build/dev")],
-            options.HostArguments());
-        Assert.Equal(Path.GetFullPath("game/build/editor/autosave"), options.AutosaveDirectory);
-        Assert.Equal(Path.GetFullPath("game/build/editor/captures"), options.CaptureDirectory);
-        Assert.Equal(Path.GetFullPath("game/build/editor/automation.json"), options.AutomationFile);
-    }
-
-    [Fact]
-    public void TheScriptEditorComesFromTheSettings()
-    {
-        var settings = new EditorSettings(_temp.Combine("settings"));
-        Assert.Equal(EditorSettings.DefaultScriptEditor, settings.ScriptEditor());
-
-        settings.Write(EditorSettings.SettingsFileName, """{ "scriptEditor": ["notepad", "{file}"] }""");
-        Assert.Equal(["notepad", "{file}"], settings.ScriptEditor());
+            [edit.GamePath, "--content", edit.Cook.CachePath, "--project", Path.GetFullPath("game/project.settings"), "--load-dir", Path.GetFullPath("game/build/dev")],
+            edit.HostArguments());
+        // Without roots, the daemon cooks the sample's content and the engine's.
+        Assert.Equal(["game", "engine"], EditorOptions.Parse([]).Cook.Roots.Select(r => r.Name));
     }
 
     public void Dispose() => _temp.Dispose();

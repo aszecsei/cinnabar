@@ -108,27 +108,17 @@ public sealed class DecisionViewsTests : IDisposable
         editor.DragFields(id, curve.Drag(bend, new Vec2(0.5, 0.25)));
         editor.EndFieldDrag();
         Assert.Equal("2", field(id, "exponent"));
-        Assert.Equal(0.25, ResponseCurve.Of(file().Find(id)!).Evaluate(0.5), 6);
         editor.Document.Undo();
         Assert.Equal(before, editor.Document.Text);
         editor.Document.Redo();
         Assert.Equal("2", field(id, "exponent"));
 
-        // The origin moves the shifts, the end sets the slope, and Escape puts a drag back.
-        curve = ResponseCurve.Of(file().Find(id)!);
-        editor.BeginFieldDrag("Drag Origin");
-        editor.DragFields(id, curve.Drag(curve.Handles().Single(h => h.Kind == CurveHandleKind.Origin), new Vec2(0.2, 0.1)));
-        editor.EndFieldDrag();
-        Assert.Equal(("0.2", "0.1"), (field(id, "x_shift"), field(id, "y_shift")));
+        // Escape puts a drag back.
         curve = ResponseCurve.Of(file().Find(id)!);
         editor.BeginFieldDrag("Drag End");
         editor.DragFields(id, curve.Drag(curve.Handles().Single(h => h.Kind == CurveHandleKind.End), new Vec2(1, 0.5)));
         editor.EndFieldDrag(cancel: true);
         Assert.Null(field(id, "slope"));
-        editor.BeginFieldDrag("Drag End");
-        editor.DragFields(id, curve.Drag(curve.Handles().Single(h => h.Kind == CurveHandleKind.End), new Vec2(1, 0.5)));
-        editor.EndFieldDrag();
-        Assert.Equal(0.5, ResponseCurve.Of(file().Find(id)!).Evaluate(1), 3);
 
         // A typed field is an entry of its own.
         editor.SetField(id, "slope", "-1");
@@ -262,7 +252,7 @@ public sealed class DecisionViewsTests : IDisposable
     }
 
     [Fact]
-    public async Task APlanPreviewAsksForItsGoalAndStateAndShowsOnlyItsOwnAnswer()
+    public void APlanPreviewAsksForItsGoalAndStateAndShowsOnlyItsOwnAnswer()
     {
         using var shell = Setup();
         var cooker = new PreviewCookTests.FakePreviewCooker();
@@ -274,83 +264,91 @@ public sealed class DecisionViewsTests : IDisposable
         Assert.Equal(30, editor.PlanValue("ammo"));
         Assert.Equal(0, editor.PlanValue("armed"));
 
-        editor.SetPlanGoal(1);
-        editor.SetPlanValue("armed", 1);
-        editor.SetPlanValue("health", 5);
+        Quietly(() =>
+        {
+            editor.SetPlanGoal(1);
+            editor.SetPlanValue("armed", 1);
+            editor.SetPlanValue("health", 5);
+        });
         var query = editor.PlanQuery()!;
         Assert.Equal(1u, query.Goal);
         // The query has every planning key's value, set or the default, and only the planning keys.
         Assert.Equal([("armed", 1), ("ammo", 30), ("near", 0), ("down", 0)], query.State.Select(v => (v.Key, v.Value)));
         Assert.Equal(PlanPreviewStatus.Pending, editor.PlanStatus);
 
-        var cook = await Next(cooker, c => c.Plan != null);
+        var cook = CookNow(editor, cooker);
         Assert.Equal(1u, cook.Plan!.Goal);
         PlanAnswer answer = new(PlanOutcome.Found, [new PlanAnswerStep(12, "move_to"), new PlanAnswerStep(11, "attack")], 4, []);
         cook.Answer(new PreviewResult("", [], [answer]));
-        await Until(() => editor.Plan != null);
         Assert.Equal([12u, 11u], editor.Plan!.Steps.Select(s => s.Id));
         Assert.Equal(PlanPreviewStatus.Answered, editor.PlanStatus);
 
         // A change of the setup hides the answer, and an answer to the old setup does not show.
-        var count = cooker.Requests.Count;
-        editor.SetPlanValue("near", 1);
+        Quietly(() => editor.SetPlanValue("near", 1));
         Assert.Null(editor.Plan);
-        var next = await Next(cooker, c => c.Plan != null, count);
+        var next = CookNow(editor, cooker);
         Assert.Equal([("armed", 1), ("ammo", 30), ("near", 1), ("down", 0)], next.Plan!.State.Select(v => (v.Key, v.Value)));
-        count = cooker.Requests.Count;
-        editor.SetPlanValue("near", null);
+        Quietly(() => editor.SetPlanValue("near", null));
         next.Answer(new PreviewResult("", [], [answer]));
-        var last = await Next(cooker, c => c.Plan != null, count);
         Assert.Null(editor.Plan);
         PlanAnswer closest = new(PlanOutcome.Closest, [new PlanAnswerStep(11, "attack")], 9, ["near"]);
-        last.Answer(new PreviewResult("", [], [closest]));
-        await Until(() => editor.Plan != null);
+        CookNow(editor, cooker).Answer(new PreviewResult("", [], [closest]));
         Assert.Equal(PlanOutcome.Closest, editor.Plan!.Outcome);
 
         // A blackboard's default is in the start state, so a change of one asks again, and hides the answer until then.
-        count = cooker.Requests.Count;
-        shell.OpenAsset(shell.Assets.Find(Board)!);
+        Quietly(() => shell.OpenAsset(shell.Assets.Find(Board)!));
         var board = Assert.Single(shell.Blackboards);
-        board.SetKey("ammo", "int", [], "12");
+        Quietly(() => board.SetKey("ammo", "int", [], "12"));
         Assert.Equal(12, editor.PlanValue("ammo"));
         Assert.Null(editor.Plan);
-        var again = await Next(cooker, c => c.Plan != null, count);
+        var again = CookNow(editor, cooker);
         Assert.Contains(again.Plan!.State, v => v.Key == "ammo" && v.Value == 12);
         // An answer without a plan, as for a decision with problems, is refused.
         again.Answer(new PreviewResult("the decision did not cook", [], []));
-        await Until(() => editor.PlanStatus == PlanPreviewStatus.Refused);
+        Assert.Equal(PlanPreviewStatus.Refused, editor.PlanStatus);
 
         // A goal that is deleted asks for no plan.
-        editor.Delete(1);
+        Quietly(() => editor.Delete(1));
         Assert.Null(editor.PlanGoal);
         Assert.Null(editor.PlanQuery());
     }
 
-    // The next cook after a count of them that matches and waits for its answer. One cook runs at a time, so each other
-    // that waits is answered with no problems, and the next can go.
-    static async Task<PreviewCookTests.Cook> Next(PreviewCookTests.FakePreviewCooker cooker, Func<PreviewCookTests.Cook, bool> match, int after = 0)
+    // Cooks the decision's text and plan setup as they are now. A cook that waits gets an answer with no problems first,
+    // as one cook runs at a time; the fake's answers run the editor's continuations before they return.
+    static PreviewCookTests.Cook CookNow(DecisionEditor editor, PreviewCookTests.FakePreviewCooker cooker)
     {
-        PreviewCookTests.Cook? found = null;
-        await Until(() =>
+        var waiting = cooker.Requests.Where(c => !c.Result.Task.IsCompleted).ToList();
+        _ = editor.CookNow();
+        foreach (var cook in waiting)
         {
-            var waiting = cooker.Requests.Skip(after).Where(c => !c.Result.Task.IsCompleted).ToList();
-            foreach (var other in waiting.Where(c => !match(c)))
-            {
-                other.Answer(new PreviewResult("", [], []));
-            }
-            found = waiting.LastOrDefault(match);
-            return found != null;
-        });
-        return found!;
+            cook.Answer(new PreviewResult("", [], []));
+        }
+        var sent = cooker.Requests.Last(c => c.Guid == editor.Guid);
+        Assert.False(sent.Result.Task.IsCompleted);
+        return sent;
     }
 
-    static async Task Until(Func<bool> condition)
+    // Runs an edit under a synchronization context that runs nothing posted to it. A preview cook takes the context when
+    // it schedules its delayed cook, so the delayed cook that the edit schedules never goes, and the test cooks when it
+    // chooses to.
+    static void Quietly(Action edit)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
-        while (!condition())
+        var context = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(new Unpumped());
+        try
         {
-            Assert.True(DateTime.UtcNow < deadline, "the condition did not hold within 10 s");
-            await Task.Delay(20, TestContext.Current.CancellationToken);
+            edit();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(context);
+        }
+    }
+
+    sealed class Unpumped : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state)
+        {
         }
     }
 

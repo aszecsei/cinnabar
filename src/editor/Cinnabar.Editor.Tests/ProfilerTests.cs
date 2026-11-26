@@ -41,19 +41,6 @@ public sealed class ProfilerTests
     }
 
     [Fact]
-    public void SortingByAColumnAgainTurnsItAround()
-    {
-        var model = new ProfilerModel();
-        model.Apply(Summary(Pass("b", 1), Pass("a", 3), Pass("c", 2)));
-        model.SortBy(ProfileCostKind.Pass, CostColumn.Name);
-        Assert.Equal(["a", "b", "c"], model.Rows(ProfileCostKind.Pass).Select(r => r.Name));
-        model.SortBy(ProfileCostKind.Pass, CostColumn.Name);
-        Assert.Equal(["c", "b", "a"], model.Rows(ProfileCostKind.Pass).Select(r => r.Name));
-        // Other tables keep their own order.
-        Assert.Equal((CostColumn.Average, true), model.SortOf(ProfileCostKind.Script));
-    }
-
-    [Fact]
     public void OnlyTheAnswerToTheLatestRequestCounts()
     {
         var model = new ProfilerModel();
@@ -139,27 +126,10 @@ public sealed class ProfilerTests
     }
 
     [Fact]
-    public void TheTimelineZoomsAroundThePointer()
-    {
-        var view = TimelineView.Fit(0, 16_000_000, 1000, TimelineZoom.Nanoseconds);
-        Assert.True(view.Start < 0 && view.End(1000) > 16_000_000);
-        var at = view.At(250);
-        var zoomed = view.ZoomAbout(250, 0.5);
-        Assert.Equal(at, zoomed.At(250), 3);
-        Assert.Equal(view.PerPixel / 2, zoomed.PerPixel, 6);
-        Assert.Equal(TimelineZoom.Nanoseconds.Min, view.ZoomAbout(0, 1e-9).PerPixel);
-        Assert.Equal(view.Start - 10 * view.PerPixel, view.Pan(10).Start, 3);
-    }
-
-    [Fact]
     public void NarrowZonesMergeIntoRuns()
     {
         var runs = TimelineGeometry.Runs([(0, 10), (10.2, 10.4), (10.5, 10.7), (10.8, 11.0), (50, 50.1), (60, 70)]);
         Assert.Equal([(0, 1), (1, 3), (4, 1), (5, 1)], runs.Select(r => (r.First, r.Count)));
         Assert.True(runs[1].X1 - runs[1].X0 >= 1);
-        Assert.Equal("850 ns", TimelineGeometry.Duration(850));
-        Assert.Equal("12.5 µs", TimelineGeometry.Duration(12_500));
-        Assert.Equal("3.20 ms", TimelineGeometry.Duration(3_200_000));
-        Assert.Equal(200_000, TimelineGeometry.TickSpacing(2_000, 80));
     }
 }

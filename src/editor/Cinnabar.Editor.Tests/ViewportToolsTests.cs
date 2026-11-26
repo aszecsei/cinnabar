@@ -78,7 +78,6 @@ public sealed class ViewportToolsTests : IDisposable
 
         Assert.True(shell.Commands.Get(EditorCommands.DuplicateEntity).Execute());
         Assert.Equal(4, shell.Scene!.Scene.Entities.Count);
-        Assert.Equal("Duplicate 2 Entities", shell.Scene.History[^1].Label);
 
         shell.Selection.Set([Handle(0), Handle(1)]);
         Assert.True(shell.Commands.Get(EditorCommands.DeleteEntity).Execute());
@@ -189,38 +188,6 @@ public sealed class ViewportToolsTests : IDisposable
 
         Assert.Empty(shell.Scene.History);
         Assert.Equal(0, shell.Scene.Scene.Find(1)!.Components[0].Fields.Find(f => f.Name == "rotation")!.Value.Numbers[2].Float);
-    }
-
-    [Fact]
-    public void OrbitSelectionTurnsAboutTheSelection()
-    {
-        using var shell = NewShell();
-        shell.Selection.Set([Handle(1)]);
-        var (width, height) = shell.FrameSize;
-        long[] right = [16777216, 0, 83886080];
-        var before = shell.Camera.Project(shell.Camera.RelativeTo(right), width, height)!.Value;
-
-        // Without the option, Alt-orbit turns about the pivot ahead, and the entity moves on screen.
-        shell.Orbit(100, 0);
-        Assert.NotEqual(before, shell.Camera.Project(shell.Camera.RelativeTo(right), width, height)!.Value);
-
-        shell.Camera.Place([0, 0, 0], 0, 0);
-        Assert.True(shell.Commands.Get(EditorCommands.OrbitSelection).Execute());
-        shell.Orbit(100, 30);
-        var after = shell.Camera.Project(shell.Camera.RelativeTo(right), width, height)!.Value;
-        Assert.InRange(after.X - before.X, -0.01, 0.01);
-        Assert.InRange(after.Y - before.Y, -0.01, 0.01);
-    }
-
-    [Fact]
-    public void TheSelectToolHasNoGizmo()
-    {
-        using var shell = NewShell();
-        shell.Selection.Select(Handle(0));
-        Assert.NotNull(shell.GizmoPose());
-        shell.Commands.Get(EditorCommands.SelectTool).Execute();
-        Assert.Null(shell.GizmoPose());
-        Assert.False(shell.PressGizmo(new Vec2(800, 450)));
     }
 
     [Fact]

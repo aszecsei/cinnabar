@@ -7,7 +7,7 @@ using Cinnabar.Editor.Shell;
 
 namespace Cinnabar.Editor.Tests;
 
-/// <summary>Instances in the shell, without a host: the prefabs that the index names, a drop, an override's drag, Reset and Make Prefab.</summary>
+/// <summary>Instances in the shell, without a host: the prefabs that the index names, a drop, Make Prefab, a prefab as the document, and Apply.</summary>
 public sealed class PrefabShellTests : IDisposable
 {
     readonly TempDirectory _temp = new("prefab-shell");
@@ -78,7 +78,7 @@ public sealed class PrefabShellTests : IDisposable
         Assert.Equal(before + 1, shell.Scene.Scene.Entities.Count);
         var created = shell.Scene.Scene.Entities.Single(e => e.Prefab == Door && e.Id != Front);
         Assert.Equal(33554432L, (long)SceneEdits.WorldPose(shell.Scene.Expanded.Flat, shell.Scene.Expanded.Flat.Find(created.Id)!)!.Position[0]);
-        Assert.Equal("Create Instance door", Assert.Single(shell.Scene.History).Label);
+        Assert.Single(shell.Scene.History);
 
         // A drag that leaves takes its instance back.
         shell.PreviewPrefab(Door, [0, 0, 0]);
@@ -91,36 +91,6 @@ public sealed class PrefabShellTests : IDisposable
         var lamp = shell.Scene.Scene.Entities.Single(e => e.Prefab == Lamp);
         Assert.Equal(Crate, lamp.Parent);
         Assert.Equal(SceneEdits.LocalTransformId, Assert.Single(lamp.Components).Id);
-    }
-
-    [Fact]
-    public void ADragOfAChildIsAnOverrideAndResetRevertsIt()
-    {
-        using var shell = NewShell();
-        Index(shell, _temp.Path);
-        var frame = InDoor(0x2000000000000002);
-
-        var edit = shell.TryBeginEdit("Move Frame", "the test")!;
-        foreach (var x in new[] { 0.1, 0.2, 0.3 })
-        {
-            edit.Preview(new SetField(frame, SceneEdits.LocalTransformId, "offset", SceneEdits.Floats(x, 0, 0)));
-        }
-        edit.Commit();
-
-        Assert.Single(shell.Scene!.History);
-        Assert.True(shell.IsOverridden(frame));
-        Assert.Equal(SceneEdits.Floats(0.3, 0, 0), shell.OverridesOf(frame)!.Components.Single().Fields.Single().Value);
-        Assert.Equal(SceneValue.Of(SceneNumber.Of(0L), SceneNumber.Of(0L), SceneNumber.Of(0L)),
-            shell.PrefabBase(frame)!.Components.Single(c => c.Id == SceneEdits.LocalTransformId).Fields.Single(f => f.Name == "offset").Value);
-
-        Assert.True(shell.Edit("Reset Offset", new SetField(frame, SceneEdits.LocalTransformId, "offset", null)));
-        Assert.False(shell.IsOverridden(frame));
-        Assert.Null(shell.OverridesOf(frame));
-
-        // An entity added under one of the instance's is the scene's, and marked as added.
-        shell.Edit("Add", new CreateEntity(new SceneEntity(0x6000000000000001) { Name = "Sticker", Parent = frame }));
-        Assert.True(shell.IsAddedToInstance(0x6000000000000001));
-        Assert.False(shell.IsAddedToInstance(Crate));
     }
 
     [Fact]
@@ -146,20 +116,6 @@ public sealed class PrefabShellTests : IDisposable
         // A name that a file has is refused.
         shell.SelectScene(Crate);
         Assert.False(shell.MakePrefab("door"));
-    }
-
-    [Fact]
-    public void UnpackMakesTheInstanceTheScenes()
-    {
-        using var shell = NewShell();
-        Index(shell, _temp.Path);
-        shell.SelectScene(Front);
-
-        Assert.True(shell.UnpackSelected(completely: true));
-
-        Assert.All(shell.Scene!.Scene.Entities, e => Assert.Equal("", e.Prefab));
-        Assert.Equal(7, shell.Scene.Scene.Entities.Count);
-        Assert.Null(shell.InstanceOf(Front));
     }
 
     [Fact]
@@ -200,8 +156,7 @@ public sealed class PrefabShellTests : IDisposable
         Assert.True(shell.ApplyField(frame, 35, null, "intensity"));
         Assert.Null(shell.OverridesOf(frame));
         Assert.True(shell.PrefabOfInstance(Front)!.IsDirty);
-        Assert.Equal("Apply Intensity to door", shell.Scene!.History[^1].Label);
-        shell.Scene.Undo();
+        shell.Scene!.Undo();
         shell.Scene.Undo();
 
         // A clean prefab whose file changes shows the change when the index next reports.

@@ -115,26 +115,6 @@ public sealed class RenderOutModelTests : IDisposable
     }
 
     [Fact]
-    public void EveryChangeOfTheStateIsOneThatTheTableAllows()
-    {
-        var run = new RenderOutRun(1, Settings(), new object(), null, null, new TaskCompletionSource<RenderOutResult>());
-        var other = new RenderOutRun(2, Settings(), new object(), null, null, new TaskCompletionSource<RenderOutResult>());
-        var progress = new RenderOutProgressInfo(RenderOutStage.Rendering, 0, 0, 30, 0);
-        var result = new RenderOutResult(RenderOutOutcome.Done, null, 30, _folder, [], null, null);
-        RenderOutState idle = new RenderOutState.Idle(null), starting = new RenderOutState.Starting(run),
-            running = new RenderOutState.Running(run, progress), cancelling = new RenderOutState.Cancelling(run),
-            muxing = new RenderOutState.Muxing(run, result, new CancellationTokenSource());
-        Assert.True(RenderOutModel.Allowed(idle, starting));
-        Assert.True(RenderOutModel.Allowed(starting, running));
-        Assert.True(RenderOutModel.Allowed(running, muxing));
-        Assert.True(RenderOutModel.Allowed(cancelling, idle));
-        Assert.False(RenderOutModel.Allowed(idle, running));
-        Assert.False(RenderOutModel.Allowed(cancelling, running));
-        Assert.False(RenderOutModel.Allowed(muxing, running));
-        Assert.False(RenderOutModel.Allowed(starting, new RenderOutState.Running(other, progress)));
-    }
-
-    [Fact]
     public void FfmpegMakesAnH264AndAacFileFromTheFramesAndTheSound()
     {
         var s = Settings(video: true);

@@ -16,7 +16,8 @@ The recipes that matter most:
 | `just engine` | Builds everything that a project outside the repository builds and runs with: the host, the cooker, the standard game, the editor and `cinnabar.exe` (see [Getting started](getting-started.md#the-engine)). |
 | `just sdk` | `engine`, then writes the engine's package, `build/sdk/cinnabar-<version>/` and its zip (see [Releases of the engine](#releases-of-the-engine)). |
 | `just engine-runtime` | Builds the standard game alone: `build/dev/standard.dll` and the release executable `build/runtime/runtime.exe`, which a project without Odin runs. |
-| `just test` | Runs every Odin package's tests, the script tests with direct field access on and off, and the editor's .NET tests. It builds `null-host.exe` first, the host on the null GPU backend, on which the editor's host tests run without a GPU (see [Editor: Host tests](../editor/processes-and-projects.md#host-tests)). |
+| `just test` | Runs every Odin package's tests, the script tests with direct field access on and off, and the editor's .NET unit tests, which start no process. |
+| `just test-e2e` | Builds the game, `null-host.exe` and the cooker, and runs the editor's end-to-end test against them, with no GPU and no audio (see [Editor: The end-to-end test](../editor/processes-and-projects.md#the-end-to-end-test)). |
 | `just gpu-bench` | Times the creation and destruction of thousands of resources on the D3D12 device. It needs a GPU, so `just test` leaves it out (see [GPU: Memory](../gpu/resources-and-pipelines.md#memory)). |
 | `just check`, `vet`, `lint`, `fmt` | Type checks and lints every package, and formats the source. |
 | `just script-types`, `link-schema`, `ltc-fit`, `stbn` | Regenerate derived files: the Luau definition file, the links' JSON schemas, the area lights' tables, and the blue noise of the ambient occlusion and the screen-space reflections. |
@@ -30,7 +31,7 @@ Everything the justfile makes goes under `build/`, one folder per thing you run,
 
 ```
 build/
-├── dev/        host.exe, null-host.exe (for the editor's tests), <game>.dll or standard.dll (and the
+├── dev/        host.exe, null-host.exe (for the editor's end-to-end test), <game>.dll or standard.dll (and the
 │               <name>_<process>_<version>.dll copies the hosts load),
 │               luau.dll, D3D12/ and the FSR libraries, content/        the development loose cache
 ├── release/    <game>.exe, D3D12/ and the FSR libraries, content/        the bundles, project.settings
