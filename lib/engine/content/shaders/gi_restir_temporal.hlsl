@@ -2,11 +2,12 @@
 // this frame's sample from its ray, then merges it with last frame's reservoir at the place that the velocity gives.
 // A hit is the hit's point, with its light from the hit light passes; a ray past the reach is a sample at infinity
 // along it, with the world probes' light from that direction, or the ambient light without them; a back face is a
-// sample of no light. The sample's weight is its target over its cosine-weighted pdf. Last frame's reservoir counts
+// sample of no light. The sample's weight is its target over the pdf of its ray's direction, which the trace stored,
+// and the ray's light over that pdf teaches the ray guide's cell of the pixel (see guide_deposit). Last frame's reservoir counts
 // while the surface that it was for is this one, by its depth, and while its sample is younger than the grid's
 // max_age, and counts as at most temporal_max_m samples, so the light follows a change within a few frames. Its sample
 // point moves back by the camera's motion, as the points are relative to the camera.
-#include "gi_restir.hlsli"
+#include "gi_restir_guide.hlsli"
 
 [numthreads(8, 8, 1)]
 void cs_main(uint3 id : SV_DispatchThreadID) {
@@ -50,9 +51,11 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		}
 	}
 	s.light = clamp_hit_light(max(s.light, 0), exposure, g.radiance_max);
-	// The target over the cosine-weighted pdf: the cosines cancel.
+	// The target over the pdf of the ray's direction, which the trace stored: the guide's mixture, or the cosine alone.
 	float cosine = saturate(dot(normal, direction));
-	float weight = cosine > 0 ? restir_luminance(s.light) * RESTIR_PI : 0;
+	float pdf = asfloat(cn_buffer(push.pdfs).Load(ray * 4));
+	float luminance = restir_luminance(s.light);
+	float weight = cosine > 0 && pdf > 0 ? luminance * cosine / pdf : 0;
 
 	Restir_Reservoir r = restir_empty();
 	r.depth = z;
@@ -61,6 +64,9 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	bool inside = !hit_missed(hit) && light.a < 0 && abs(light.a) < 4 * g.bias * pixel_meters(z);
 	if (!inside) {
 		restir_merge(r, s, weight, 1, state);
+		if (cosine > 0 && pdf > 0) {
+			guide_deposit(p, direction, luminance * exposure / max(pdf, GUIDE_PDF_FLOOR), state);
+		}
 	}
 
 	// Last frame's reservoir.

@@ -41,8 +41,12 @@ struct Restir_Push {
 	uint normal_out;
 	uint filter_in;
 	uint filter_out;
-	uint padding0;
-	uint padding1;
+	// The ray guide's Restir_Guide in the upload ring (see gi_restir_guide.hlsli), each ray's pdf, and the Gi_Probes
+	// debug view's texture.
+	uint guide_grid;
+	uint guide_offset;
+	uint pdfs;
+	uint view_out;
 };
 CN_PUSH_CONSTANTS(Restir_Push, push);
 

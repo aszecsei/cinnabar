@@ -1,9 +1,11 @@
 // ReSTIR GI's rays (see docs/rendering/global-illumination.md#restir-gi): a thread for each tile of the screen, which
 // traces one ray from its pixel this frame through the ray scene, at most the grid's reach. The ray starts at the
-// pixel's surface, a little off it, and its direction is cosine-weighted around the surface's normal, new each frame.
-// It passes through glass, and stores the glass's transmittance beside its hit (see gi_translucency.hlsli). A pixel
-// without a surface stores a miss of no length, which the temporal pass skips.
-#include "gi_restir.hlsli"
+// pixel's surface, a little off it. Its direction is new each frame: where the pixel's cell has a ray guide, a share of
+// the guide's mix of the rays take it from the guide, and the rest are cosine-weighted around the surface's normal
+// (see docs/rendering/global-illumination.md#ray-guiding). The pdf of that mixture at the ray's direction is stored
+// beside it, for the temporal pass's weight. It passes through glass, and stores the glass's transmittance beside its
+// hit (see gi_translucency.hlsli). A pixel without a surface stores a miss of no length, which the temporal pass skips.
+#include "gi_restir_guide.hlsli"
 
 // The rays' cone, in radians.
 static const float RESTIR_SPREAD = 0.25;
@@ -31,13 +33,31 @@ void cs_main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 		miss.entry = 0;
 		store_hit(push.hits, ray, miss);
 		store_transmittance(push.transmit, ray, 1);
+		cn_rw_buffer(push.pdfs).Store(ray * 4, asuint(0.0));
 		return;
 	}
 	uint state = restir_seed(g, texel, 0);
-	float2 u = float2(random_unit(state), random_unit(state));
+	Restir_Guide gd = restir_guide();
+	uint cell = 0;
+	bool guided = false;
+	if (gd.level_count > 0 && constants.probes != 0) {
+		guided = guide_cell(gd, load_probe_grid(constants.probe_grid, constants.probe_grid_offset), p, cell);
+	}
+	bool from_guide = false;
+	if (guided) {
+		from_guide = random_unit(state) < gd.mix;
+	}
+	float3 direction;
+	if (from_guide) {
+		direction = guide_sample(gd.guide, cell, normal, state);
+	} else {
+		float2 u = float2(random_unit(state), random_unit(state));
+		direction = restir_cosine_direction(normal, u);
+	}
+	cn_rw_buffer(push.pdfs).Store(ray * 4, asuint(guide_mixture_pdf(gd.guide, cell, guided, gd.mix, normal, direction)));
 	RayDesc desc;
 	desc.Origin = p + normal * g.bias * pixel_meters(z) + g.camera_offset.xyz;
-	desc.Direction = restir_cosine_direction(normal, u);
+	desc.Direction = direction;
 	desc.TMin = 0;
 	desc.TMax = g.reach;
 	// A diffuse ray's hit needs little of its texture's detail, so its cone is wide: the materials sample coarse mips.

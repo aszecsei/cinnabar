@@ -93,6 +93,7 @@ Gi_State :: struct {
 gi_state_destroy :: proc(g: ^Gi_State, platform: ^core.Platform_API) {
 	destroy_probe_storage(&g.probes, platform)
 	gi_split_state_destroy(&g.split, platform)
+	destroy_restir_guide(&g.restir.guide, platform)
 	destroy_voxel_storage(&g.voxel, platform)
 	g^ = {}
 }

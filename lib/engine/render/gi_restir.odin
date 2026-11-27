@@ -9,7 +9,7 @@ import "cinnabar:engine/ecs"
 
 // ReSTIR GI (see docs/rendering/global-illumination.md#restir-gi), after Ouyang et al.'s "ReSTIR GI: Path Resampling
 // for Real-Time Path Tracing": with the world probes, one ray a pixel of each tile from the prepass's surface, cosine
-// sampled, which traces the ray scene. Hit shading and the world probes' hit light give the light that its hit sends
+// sampled or drawn from the ray guide (gi_restir_guide.odin), which traces the ray scene. Hit shading and the world probes' hit light give the light that its hit sends
 // back, and the probes' light at the hit is the bounces past the first. Each tile keeps a reservoir: the sample point
 // that it chose, its light and its weight. The temporal pass merges this frame's sample into last frame's reservoir,
 // found by the velocity, and the spatial pass merges in a few neighbours' reservoirs, each reconnected to the pixel's
@@ -52,7 +52,8 @@ RESTIR_RESERVOIR_SIZE :: 16 + 8 + 8
 // temporal_max_m samples, and a sample is kept for at most max_age frames, so the light follows a change. The spatial
 // pass merges spatial_samples neighbours within spatial_radius reservoirs, to at most spatial_max_m samples, and with
 // visibility traces a shadow ray to each neighbour's sample. The resolve blends into a history of at most
-// history_frames frames, and the filter runs filter_passes a-trous steps.
+// history_frames frames, and the filter runs filter_passes a-trous steps. The world probes' first guide_levels levels
+// have a ray guide (see gi_restir_guide.odin), whose walk draws a share of guide_mix of the rays that start in them.
 Gi_Restir_Params :: struct {
 	tile:            [2]u32,
 	reach:           f32,
@@ -64,6 +65,8 @@ Gi_Restir_Params :: struct {
 	visibility:      bool,
 	filter_passes:   u32,
 	history_frames:  f32,
+	guide_levels:    u32,
+	guide_mix:       f32,
 }
 
 // Low and Medium run only when a quality picks ReSTIR GI by hand: no preset does below Ultra.
@@ -79,6 +82,8 @@ GI_RESTIR_PARAMS := [Quality_Level]Gi_Restir_Params {
 		spatial_max_m = 30,
 		filter_passes = 3,
 		history_frames = 16,
+		guide_levels = 2,
+		guide_mix = 0.35,
 	},
 	.Medium = {
 		tile = {2, 2},
@@ -90,6 +95,8 @@ GI_RESTIR_PARAMS := [Quality_Level]Gi_Restir_Params {
 		spatial_max_m = 40,
 		filter_passes = 2,
 		history_frames = 12,
+		guide_levels = 2,
+		guide_mix = 0.35,
 	},
 	.High = {
 		tile = {2, 2},
@@ -101,6 +108,8 @@ GI_RESTIR_PARAMS := [Quality_Level]Gi_Restir_Params {
 		spatial_max_m = 60,
 		filter_passes = 2,
 		history_frames = 12,
+		guide_levels = 2,
+		guide_mix = 0.35,
 	},
 	.Ultra = {
 		tile = {1, 1},
@@ -113,6 +122,8 @@ GI_RESTIR_PARAMS := [Quality_Level]Gi_Restir_Params {
 		visibility = true,
 		filter_passes = 2,
 		history_frames = 10,
+		guide_levels = 2,
+		guide_mix = 0.35,
 	},
 }
 
@@ -170,7 +181,11 @@ Restir_Push :: struct {
 	normal_out:   u32,
 	filter_in:    u32,
 	filter_out:   u32,
-	padding:      [2]u32,
+	// The ray guide's Restir_Guide in the upload ring, each ray's pdf, and the Gi_Probes debug view's texture.
+	guide_grid:   u32,
+	guide_offset: u32,
+	pdfs:         u32,
+	view_out:     u32,
 }
 
 #assert(size_of(Restir_Push) <= 128)
@@ -184,10 +199,14 @@ Gi_Restir :: struct {
 	spatial:      Shader_Pipeline,
 	resolve:      Shader_Pipeline,
 	filter:       Shader_Pipeline,
+	guide:        Shader_Pipeline,
+	guide_view:   Shader_Pipeline,
 	hits:         gpu.Buffer,
 	surfaces:     gpu.Buffer,
 	rays:         gpu.Buffer,
 	transmit:     gpu.Buffer,
+	// Each ray's pdf, which the trace writes and the temporal pass weighs its sample by.
+	pdfs:         gpu.Buffer,
 	ray_capacity: int,
 }
 
@@ -198,6 +217,7 @@ Gi_Restir_State :: struct {
 	frame:   u32,
 	// Whether the last frame that wanted ReSTIR GI had it, for note_restir_fallback.
 	running: bool,
+	guide:   Gi_Restir_Guide_State,
 }
 
 // Restir_Reservoirs are one set of reservoirs' textures.
@@ -219,6 +239,8 @@ Gi_Restir_Frame :: struct {
 	surfaces: Buffer,
 	rays:     Buffer,
 	transmit: Buffer,
+	pdfs:     Buffer,
+	guide:    Gi_Restir_Guide_Frame,
 	// Last frame's reservoirs, this frame's after the temporal pass, and after the spatial pass.
 	previous: Restir_Reservoirs,
 	temporal: Restir_Reservoirs,
@@ -234,6 +256,8 @@ Restir_Pass :: enum u32 {
 	Spatial,
 	Resolve,
 	Filter,
+	Guide,
+	Guide_View,
 }
 
 // Restir_Step is one ReSTIR GI pass's data, in frame memory.
@@ -253,16 +277,18 @@ gi_restir_init :: proc(s: ^Gi_Restir) {
 	s.spatial = shader_pipeline(GI_RESTIR_SPATIAL_SHADER)
 	s.resolve = shader_pipeline(GI_RESTIR_RESOLVE_SHADER)
 	s.filter = shader_pipeline(GI_RESTIR_FILTER_SHADER)
+	s.guide = shader_pipeline(GI_RESTIR_GUIDE_SHADER)
+	s.guide_view = shader_pipeline(GI_RESTIR_GUIDE_VIEW_SHADER)
 }
 
 gi_restir_destroy :: proc(s: ^Gi_Restir, platform: ^core.Platform_API) {
-	for p in ([]^Shader_Pipeline{&s.trace, &s.temporal, &s.spatial, &s.resolve, &s.filter}) {
+	for p in ([]^Shader_Pipeline{&s.trace, &s.temporal, &s.spatial, &s.resolve, &s.filter, &s.guide, &s.guide_view}) {
 		destroy_shader_pipeline(p, platform)
 	}
-	for b in ([]gpu.Buffer{s.hits, s.surfaces, s.rays, s.transmit}) {
+	for b in ([]gpu.Buffer{s.hits, s.surfaces, s.rays, s.transmit, s.pdfs}) {
 		platform.gpu_destroy_buffer(b)
 	}
-	s.hits, s.surfaces, s.rays, s.transmit, s.ray_capacity = {}, {}, {}, {}, 0
+	s.hits, s.surfaces, s.rays, s.transmit, s.pdfs, s.ray_capacity = {}, {}, {}, {}, {}, 0
 }
 
 // sync_gi_restir_pipelines makes ReSTIR GI's pipelines, with Ray_Query only.
@@ -278,13 +304,22 @@ sync_gi_restir_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&s.spatial, r.platform, assets, {label = "gi restir spatial"}, force)
 	sync_compute_pipeline(&s.resolve, r.platform, assets, {label = "gi restir resolve"}, force)
 	sync_compute_pipeline(&s.filter, r.platform, assets, {label = "gi restir filter"}, force)
+	sync_compute_pipeline(&s.guide, r.platform, assets, {label = "gi restir guide"}, force)
+	sync_compute_pipeline(
+		&s.guide_view,
+		r.platform,
+		assets,
+		{label = "gi restir guide view"},
+		force,
+	)
 }
 
-// gi_restir_ready is whether ReSTIR GI's pipelines have compiled.
+// gi_restir_ready is whether ReSTIR GI's pipelines have compiled, the ray guide's build among them. The guide's debug
+// view is not: without it, the view is black.
 @(private)
 gi_restir_ready :: proc(r: ^Renderer) -> bool {
 	s := &r.gi.restir
-	for p in ([]^Shader_Pipeline{&s.trace, &s.temporal, &s.spatial, &s.resolve, &s.filter}) {
+	for p in ([]^Shader_Pipeline{&s.trace, &s.temporal, &s.spatial, &s.resolve, &s.filter, &s.guide}) {
 		if !pipeline_ready(r.platform, p) {
 			return false
 		}
@@ -349,7 +384,7 @@ ensure_restir_rays :: proc(r: ^Renderer, count: int) {
 		return
 	}
 	platform := r.platform
-	for b in ([]gpu.Buffer{s.hits, s.surfaces, s.rays, s.transmit}) {
+	for b in ([]gpu.Buffer{s.hits, s.surfaces, s.rays, s.transmit, s.pdfs}) {
 		platform.gpu_destroy_buffer(b)
 	}
 	s.ray_capacity = max(count, s.ray_capacity * 2)
@@ -368,6 +403,10 @@ ensure_restir_rays :: proc(r: ^Renderer, count: int) {
 	)
 	s.transmit = platform.gpu_create_buffer(
 		{size = capacity * 4, usage = {.Storage}, label = "gi restir transmittance"},
+		nil,
+	)
+	s.pdfs = platform.gpu_create_buffer(
+		{size = capacity * 4, usage = {.Storage}, label = "gi restir pdfs"},
 		nil,
 	)
 }
@@ -408,7 +447,8 @@ add_gi_restir_passes :: proc(f: ^Frame) -> bool {
 	tile, reservoirs := restir_fit(f.size, params)
 	ray_count := reservoirs.x * reservoirs.y
 	upload, ok := platform.gpu_upload(size_of(Restir_Grid), 16)
-	if !ok {
+	guide_upload, guide_ok := platform.gpu_upload(size_of(Restir_Guide), 16)
+	if !ok || !guide_ok {
 		return false
 	}
 	g := f.graph
@@ -433,6 +473,7 @@ add_gi_restir_passes :: proc(f: ^Frame) -> bool {
 	rf.surfaces = import_buffer(g, shared.surfaces)
 	rf.rays = import_buffer(g, shared.rays)
 	rf.transmit = import_buffer(g, shared.transmit)
+	rf.pdfs = import_buffer(g, shared.pdfs)
 	rf.previous = {sample.previous, light.previous, normal.previous}
 	rf.temporal = {sample.current, light.current, normal.current}
 	rf.spatial = restir_transient_reservoirs(g, reservoirs)
@@ -463,6 +504,7 @@ add_gi_restir_passes :: proc(f: ^Frame) -> bool {
 	}
 	(^Restir_Grid)(raw_data(upload.data))^ = rf.grid
 
+	add_restir_guide(rf, guide_upload, run_restir_pass, restir_step(rf, .Guide))
 	add_restir_trace(rf)
 	shaded := add_hit_shading(
 		f,
@@ -491,6 +533,10 @@ add_gi_restir_passes :: proc(f: ^Frame) -> bool {
 	read(g, p, rf.surfaces)
 	read(g, p, rf.rays)
 	read(g, p, rf.transmit)
+	read(g, p, rf.pdfs)
+	if rf.guide.grid.level_count > 0 {
+		write(g, p, rf.guide.accum)
+	}
 	read_reservoirs(g, p, rf.previous)
 	write_reservoirs(g, p, rf.temporal)
 	declare_probe_reads(f, p)
@@ -511,8 +557,38 @@ add_gi_restir_passes :: proc(f: ^Frame) -> bool {
 	write_reservoirs(g, p, rf.spatial)
 
 	add_restir_denoise(rf)
+	add_restir_guide_view(rf)
 	gf.restir = rf
 	return true
+}
+
+// add_restir_guide_view adds the ray guide's Gi_Probes debug view, when the view is on, the frame has a guide and its
+// pipeline is ready, into Gi_Frame.probe_view.
+@(private = "file")
+add_restir_guide_view :: proc(rf: ^Gi_Restir_Frame) {
+	f := rf.frame
+	r := f.renderer
+	if f.debug_view != .Gi_Probes ||
+	   rf.guide.grid.level_count == 0 ||
+	   !pipeline_ready(r.platform, &r.gi.restir.guide_view) {
+		return
+	}
+	g := f.graph
+	f.gi.probe_view = create_texture(
+		g,
+		{size = f.size, format = GI_FORMAT, label = "gi probe view"},
+	)
+	p := add_compute_pass(
+		g,
+		"gi restir guide view",
+		run_restir_pass,
+		restir_step(rf, .Guide_View),
+		queue = .Compute,
+	)
+	read(g, p, f.depth)
+	read(g, p, f.normals)
+	read(g, p, rf.guide.guide)
+	write(g, p, f.gi.probe_view)
 }
 
 // restir_transient_reservoirs are a frame's spatial reservoirs, which no later frame reads, at a size.
@@ -553,8 +629,12 @@ add_restir_trace :: proc(rf: ^Gi_Restir_Frame) {
 	read(g, p, f.normals)
 	read_accel(g, p, ray_scene_accel(f))
 	declare_translucency_reads(f, p)
+	if rf.guide.grid.level_count > 0 {
+		read(g, p, rf.guide.guide)
+	}
 	write(g, p, rf.hits)
 	write(g, p, rf.transmit)
+	write(g, p, rf.pdfs)
 }
 
 // add_restir_denoise adds the resolve of the frame's spatial reservoirs into the diffuse and specular histories and
@@ -672,11 +752,13 @@ run_restir_pass :: proc(ctx: ^Pass_Context) {
 		return gpu.write_index(gpu_texture(g, t))
 	}
 	push := Restir_Push {
-		grid        = gpu.read_index(rf.upload.buffer),
-		grid_offset = rf.upload.offset,
-		pass        = u32(step.pass),
-		step        = step.step,
-		exposure    = gpu.read_index(gpu_buffer(g, f.exposure)),
+		grid         = gpu.read_index(rf.upload.buffer),
+		grid_offset  = rf.upload.offset,
+		pass         = u32(step.pass),
+		step         = step.step,
+		exposure     = gpu.read_index(gpu_buffer(g, f.exposure)),
+		guide_grid   = gpu.read_index(rf.guide.upload.buffer),
+		guide_offset = rf.guide.upload.offset,
 	}
 	c := gi_constants(ctx, f)
 	pipeline: gpu.Pipeline
@@ -688,12 +770,14 @@ run_restir_pass :: proc(ctx: ^Pass_Context) {
 		push.transmit = gpu.write_index(gpu_buffer(g, rf.transmit))
 		push.accel = gpu.read_index(gpu_accel(g, ray_scene_accel(f)))
 		push.translucency = translucency_constants(f, g)
+		push.pdfs = gpu.write_index(gpu_buffer(g, rf.pdfs))
 	case .Temporal:
 		pipeline, dispatch = s.temporal.pipeline, groups(rf.grid.reservoirs, POST_GROUP_SIZE)
 		push.hits = gpu.read_index(gpu_buffer(g, rf.hits))
 		push.surfaces = gpu.read_index(gpu_buffer(g, rf.surfaces))
 		push.rays = gpu.read_index(gpu_buffer(g, rf.rays))
 		push.transmit = gpu.read_index(gpu_buffer(g, rf.transmit))
+		push.pdfs = gpu.read_index(gpu_buffer(g, rf.pdfs))
 		push.sample_in, push.light_in, push.normal_in =
 			read_index(g, rf.previous.sample),
 			read_index(g, rf.previous.light),
@@ -731,6 +815,11 @@ run_restir_pass :: proc(ctx: ^Pass_Context) {
 	case .Filter:
 		pipeline, dispatch = s.filter.pipeline, groups(f.size, POST_GROUP_SIZE)
 		push.filter_in, push.filter_out = read_index(g, step.input), write_index(g, step.output)
+	case .Guide:
+		pipeline, dispatch = s.guide.pipeline, restir_guide_groups(rf.guide.grid.level_count)
+	case .Guide_View:
+		pipeline, dispatch = s.guide_view.pipeline, groups(f.size, POST_GROUP_SIZE)
+		push.view_out = write_index(g, gf.probe_view)
 	}
 	gpu.cmd_set_pipeline(ctx.cb, pipeline)
 	if !upload_gi_constants(ctx, f, c) {
