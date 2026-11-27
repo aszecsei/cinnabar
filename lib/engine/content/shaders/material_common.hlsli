@@ -202,7 +202,7 @@ struct Frame_Constants {
 	uint aerial;
 	uint aerial_sampler;
 	// The atlas's soft shadows (see soft_shadow_map in material_lighting.hlsli): the blocker search's gathers, the
-	// filter's comparisons, 0 without soft shadows, and its widest reach in texels; the sampler that the search gathers
+	// filter's comparisons, 0 without soft shadows, and its widest reach as a fraction of a slot's side; the sampler that the search gathers
 	// depths with; and the blue noise that turns the taps, 0 without it, and this frame's slice of it.
 	uint shadow_soft_search;
 	uint shadow_soft_taps;

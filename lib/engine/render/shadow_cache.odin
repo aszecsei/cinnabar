@@ -16,24 +16,24 @@ import "cinnabar:engine/ecs"
 // it changed enough to change the level of detail, so a still light over still casters draws its cache once.
 
 SHADOW_CACHE_SHADER :: #load("../content/shaders/shadow_cache.hlsl.meta", string)
-// The most slots that an atlas has (see max_shadow_views), which a cache's lights fit in.
-ATLAS_MAX_SLOTS :: 64
 // A light draws its cache again when the camera's distance from its reach has grown or shrunk by this factor since it
 // drew: the level of detail that the shadow views take is the camera's, and a factor of two is a level.
 SHADOW_LOD_DRIFT :: math.SQRT_TWO
 
 // Atlas_Light is a light that takes slots of the atlas, as the cache keeps it: its entity, its position in the world,
-// its direction and field of view, its range and guard band (see soft_guard), its views (1 for a spot light, 6 for a
-// cube), and the camera's distance from its reach, at least 1 m, which the level of detail follows.
+// its direction and field of view, its range, whether it has soft shadows, whose views have a guard band (see
+// soft_guard), its views (1 for a spot light, 6 for a cube), the camera's distance from its reach, at least 1 m, which
+// the level of detail follows, and its coverage, which its slots' size follows (see atlas_light_coverage).
 Atlas_Light :: struct {
 	entity:    ecs.Entity,
 	position:  ecs.World_Position,
 	direction: [3]f32,
 	fov:       f32,
 	range:     f32,
-	guard:     int,
+	soft:      bool,
 	faces:     int,
 	distance:  f32,
+	coverage:  f32,
 }
 
 // Atlas_Cache_Light is a light whose slots the cache holds: the light as it drew them, its slots, the scene frame that
@@ -41,22 +41,22 @@ Atlas_Light :: struct {
 // inputs were not complete, so it draws again once they are.
 Atlas_Cache_Light :: struct {
 	light:       Atlas_Light,
-	slots:       [6]int,
+	slots:       [6]Atlas_Slot,
 	drawn:       u64,
 	pending:     bool,
 	provisional: bool,
 }
 
-// Atlas_Cache is what a view's cache holds, and so what keeps it valid: the shadows' parameters, the first slot after
-// the cascades, the scene frame that it was drawn in, whose changes are the last that it took, its lights, and the slots
-// that the view drew live, whose casters it does not hold.
+// Atlas_Cache is what a view's cache holds, and so what keeps it valid: the shadows' parameters, the cascades' cells
+// that the slots lie around, the scene frame that it was drawn in, whose changes are the last that it took, its lights,
+// and the slots that the view drew live, whose casters it does not hold.
 Atlas_Cache :: struct {
-	params:     Shadow_Params,
-	first_slot: int,
-	frame:      u64,
-	lights:     [ATLAS_MAX_SLOTS]Atlas_Cache_Light,
-	count:      int,
-	live:       Live_Slots,
+	params:   Shadow_Params,
+	cascades: int,
+	frame:    u64,
+	lights:   [ATLAS_MAX_VIEWS]Atlas_Cache_Light,
+	count:    int,
+	live:     Live_Slots,
 }
 
 // Atlas_Cache_Stats are a view's cache in its last frame, which the editor shows: the lights that it held, the slots that
@@ -79,9 +79,10 @@ Atlas_Cache_State :: struct {
 	stats:   Atlas_Cache_Stats,
 }
 
-// Atlas_Plan is a light's slots this frame, and whether it draws them into the cache.
+// Atlas_Plan is a light's slots this frame, none when the atlas has no room for it, and whether it draws them into the
+// cache.
 Atlas_Plan :: struct {
-	slots:  [6]int,
+	slots:  [6]Atlas_Slot,
 	redraw: bool,
 }
 
@@ -108,26 +109,29 @@ Shadow_Cache_Push :: struct {
 // atlas_cache_plan is what a frame keeps of the cache, the one place that decides it, from the lights that take slots
 // this frame, in their order, and the view's changes of casters (see view_caster_changes). A frame starts again, and
 // every light draws, when the cache is off, when there is none or it missed a frame's changes (tracked is false or its
-// frame is not the last), or when the parameters or the first slot changed. Otherwise a light that the cache holds
-// keeps its slots, and the others take free ones. A light draws when it is new, when it moved or changed, when the
-// camera's distance from it drifted by SHADOW_LOD_DRIFT, when a change meets its reach at once, or once the frame's inputs
-// are complete after it drew without them. A report that meets its reach waits: at most budget slots draw for reports a
-// frame, the lights that drew longest ago first. free_slot is the first slot that no light takes, or -1.
+// frame is not the last), or when the parameters or the cascades changed. Otherwise atlas_place sizes the slots and
+// places them, and a light that the cache holds keeps its slots while its size stays the same. A light draws when its
+// slots are new, when it moved or changed, when the camera's distance from it drifted by SHADOW_LOD_DRIFT, when a change
+// meets its reach at once, or once the frame's inputs are complete after it drew without them. A report that meets its
+// reach waits: at most budget slots draw for reports a frame, the lights that drew longest ago first. With probe, a
+// reflection probe's capture takes probe_slot after the lights, which the cache does not keep. A light or a probe that
+// the atlas has no room for has no slots.
 atlas_cache_plan :: proc(
 	cache: Maybe(Atlas_Cache),
 	enabled, tracked: bool,
 	params: Shadow_Params,
-	first_slot: int,
+	cascades: int,
 	frame: u64,
 	lights: []Atlas_Light,
 	changes: []Caster_Change,
 	live: ^Live_Slots,
 	complete: bool,
+	probe := false,
 	allocator := context.allocator,
 ) -> (
 	next: Atlas_Cache,
 	plans: []Atlas_Plan,
-	free_slot: int,
+	probe_slot: Atlas_Slot,
 	stats: Atlas_Cache_Stats,
 ) {
 	previous, kept := cache.?
@@ -137,11 +141,11 @@ atlas_cache_plan :: proc(
 		!kept ||
 		previous.frame + 1 != frame ||
 		previous.params != params ||
-		previous.first_slot != first_slot
+		previous.cascades != cascades
 	next = {
-		params     = params,
-		first_slot = first_slot,
-		frame      = frame,
+		params   = params,
+		cascades = cascades,
+		frame    = frame,
 	}
 	if live != nil {
 		next.live = live^
@@ -149,10 +153,14 @@ atlas_cache_plan :: proc(
 	plans = make([]Atlas_Plan, len(lights), allocator)
 	held := make([]int, len(lights), context.temp_allocator)
 	pending := make([]bool, len(lights), context.temp_allocator)
-	used: [ATLAS_MAX_SLOTS]bool
-	// The lights that the cache holds keep their slots.
+	// The lights that the cache holds bring their slots, which they keep while their size stays the same.
+	takers := make([]Atlas_Taker, len(lights) + 1, context.temp_allocator)
 	for light, i in lights {
 		held[i] = -1
+		takers[i] = {
+			coverage = light.coverage,
+			faces    = light.faces,
+		}
 		if reset {
 			continue
 		}
@@ -160,51 +168,37 @@ atlas_cache_plan :: proc(
 			old := previous.lights[k]
 			if old.light.entity == light.entity && old.light.faces == light.faces {
 				held[i] = k
-				plans[i].slots = old.slots
-				for face in 0 ..< light.faces {
-					used[old.slots[face]] = true
-				}
+				takers[i].held = old.slots
 				break
 			}
 		}
 	}
-	// The new lights take the free slots, from the first after the cascades.
-	cursor := first_slot
+	if probe {
+		takers[len(lights)] = probe_taker(params)
+	}
+	grid := atlas_grid(params, cascades)
+	slots, moved := atlas_place(&grid, params, takers, context.temp_allocator)
+	probe_slot = slots[len(lights)][0]
+	placed := make([]bool, len(lights), context.temp_allocator)
 	for light, i in lights {
-		if held[i] >= 0 {
+		plans[i].slots = slots[i]
+		placed[i] = slots[i][0].size > 0
+		if !placed[i] {
 			continue
 		}
-		plans[i].redraw = true
-		for face in 0 ..< light.faces {
-			for cursor < ATLAS_MAX_SLOTS && used[cursor] {
-				cursor += 1
-			}
-			plans[i].slots[face] = min(cursor, ATLAS_MAX_SLOTS - 1)
-			if cursor < ATLAS_MAX_SLOTS {
-				used[cursor] = true
-			}
-		}
-	}
-	free_slot = -1
-	for slot in first_slot ..< ATLAS_MAX_SLOTS {
-		if !used[slot] {
-			free_slot = slot
-			break
-		}
-	}
-	// What makes a held light draw again.
-	for light, i in lights {
 		k := held[i]
-		if k < 0 {
+		if k < 0 || moved[i] {
+			plans[i].redraw = true
 			continue
 		}
+		// What makes a held light in its slots draw again.
 		old := previous.lights[k]
 		redraw :=
 			old.light.position != light.position ||
 			old.light.direction != light.direction ||
 			old.light.fov != light.fov ||
 			old.light.range != light.range ||
-			old.light.guard != light.guard
+			old.light.soft != light.soft
 		drift := light.distance / max(old.light.distance, 1)
 		redraw ||= drift > SHADOW_LOD_DRIFT || drift < 1 / SHADOW_LOD_DRIFT
 		redraw ||= old.provisional && complete
@@ -237,7 +231,7 @@ atlas_cache_plan :: proc(
 	for budget > 0 {
 		oldest := -1
 		for i in 0 ..< len(lights) {
-			if held[i] < 0 || plans[i].redraw || !pending[i] {
+			if held[i] < 0 || !placed[i] || plans[i].redraw || !pending[i] {
 				continue
 			}
 			if oldest < 0 || previous.lights[held[i]].drawn < previous.lights[held[oldest]].drawn {
@@ -252,6 +246,9 @@ atlas_cache_plan :: proc(
 		stats.refreshed += u32(lights[oldest].faces)
 	}
 	for light, i in lights {
+		if !placed[i] {
+			continue
+		}
 		entry := Atlas_Cache_Light {
 			light       = light,
 			slots       = plans[i].slots,
@@ -262,7 +259,7 @@ atlas_cache_plan :: proc(
 			entry = previous.lights[held[i]]
 			entry.pending = pending[i]
 		}
-		if next.count < ATLAS_MAX_SLOTS {
+		if next.count < ATLAS_MAX_VIEWS {
 			next.lights[next.count] = entry
 			next.count += 1
 		}
@@ -275,6 +272,12 @@ atlas_cache_plan :: proc(
 	return
 }
 
+// probe_taker is a reflection probe's capture as it takes a slot: half the largest, as atlas_place may halve it.
+@(private = "file")
+probe_taker :: proc(p: Shadow_Params) -> Atlas_Taker {
+	return {coverage = f32(p.max_slot / 2), faces = 1}
+}
+
 // atlas_light_distance is the camera's distance from a light's reach, at least 1 m, from the light's position relative
 // to the camera.
 atlas_light_distance :: proc(position: [3]f32, range: f32) -> f32 {
@@ -285,8 +288,7 @@ atlas_light_distance :: proc(position: [3]f32, range: f32) -> f32 {
 // can use it: until the pipeline compiles, the frame draws the atlas in full. A texture of another size holds nothing.
 @(private)
 ensure_atlas_cache :: proc(r: ^Renderer, s: ^Atlas_Cache_State, p: Shadow_Params) -> bool {
-	if !pipeline_ready(r.platform, &r.shadows.cache_pipeline) ||
-	   max_shadow_views(p) > ATLAS_MAX_SLOTS {
+	if !pipeline_ready(r.platform, &r.shadows.cache_pipeline) {
 		return false
 	}
 	if s.size != p.atlas {
@@ -339,17 +341,19 @@ atlas_cache_stats :: proc(r: ^Renderer) -> Atlas_Cache_Stats {
 	return stats_state(r).atlas_cache.stats
 }
 
-// plan_atlas_slots gives the frame's lights their slots: with the cache, as atlas_cache_plan keeps them, and without
-// it, one after another from first_slot, as every frame draws them all. It gives the first slot that no light takes.
+// plan_atlas_slots gives the frame's lights their slots, and with probe, a reflection probe's capture its slot: with the
+// cache, as atlas_cache_plan keeps them, and without it, as atlas_place gives them in an empty atlas, as every frame
+// draws them all.
 @(private)
 plan_atlas_slots :: proc(
 	f: ^Frame,
 	sf: ^Shadow_Frame,
 	lights: []Atlas_Light,
-	first_slot: int,
+	cascades: int,
+	probe: bool,
 ) -> (
 	plans: []Atlas_Plan,
-	free_slot: int,
+	probe_slot: Atlas_Slot,
 ) {
 	r := f.renderer
 	s := &r.scene
@@ -360,15 +364,23 @@ plan_atlas_slots :: proc(
 	ac.enabled =
 		f.shadow_settings.atlas_cache && len(lights) > 0 && ensure_atlas_cache(r, state, sf.params)
 	if !ac.enabled {
-		plans = make([]Atlas_Plan, len(lights), r.platform.frame_allocator)
-		next := first_slot
+		takers := make([]Atlas_Taker, len(lights) + 1, r.platform.frame_allocator)
 		for light, i in lights {
-			for face in 0 ..< light.faces {
-				plans[i].slots[face] = next
-				next += 1
+			takers[i] = {
+				coverage = light.coverage,
+				faces    = light.faces,
 			}
 		}
-		return plans, next
+		if probe {
+			takers[len(lights)] = probe_taker(sf.params)
+		}
+		grid := atlas_grid(sf.params, cascades)
+		slots, _ := atlas_place(&grid, sf.params, takers, r.platform.frame_allocator)
+		plans = make([]Atlas_Plan, len(lights), r.platform.frame_allocator)
+		for &plan, i in plans {
+			plan.slots = slots[i]
+		}
+		return plans, slots[len(lights)][0]
 	}
 	live := scene != nil ? scene.live : nil
 	tracked := s.casters.frame == s.frame && live != nil
@@ -376,17 +388,18 @@ plan_atlas_slots :: proc(
 	if previous, kept := state.cache.?; kept && tracked {
 		changes = view_caster_changes(&s.casters, live, &previous.live, r.platform.frame_allocator)
 	}
-	ac.next, plans, free_slot, ac.stats = atlas_cache_plan(
+	ac.next, plans, probe_slot, ac.stats = atlas_cache_plan(
 		state.cache,
 		true,
 		tracked,
 		sf.params,
-		first_slot,
+		cascades,
 		s.frame,
 		lights,
 		changes,
 		live,
 		reflection_probe_inputs_complete(f),
+		probe,
 		r.platform.frame_allocator,
 	)
 	return
@@ -403,36 +416,37 @@ add_atlas_cache_pass :: proc(f: ^Frame) {
 	if len(ac.redraw) == 0 {
 		return
 	}
-	p := add_render_pass(g, "shadow cache", draw_shadow_cache, f, pieces = len(ac.redraw))
+	p := add_render_pass(
+		g,
+		"shadow cache",
+		draw_shadow_cache,
+		f,
+		pieces = min(len(ac.redraw), MAX_PASS_PIECES),
+	)
 	depth(g, p, ac.texture, .Load)
 	declare_scene_draws(f, p)
 }
 
+// draw_shadow_cache draws a piece's share of the slots that draw again (see piece_views): for each, a triangle over its
+// slot clears it, and its cache view draws its casters.
 @(private = "file")
 draw_shadow_cache :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
 	sf := f.shadows
-	view := sf.cache.redraw[ctx.piece]
-	viewport := sf.viewports[view]
-	gpu.cmd_set_viewport(
-		ctx.cb,
-		{f32(viewport.x), f32(viewport.y)},
-		{f32(viewport.z), f32(viewport.w)},
-	)
-	gpu.cmd_set_scissor(
-		ctx.cb,
-		{i32(viewport.x), i32(viewport.y)},
-		{i32(viewport.z), i32(viewport.w)},
-	)
 	pipeline := f.renderer.shadows.cache_pipeline.pipeline
 	if pipeline == {} {
 		return
 	}
-	push := Shadow_Cache_Push{}
-	gpu.cmd_set_pipeline(ctx.cb, pipeline)
-	gpu.cmd_push_constants(ctx.cb, &push)
-	gpu.cmd_draw(ctx.cb, 3)
-	draw_scene_view(f, ctx.cb, FIRST_SHADOW_VIEW + len(sf.views) + ctx.piece, .Depth)
+	first, last := piece_views(ctx.piece, ctx.piece_count, len(sf.cache.redraw))
+	for k in first ..< last {
+		view := sf.cache.redraw[k]
+		set_slot_viewport(ctx.cb, sf.viewports[view])
+		push := Shadow_Cache_Push{}
+		gpu.cmd_set_pipeline(ctx.cb, pipeline)
+		gpu.cmd_push_constants(ctx.cb, &push)
+		gpu.cmd_draw(ctx.cb, 3)
+		draw_scene_view(f, ctx.cb, FIRST_SHADOW_VIEW + len(sf.views) + k, .Depth)
+	}
 }
 
 // copy_cached_slot copies a cached view's slot from the cache into the atlas, in the atlas's pass, whose viewport is the

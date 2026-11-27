@@ -76,23 +76,44 @@ cascades_split_between_even_and_exponential :: proc(t: ^testing.T) {
 @(test)
 every_level_fits_its_shadow_views_in_its_atlas :: proc(t: ^testing.T) {
 	for p, level in SHADOW_PARAMS {
-		// The cascades take whole cells, then the slots start after them, as assign_shadow_views gives them.
+		// The cascades take whole cells, then the slots fill the rest, from the largest to the smallest, as atlas_place
+		// takes them: every unit past the cascades.
 		viewports := make([dynamic][4]u32, context.temp_allocator)
 		for c in 0 ..< p.cascades {
-			pixels, _ := slot_viewport(p, c, p.cell)
+			pixels, _ := slot_viewport(p, cascade_slot(p, c))
 			append(&viewports, pixels)
 		}
-		for slot in p.cascades * slots_per_cell(p) ..< max_shadow_views(p) {
-			pixels, rect := slot_viewport(p, slot, p.slot)
-			testing.expectf(
-				t,
-				rect.x + rect.z <= 1 && rect.y + rect.w <= 1,
-				"%v: slot %d is outside the atlas",
-				level,
-				slot,
-			)
-			append(&viewports, pixels)
+		grid := atlas_grid(p, p.cascades)
+		free := atlas_free_units(&grid)
+		units := 0
+		for size := p.max_slot; size >= p.min_slot; size /= 2 {
+			for _ in 0 ..< 3 {
+				slot, ok := atlas_take(&grid, size)
+				if !ok {
+					break
+				}
+				pixels, rect := slot_viewport(p, slot)
+				testing.expectf(
+					t,
+					rect.x + rect.z <= 1 && rect.y + rect.w <= 1,
+					"%v: slot %v is outside the atlas",
+					level,
+					slot,
+				)
+				append(&viewports, pixels)
+				units += (size / p.min_slot) * (size / p.min_slot)
+			}
 		}
+		for {
+			slot, ok := atlas_take(&grid, p.min_slot)
+			if !ok {
+				break
+			}
+			pixels, _ := slot_viewport(p, slot)
+			append(&viewports, pixels)
+			units += 1
+		}
+		testing.expectf(t, units == free, "%v: the slots took %d of %d units", level, units, free)
 		for a, i in viewports {
 			testing.expectf(
 				t,
@@ -304,8 +325,7 @@ lights_take_their_shadows_in_order :: proc(t: ^testing.T) {
 	testing.expect_value(t, lf.records[4].shadow, i32(levels + 6))
 	testing.expect_value(t, len(sf.views), levels + 6 + 1)
 	testing.expect_value(t, sf.cascade_splits, [4]f32{})
-	first, _ := slot_viewport(sf.params, 0, sf.params.slot)
-	testing.expect_value(t, sf.viewports[levels], first)
+	testing.expect_value(t, sf.viewports[levels].xy, [2]u32{0, 0})
 	for view in sf.views[:levels] {
 		testing.expect_value(t, view.perspective, u32(0))
 	}
@@ -385,20 +405,24 @@ a_soft_lights_views_have_a_guard_band :: proc(t: ^testing.T) {
 		assign_shadow_views(frame, trace = false)
 		sf := frame.shadows
 		p := SHADOW_PARAMS[level]
-		guard := soft_guard(p)
-		testing.expect_value(t, guard, level == .Low ? 0 : int(p.soft.radius) + 2)
+		// The camera is within both lights' reach, so their faces take the largest slots.
+		size := int(sf.viewports[lf.records[0].shadow].z)
+		hard_size := int(sf.viewports[lf.records[1].shadow].z)
+		testing.expect_value(t, size, p.max_slot)
+		guard := soft_guard(p, size)
+		testing.expect_value(t, guard, level == .Low ? 0 : int(math.ceil(f32(size) / 32)) + 2)
 		// The soft light's faces are wider than 90 degrees, by its guard of texels on each side; the hard light's are not.
 		soft, hard := sf.views[lf.records[0].shadow], sf.views[lf.records[1].shadow]
 		testing.expectf(
 			t,
-			abs(soft.texel - 2 / f32(p.slot - 2 * guard)) < 1e-7,
+			abs(soft.texel - 2 / f32(size - 2 * guard)) < 1e-7,
 			"%v: a soft face's texel is %v",
 			level,
 			soft.texel,
 		)
 		testing.expectf(
 			t,
-			abs(hard.texel - 2 / f32(p.slot)) < 1e-7,
+			abs(hard.texel - 2 / f32(hard_size)) < 1e-7,
 			"%v: a hard face's texel is %v",
 			level,
 			hard.texel,
@@ -406,7 +430,7 @@ a_soft_lights_views_have_a_guard_band :: proc(t: ^testing.T) {
 		// A point 45 degrees off the +x face's axis is on its 90 degrees' edge, guard texels inside the slot's.
 		m := sf.matrices[lf.records[0].shadow]
 		clip := m * [4]f32{2, 1, 3, 1}
-		edge := (1 - clip.y / clip.w) * 0.5 * f32(p.slot)
+		edge := (1 - clip.y / clip.w) * 0.5 * f32(size)
 		testing.expectf(
 			t,
 			abs(edge - f32(guard)) < 1e-2,
@@ -414,6 +438,162 @@ a_soft_lights_views_have_a_guard_band :: proc(t: ^testing.T) {
 			level,
 			edge,
 		)
+	}
+}
+
+// The guard band is the filter's reach in each slot's size, so a smaller slot's band is narrower.
+@(test)
+a_guard_band_follows_its_slots_size :: proc(t: ^testing.T) {
+	p := SHADOW_PARAMS[.High]
+	testing.expect_value(t, soft_guard(p, 512), 18)
+	testing.expect_value(t, soft_guard(p, 128), 6)
+	testing.expect_value(t, soft_guard(SHADOW_PARAMS[.Low], 512), 0)
+}
+
+// A spot light near the camera takes a larger slot than the same light far away, as large as it shows.
+@(test)
+a_near_spot_light_takes_a_larger_slot :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f := light_setup(t)
+	defer light_teardown(f)
+	w := &f.world
+
+	down := linalg.quaternion_angle_axis_f32(math.PI / 2, {1, 0, 0})
+	spot := Spot_Light{intensity = 4, range = 6, outer_angle = 0.6, cast_shadows = true}
+	spawn_light(w, {0, 2, 10}, down, spot)
+	spawn_light(w, {0, 2, 60}, down, spot)
+	frame := &f.frame
+	frame.size = {1920, 1080}
+	frame.lights = extract_lights(frame, w, nil)
+	lf := frame.lights
+	frame.shadow_settings = {
+		distance     = SHADOW_DISTANCE,
+		split_lambda = SHADOW_SPLIT_LAMBDA,
+		level        = .High,
+	}
+	assign_shadow_views(frame, trace = false)
+	sf := frame.shadows
+	near, far := -1, -1
+	for record, i in lf.records {
+		testing.expect(t, record.shadow >= 0)
+		if record.position.z < 30 {
+			near = i
+		} else {
+			far = i
+		}
+	}
+	near_size := sf.viewports[lf.records[near].shadow].z
+	far_size := sf.viewports[lf.records[far].shadow].z
+	testing.expectf(t, near_size > far_size, "near %d, far %d", near_size, far_size)
+	testing.expect_value(t, int(far_size), SHADOW_PARAMS[.High].min_slot)
+	// A still camera gives every light the same slot.
+	viewports := make([][4]u32, len(sf.viewports), context.temp_allocator)
+	copy(viewports, sf.viewports[:])
+	for &record in lf.records {
+		record.shadow = -1
+	}
+	assign_shadow_views(frame, trace = false)
+	testing.expect_value(t, len(frame.shadows.viewports), len(viewports))
+	for v, i in viewports {
+		testing.expect_value(t, frame.shadows.viewports[i], v)
+	}
+}
+
+// At High, with the cascades, many far point lights fit the atlas in small slots, more than the 8 of fixed slots, and
+// 8 near ones still fit in slots that halve until they do.
+@(test)
+the_atlas_fits_many_far_point_lights :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f := light_setup(t)
+	defer light_teardown(f)
+	w := &f.world
+
+	down := linalg.quaternion_angle_axis_f32(math.PI / 2, {1, 0, 0})
+	spawn_light(w, {}, down, Directional_Light{intensity = 3, cast_shadows = true})
+	for i in 0 ..< 16 {
+		spawn_light(
+			w,
+			{f32(i % 4) * 4 - 6, f32(i / 4) * 4 - 6, 50},
+			1,
+			Point_Light{intensity = 4, range = 3, cast_shadows = true},
+		)
+	}
+	frame := &f.frame
+	frame.size = {1920, 1080}
+	frame.shadow_settings = {
+		distance     = SHADOW_DISTANCE,
+		split_lambda = SHADOW_SPLIT_LAMBDA,
+		level        = .High,
+	}
+	frame.lights = extract_lights(frame, w, nil)
+	assign_shadow_views(frame, trace = false)
+	lit := 0
+	for record in frame.lights.records {
+		if record.type == .Point && record.shadow >= 0 {
+			lit += 1
+		}
+	}
+	testing.expect_value(t, lit, 16)
+	testing.expect_value(t, len(frame.shadows.views), SHADOW_CASCADES + 16 * 6)
+	expect_viewports_apart(t, frame.shadows.viewports[:])
+}
+
+// At High, with the cascades, 8 point lights around the camera, within their reach, still fit: each would take 1024,
+// and their slots halve until they do.
+@(test)
+the_atlas_fits_near_point_lights_in_halved_slots :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f := light_setup(t)
+	defer light_teardown(f)
+	w := &f.world
+
+	down := linalg.quaternion_angle_axis_f32(math.PI / 2, {1, 0, 0})
+	spawn_light(w, {}, down, Directional_Light{intensity = 3, cast_shadows = true})
+	for i in 0 ..< 8 {
+		spawn_light(w, {f32(i) - 4, 0, 3}, 1, Point_Light{intensity = 4, cast_shadows = true})
+	}
+	frame := &f.frame
+	frame.size = {1920, 1080}
+	frame.shadow_settings = {
+		distance     = SHADOW_DISTANCE,
+		split_lambda = SHADOW_SPLIT_LAMBDA,
+		level        = .High,
+	}
+	frame.lights = extract_lights(frame, w, nil)
+	assign_shadow_views(frame, trace = false)
+	lit := 0
+	for record in frame.lights.records {
+		if record.type == .Point && record.shadow >= 0 {
+			lit += 1
+		}
+	}
+	testing.expect_value(t, lit, 8)
+	expect_viewports_apart(t, frame.shadows.viewports[:])
+}
+
+@(private = "file")
+expect_viewports_apart :: proc(t: ^testing.T, viewports: [][4]u32, loc := #caller_location) {
+	for a, i in viewports {
+		for b in viewports[i + 1:] {
+			apart := a.x + a.z <= b.x || b.x + b.z <= a.x || a.y + a.w <= b.y || b.y + b.w <= a.y
+			testing.expectf(t, apart, "%v and %v overlap", a, b, loc = loc)
+		}
+	}
+}
+
+// A pass's pieces share its views: consecutive, every view once, at most MAX_PASS_PIECES pieces.
+@(test)
+the_pieces_share_the_views :: proc(t: ^testing.T) {
+	for count in ([]int{1, 7, 64, 100, ATLAS_MAX_VIEWS}) {
+		pieces := min(count, MAX_PASS_PIECES)
+		next := 0
+		for piece in 0 ..< pieces {
+			first, last := piece_views(piece, pieces, count)
+			testing.expect_value(t, first, next)
+			testing.expect(t, last > first)
+			next = last
+		}
+		testing.expect_value(t, next, count)
 	}
 }
 

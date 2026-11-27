@@ -28,7 +28,8 @@ Shadow_Filter :: enum u32 {
 }
 
 // Shadow_Params are the shadow maps at a level. The atlas is square. Cascades take cells of cell pixels; spot lights
-// and point lights' faces take slots of slot pixels, several to a cell. A level with virtual_levels has a virtual shadow
+// and point lights' faces take slots of min_slot to max_slot pixels, powers of two no larger than a cell, as large as
+// they show on the screen (see shadow_atlas.odin). A level with virtual_levels has a virtual shadow
 // map, whose pool is pool_pages of VIRTUAL_PAGE_TEXELS on a side. virtual_bias moves its levels: above 0 is coarser.
 // A level with soft has percentage-closer soft shadows for the atlas's lights that have a size (see Soft_Params), and a
 // level with smrt rays shadow map ray tracing for the virtual shadow map's light (see Smrt_Params). With the caches, a
@@ -37,7 +38,8 @@ Shadow_Filter :: enum u32 {
 Shadow_Params :: struct {
 	atlas:            int,
 	cell:             int,
-	slot:             int,
+	min_slot:         int,
+	max_slot:         int,
 	cascades:         int,
 	filter:           Shadow_Filter,
 	virtual_levels:   int,
@@ -67,12 +69,13 @@ Smrt_Params :: struct {
 
 // Soft_Params are the percentage-closer soft shadows of the atlas's spot, point and area lights at a level (see
 // docs/rendering/lighting-and-shadows.md#soft-shadows): the blocker search's gathers, each of 2x2 texels, the filter's
-// bilinear comparisons, and the widest the filter reaches from its middle, in texels. A level with no taps keeps the
-// comparison taps of Shadow_Params.filter. Match soft_shadow_map in material_lighting.hlsli.
+// bilinear comparisons, and the widest the filter reaches from its middle, as a fraction of its slot's side, so a
+// penumbra is as wide in a slot of any size. A level with no taps keeps the comparison taps of Shadow_Params.filter.
+// Match soft_shadow_map in material_lighting.hlsli.
 Soft_Params :: struct {
 	search: u32,
 	taps:   u32,
-	radius: f32,
+	reach:  f32,
 }
 
 @(rodata)
@@ -80,7 +83,8 @@ SHADOW_PARAMS := [Quality_Level]Shadow_Params {
 	.Low = {
 		atlas = 2048,
 		cell = 1024,
-		slot = 512,
+		min_slot = 128,
+		max_slot = 512,
 		cascades = 2,
 		filter = .Taps_1,
 		dynamic_distance = 50,
@@ -89,13 +93,14 @@ SHADOW_PARAMS := [Quality_Level]Shadow_Params {
 	.Medium = {
 		atlas = 4096,
 		cell = 1024,
-		slot = 512,
+		min_slot = 128,
+		max_slot = 1024,
 		cascades = 3,
 		filter = .Taps_4,
 		virtual_levels = 12,
 		pool_pages = {32, 32},
 		virtual_bias = 1,
-		soft = {search = 4, taps = 8, radius = 16},
+		soft = {search = 4, taps = 8, reach = SOFT_REACH},
 		dynamic_distance = 75,
 		refresh_slots = 2,
 		stream_pages = 64,
@@ -104,12 +109,13 @@ SHADOW_PARAMS := [Quality_Level]Shadow_Params {
 	.High = {
 		atlas = 4096,
 		cell = 1024,
-		slot = 512,
+		min_slot = 128,
+		max_slot = 1024,
 		cascades = 4,
 		filter = .Taps_4,
 		virtual_levels = 12,
 		pool_pages = {64, 32},
-		soft = {search = 8, taps = 16, radius = 16},
+		soft = {search = 8, taps = 16, reach = SOFT_REACH},
 		smrt = {rays = 4, steps = 6, length = SMRT_LENGTH},
 		dynamic_distance = 100,
 		refresh_slots = 4,
@@ -119,12 +125,13 @@ SHADOW_PARAMS := [Quality_Level]Shadow_Params {
 	.Ultra = {
 		atlas = 8192,
 		cell = 2048,
-		slot = 1024,
+		min_slot = 256,
+		max_slot = 2048,
 		cascades = 4,
 		filter = .Taps_9,
 		virtual_levels = 13,
 		pool_pages = {64, 64},
-		soft = {search = 8, taps = 24, radius = 32},
+		soft = {search = 8, taps = 24, reach = SOFT_REACH},
 		smrt = {rays = 8, steps = 8, length = SMRT_LENGTH},
 		dynamic_distance = 150,
 		refresh_slots = 6,
@@ -132,6 +139,8 @@ SHADOW_PARAMS := [Quality_Level]Shadow_Params {
 		drop_pages = 64 * 64,
 	},
 }
+// How far the soft shadows' filter reaches at most, as a fraction of a slot's side: 16 texels of 512.
+SOFT_REACH :: 1.0 / 32
 // How far the virtual shadow map's rays reach toward the light, in meters. A caster farther than this casts a penumbra
 // as wide as one this far.
 SMRT_LENGTH :: 20
@@ -151,23 +160,12 @@ MASK_GROUP_SIZE :: 8
 // The contact shadows hold one light's visibility: a frame that has them traces no mask.
 CONTACT_SHADOWS_FORMAT :: gpu.Format.R8_Unorm
 
-// soft_guard is the band of texels around a soft light's view, inside its slot, that its filter may read past the
-// view's edge: the filter's reach, and a texel each for a gather's and a comparison's 2x2. A cube face's or a spot
-// light's view is that much wider than its own field of view, so a wide filter at its edge reads what lies beyond the
-// edge, and never a neighbouring view, nor a seam where its taps would clamp. 0 without soft shadows.
-soft_guard :: proc(p: Shadow_Params) -> int {
-	return p.soft.taps > 0 ? int(math.ceil(p.soft.radius)) + 2 : 0
-}
-
-// slots_per_cell is how many slots a cell holds.
-slots_per_cell :: proc(p: Shadow_Params) -> int {
-	return (p.cell / p.slot) * (p.cell / p.slot)
-}
-
-// max_shadow_views is how many slots the atlas holds.
-max_shadow_views :: proc(p: Shadow_Params) -> int {
-	cells := p.atlas / p.cell
-	return cells * cells * slots_per_cell(p)
+// soft_guard is the band of texels around a soft light's view, inside its slot of size pixels, that its filter may read
+// past the view's edge: the filter's reach in the slot, and a texel each for a gather's and a comparison's 2x2. A cube
+// face's or a spot light's view is that much wider than its own field of view, so a wide filter at its edge reads what
+// lies beyond the edge, and never a neighbouring view, nor a seam where its taps would clamp. 0 without soft shadows.
+soft_guard :: proc(p: Shadow_Params, size: int) -> int {
+	return p.soft.taps > 0 ? int(math.ceil(p.soft.reach * f32(size))) + 2 : 0
 }
 
 // SHADOW_MASK_SHADER is the engine's shadow mask shader (lib/engine/content/shaders/shadow_mask.hlsl).
@@ -465,7 +463,8 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 	sf.eyes = make([dynamic][4]f32, r.platform.frame_allocator)
 	sf.viewports = make([dynamic][4]u32, r.platform.frame_allocator)
 	sf.params = SHADOW_PARAMS[f.shadow_settings.level]
-	max_views := max_shadow_views(sf.params)
+	lod, near := lod_scale(f.view, f.size.y, 1)
+	_, flat := f.view.projection.(Orthographic)
 
 	// The directional lights first, in their order, then the punctual ones by their light in view.
 	order := make([dynamic]int, r.platform.frame_allocator)
@@ -494,18 +493,16 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 	sort_by_importance(order[punctual_start:], importance)
 
 	cascades_taken := false
-	// The atlas's slots that the punctual lights take, after first_slot, and the lights in their order.
-	taken := 0
-	first_slot := 0
-	Atlas_Taker :: struct {
+	// The cascades' cells, the views that the punctual lights ask for, and the lights in their order.
+	cascades := 0
+	views := 0
+	Light_Taker :: struct {
 		record: int,
 		light:  Atlas_Light,
 	}
-	takers := make([dynamic]Atlas_Taker, r.platform.frame_allocator)
+	takers := make([dynamic]Light_Taker, r.platform.frame_allocator)
 	for i in order {
 		record := &lf.records[i]
-		// A light with a size takes soft shadows, whose views have a guard band.
-		guard := light_size(record^) > 0 ? soft_guard(sf.params) : 0
 		if trace && sf.mask_count < MAX_MASK_LIGHTS {
 			record.mask = i32(sf.mask_count)
 			sf.mask_lights[sf.mask_count] = u32(i)
@@ -519,7 +516,7 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 		case .Directional:
 			// The cascades take the first cells, so the slots start after them. A virtual shadow map's levels take none.
 			// A second directional light without a mask channel has no shadow.
-			if cascades_taken || taken > 0 {
+			if cascades_taken || len(takers) > 0 {
 				continue
 			}
 			cascades_taken = true
@@ -535,23 +532,24 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 				}
 				add_virtual_levels(f, sf, record.direction)
 			} else {
-				first_slot = sf.params.cascades * slots_per_cell(sf.params)
+				cascades = sf.params.cascades
 				add_cascades(f, sf, record.direction)
 			}
 		case .Spot, .Point, .Quad, .Disk, .Line:
 			// An area light casts its shadows from its middle, as a point light does, as soft as its size. A point light's
 			// six views are the faces of its cube.
+			// A light with a size takes soft shadows, whose views have a guard band.
 			faces := record.type == .Spot ? 1 : 6
-			if first_slot + taken + faces > max_views {
+			if views + faces > ATLAS_MAX_VIEWS {
 				continue
 			}
-			taker := Atlas_Taker {
+			taker := Light_Taker {
 				record = i,
 				light = {
 					entity = lf.entities[i],
 					position = i < len(lf.positions) ? lf.positions[i] : ecs.position_offset(f.view.position, record.position),
 					range = record.range,
-					guard = guard,
+					soft = light_size(record^) > 0,
 					faces = faces,
 					distance = atlas_light_distance(record.position, record.range),
 					fov = math.PI / 2,
@@ -563,23 +561,36 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 				taker.light.direction, taker.light.fov =
 					record.direction, min(cone * 2, math.to_radians(f32(170)))
 			}
+			taker.light.coverage = atlas_light_coverage(
+				record.position,
+				record.range,
+				taker.light.fov,
+				lod,
+				near,
+				flat,
+				sf.params,
+			)
 			append(&takers, taker)
-			taken += faces
+			views += faces
 		}
 	}
 	if !cascades_taken {
 		// Every view depth is beyond the last split, so no pixel looks for a cascade.
 		sf.cascade_splits = {}
 	}
-	// The lights take their slots, which they keep with the cache.
+	// The lights take their slots, which they keep with the cache, and a light that the atlas has no room for has no
+	// shadow.
 	lights := make([]Atlas_Light, len(takers), r.platform.frame_allocator)
 	for t, k in takers {
 		lights[k] = t.light
 	}
-	plans, free_slot := plan_atlas_slots(f, sf, lights, first_slot)
+	plans, probe_slot := plan_atlas_slots(f, sf, lights, cascades, reflection_probe_takes_shadow(f))
 	cube_faces := CUBE_FACES
 	cached := make([dynamic]int, r.platform.frame_allocator)
 	for t, k in takers {
+		if plans[k].slots[0].size == 0 {
+			continue
+		}
 		record := &lf.records[t.record]
 		record.shadow = i32(len(sf.views))
 		for face in 0 ..< t.light.faces {
@@ -590,6 +601,7 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 					append(&sf.cache.redraw, len(sf.views))
 				}
 			}
+			slot := plans[k].slots[face]
 			add_perspective_view(
 				f,
 				sf,
@@ -597,13 +609,13 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 				direction,
 				t.light.fov,
 				record.range,
-				plans[k].slots[face],
-				t.light.guard,
+				slot,
+				t.light.soft ? soft_guard(sf.params, int(slot.size)) : 0,
 			)
 		}
 	}
 	// A reflection probe's capture takes a slot after the others for its own view of the directional light.
-	add_reflection_probe_shadow(f, sf, free_slot < 0 ? max_views : free_slot, max_views)
+	add_reflection_probe_shadow(f, sf, probe_slot)
 	sf.cache.cached = make([]bool, len(sf.views), r.platform.frame_allocator)
 	for view in cached {
 		sf.cache.cached[view] = true
@@ -645,7 +657,7 @@ soft_shadow_constants :: proc(constants: ^Frame_Constants, f: ^Frame) {
 	if soft.taps > 0 {
 		constants.shadow_soft_search = soft.search
 		constants.shadow_soft_taps = soft.taps
-		constants.shadow_soft_radius = soft.radius
+		constants.shadow_soft_radius = soft.reach
 		constants.shadow_depth_sampler = gpu.sampler_index(r.post.sampler)
 	}
 	if traces {
@@ -692,21 +704,6 @@ light_basis :: proc(forward: [3]f32) -> (right, up: [3]f32) {
 	hint := abs(forward.y) < 0.99 ? [3]f32{0, 1, 0} : [3]f32{0, 0, 1}
 	right = linalg.normalize(linalg.cross(hint, forward))
 	up = linalg.cross(forward, right)
-	return
-}
-
-// slot_viewport is a slot's rectangle of the atlas in pixels, and in UV: a whole cell when size is the cell's, and
-// otherwise one of its slots.
-slot_viewport :: proc(p: Shadow_Params, slot: int, size: int) -> (pixels: [4]u32, rect: [4]f32) {
-	per_side := p.cell / size
-	cells_per_side := p.atlas / p.cell
-	cell := size == p.cell ? slot : slot / slots_per_cell(p)
-	sub := size == p.cell ? 0 : slot % slots_per_cell(p)
-	x := (cell % cells_per_side) * p.cell + (sub % per_side) * size
-	y := (cell / cells_per_side) * p.cell + (sub / per_side) * size
-	pixels = {u32(x), u32(y), u32(size), u32(size)}
-	atlas := f32(p.atlas)
-	rect = {f32(x) / atlas, f32(y) / atlas, f32(size) / atlas, f32(size) / atlas}
 	return
 }
 
@@ -763,7 +760,7 @@ add_cascades :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 			-direction.x / depth_range, -direction.y / depth_range, -direction.z / depth_range, (radius + d) / depth_range,
 			0, 0, 0, 1,
 		}
-		pixels, rect := slot_viewport(sf.params, c, sf.params.cell)
+		pixels, rect := slot_viewport(sf.params, cascade_slot(sf.params, c))
 		planes := frustum_planes_6(m)
 		// The near plane culls nothing: casters toward the light still cast, with their depth clamped.
 		planes[4] = {0, 0, 0, 1}
@@ -783,7 +780,7 @@ add_orthographic_shadow_view :: proc(
 	sf: ^Shadow_Frame,
 	direction, center: [3]f32,
 	radius: f32,
-	slot: int,
+	slot: Atlas_Slot,
 ) {
 	light_right, light_up := light_basis(direction)
 	depth_range := 2 * radius
@@ -794,13 +791,13 @@ add_orthographic_shadow_view :: proc(
 		-direction.x / depth_range, -direction.y / depth_range, -direction.z / depth_range, (radius + d) / depth_range,
 		0, 0, 0, 1,
 	}
-	pixels, rect := slot_viewport(sf.params, slot, sf.params.slot)
+	pixels, rect := slot_viewport(sf.params, slot)
 	planes := frustum_planes_6(m)
 	planes[4] = {0, 0, 0, 1}
 	append(&sf.matrices, m)
 	append(
 		&sf.views,
-		Shadow_View{rows = matrix_rows(m), rect = rect, texel = 2 * radius / f32(sf.params.slot)},
+		Shadow_View{rows = matrix_rows(m), rect = rect, texel = 2 * radius / f32(slot.size)},
 	)
 	append(&sf.planes, planes)
 	append(&sf.eyes, [4]f32{direction.x, direction.y, direction.z, 0})
@@ -808,19 +805,19 @@ add_orthographic_shadow_view :: proc(
 }
 
 // add_perspective_view adds a perspective view from a light's position, relative to the camera, along a direction,
-// with reversed depth from SHADOW_NEAR, and culling to the light's range. With a guard of texels, its field of view
-// widens so that fov fills the slot but for guard texels on each side (see soft_guard).
+// with reversed depth from SHADOW_NEAR, and culling to the light's range, in a slot of the atlas. With a guard of texels,
+// its field of view widens so that fov fills the slot but for guard texels on each side (see soft_guard).
 @(private = "file")
 add_perspective_view :: proc(
 	f: ^Frame,
 	sf: ^Shadow_Frame,
 	position, direction: [3]f32,
 	fov, range: f32,
-	slot: int,
+	slot: Atlas_Slot,
 	guard := 0,
 ) {
 	right, up := light_basis(direction)
-	slot_size := sf.params.slot
+	slot_size := int(slot.size)
 	s := 1 / math.tan(fov * 0.5) * f32(slot_size - 2 * guard) / f32(slot_size)
 	// The rows take a position relative to the camera: its offset from the light along the light's axes, projected.
 	m := matrix[4, 4]f32{
@@ -829,7 +826,7 @@ add_perspective_view :: proc(
 		0, 0, 0, SHADOW_NEAR,
 		direction.x, direction.y, direction.z, -linalg.dot(direction, position),
 	}
-	pixels, rect := slot_viewport(sf.params, slot, slot_size)
+	pixels, rect := slot_viewport(sf.params, slot)
 	planes := frustum_planes_6(m)
 	// The far plane is at the light's range.
 	planes[5] = {-direction.x, -direction.y, -direction.z, linalg.dot(direction, position) + range}
@@ -900,7 +897,13 @@ add_shadow_passes :: proc(f: ^Frame) {
 			g,
 			{size = {atlas, atlas}, format = SHADOW_FORMAT, label = "shadow atlas"},
 		)
-		p := add_render_pass(g, "shadow maps", draw_shadow_maps, f, pieces = atlas_views)
+		p := add_render_pass(
+			g,
+			"shadow maps",
+			draw_shadow_maps,
+			f,
+			pieces = min(atlas_views, MAX_PASS_PIECES),
+		)
 		depth(g, p, sf.atlas, .Clear)
 		if sf.cache.enabled {
 			read(g, p, sf.cache.texture)
@@ -1164,27 +1167,35 @@ run_contact_shadows :: proc(ctx: ^Pass_Context) {
 	gpu.cmd_dispatch(ctx.cb, {groups.x, groups.y, 1})
 }
 
+// draw_shadow_maps draws a piece's share of the atlas's views (see piece_views), each in its slot.
 @(private = "file")
 draw_shadow_maps :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
-	// A virtual shadow map's levels are the first views.
-	view := f.shadows.virtual.count + ctx.piece
-	viewport := f.shadows.viewports[view]
-	gpu.cmd_set_viewport(
-		ctx.cb,
-		{f32(viewport.x), f32(viewport.y)},
-		{f32(viewport.z), f32(viewport.w)},
-	)
-	gpu.cmd_set_scissor(
-		ctx.cb,
-		{i32(viewport.x), i32(viewport.y)},
-		{i32(viewport.z), i32(viewport.w)},
-	)
-	// A cached view's slot is its cache's, and the view draws only its live casters over it.
-	if f.shadows.cache.enabled && f.shadows.cache.cached[view] {
-		copy_cached_slot(ctx, f)
+	sf := f.shadows
+	first, last := piece_views(ctx.piece, ctx.piece_count, len(sf.views) - sf.virtual.count)
+	for k in first ..< last {
+		// A virtual shadow map's levels are the first views.
+		view := sf.virtual.count + k
+		set_slot_viewport(ctx.cb, sf.viewports[view])
+		// A cached view's slot is its cache's, and the view draws only its live casters over it.
+		if sf.cache.enabled && sf.cache.cached[view] {
+			copy_cached_slot(ctx, f)
+		}
+		draw_scene_view(f, ctx.cb, FIRST_SHADOW_VIEW + view, .Depth)
 	}
-	draw_scene_view(f, ctx.cb, FIRST_SHADOW_VIEW + view, .Depth)
+}
+
+// piece_views is the share of count views that a pass's piece draws, from first to last: consecutive views, as even as
+// they divide, since a pass has at most MAX_PASS_PIECES pieces.
+piece_views :: proc(piece, pieces, count: int) -> (first, last: int) {
+	return piece * count / max(pieces, 1), (piece + 1) * count / max(pieces, 1)
+}
+
+// set_slot_viewport sets the viewport and the scissor to a slot's rectangle of the atlas, in pixels.
+@(private)
+set_slot_viewport :: proc(cb: ^gpu.Command_Buffer, viewport: [4]u32) {
+	gpu.cmd_set_viewport(cb, {f32(viewport.x), f32(viewport.y)}, {f32(viewport.z), f32(viewport.w)})
+	gpu.cmd_set_scissor(cb, {i32(viewport.x), i32(viewport.y)}, {i32(viewport.z), i32(viewport.w)})
 }
 
 @(private = "file")
