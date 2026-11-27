@@ -151,6 +151,8 @@ restir_gi_runs_on_the_compute_queue_and_passes_validation :: proc(t: ^testing.T)
 		&restir.spatial,
 		&restir.resolve,
 		&restir.filter,
+		&restir.guide,
+		&restir.guide_view,
 	}
 	for p in pipelines {
 		p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
@@ -257,6 +259,7 @@ restir_gi_runs_on_the_compute_queue_and_passes_validation :: proc(t: ^testing.T)
 		level     = .Low,
 	}
 	names := []string {
+		"gi restir guide",
 		"gi restir trace",
 		"gi restir light",
 		"gi restir temporal",
