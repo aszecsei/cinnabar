@@ -584,7 +584,13 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 	for t, k in takers {
 		lights[k] = t.light
 	}
-	plans, probe_slot := plan_atlas_slots(f, sf, lights, cascades, reflection_probe_takes_shadow(f))
+	plans, probe_slot := plan_atlas_slots(
+		f,
+		sf,
+		lights,
+		cascades,
+		reflection_probe_takes_shadow(f),
+	)
 	cube_faces := CUBE_FACES
 	cached := make([dynamic]int, r.platform.frame_allocator)
 	for t, k in takers {
@@ -1194,7 +1200,11 @@ piece_views :: proc(piece, pieces, count: int) -> (first, last: int) {
 // set_slot_viewport sets the viewport and the scissor to a slot's rectangle of the atlas, in pixels.
 @(private)
 set_slot_viewport :: proc(cb: ^gpu.Command_Buffer, viewport: [4]u32) {
-	gpu.cmd_set_viewport(cb, {f32(viewport.x), f32(viewport.y)}, {f32(viewport.z), f32(viewport.w)})
+	gpu.cmd_set_viewport(
+		cb,
+		{f32(viewport.x), f32(viewport.y)},
+		{f32(viewport.z), f32(viewport.w)},
+	)
 	gpu.cmd_set_scissor(cb, {i32(viewport.x), i32(viewport.y)}, {i32(viewport.z), i32(viewport.w)})
 }
 

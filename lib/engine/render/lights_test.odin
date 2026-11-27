@@ -459,7 +459,12 @@ a_near_spot_light_takes_a_larger_slot :: proc(t: ^testing.T) {
 	w := &f.world
 
 	down := linalg.quaternion_angle_axis_f32(math.PI / 2, {1, 0, 0})
-	spot := Spot_Light{intensity = 4, range = 6, outer_angle = 0.6, cast_shadows = true}
+	spot := Spot_Light {
+		intensity    = 4,
+		range        = 6,
+		outer_angle  = 0.6,
+		cast_shadows = true,
+	}
 	spawn_light(w, {0, 2, 10}, down, spot)
 	spawn_light(w, {0, 2, 60}, down, spot)
 	frame := &f.frame

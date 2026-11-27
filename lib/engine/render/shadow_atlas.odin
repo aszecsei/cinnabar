@@ -49,7 +49,12 @@ cascade_slot :: proc(p: Shadow_Params, c: int) -> Atlas_Slot {
 slot_viewport :: proc(p: Shadow_Params, slot: Atlas_Slot) -> (pixels: [4]u32, rect: [4]f32) {
 	pixels = {u32(slot.x), u32(slot.y), u32(slot.size), u32(slot.size)}
 	atlas := f32(p.atlas)
-	rect = {f32(slot.x) / atlas, f32(slot.y) / atlas, f32(slot.size) / atlas, f32(slot.size) / atlas}
+	rect = {
+		f32(slot.x) / atlas,
+		f32(slot.y) / atlas,
+		f32(slot.size) / atlas,
+		f32(slot.size) / atlas,
+	}
 	return
 }
 
@@ -212,7 +217,9 @@ atlas_place :: proc(
 			}
 		}
 		if largest >= 0 {
-			need -= takers[largest].faces * (units(sizes[largest], g.unit) - units(sizes[largest] / 2, g.unit))
+			need -=
+				takers[largest].faces *
+				(units(sizes[largest], g.unit) - units(sizes[largest] / 2, g.unit))
 			sizes[largest] /= 2
 			continue
 		}
