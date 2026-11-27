@@ -406,6 +406,23 @@ a_saved_world_probes_technique_reads_as_the_split_cascades :: proc(t: ^testing.T
 }
 
 @(test)
+restir_gi_reads_and_writes_with_ray_queries :: proc(t: ^testing.T) {
+	caps := render.Caps {
+		ray_query = true,
+	}
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("quality.gi = Restir\n", &s, &problems)
+	testing.expect_value(t, len(problems), 0)
+	q := quality(s, caps)
+	testing.expect_value(t, q.gi.technique, render.Gi_Technique.Restir)
+	testing.expect_value(t, quality_values(q, caps)[.Gi], "Restir")
+	// Without them, it is the screen cascades.
+	testing.expect_value(t, quality(s, {}).gi.technique, render.Gi_Technique.Screen_Cascades)
+	free_all(context.temp_allocator)
+}
+
+@(test)
 the_voxel_cones_read_and_write_on_any_device :: proc(t: ^testing.T) {
 	// They need no ray queries, so a device without them keeps them.
 	caps := render.Caps{}

@@ -12,7 +12,7 @@ quality_only_turns_features_off :: proc(t: ^testing.T) {
 	testing.expect(t, settings.shadows.ray_traced)
 	testing.expect_value(t, settings.fog.level, Quality_Level.Ultra)
 	testing.expect_value(t, settings.clouds.level, Quality_Level.Ultra)
-	testing.expect_value(t, settings.gi.technique, Gi_Technique.Split_Cascades)
+	testing.expect_value(t, settings.gi.technique, Gi_Technique.Restir)
 	q.aa = .Smaa
 	apply_quality(&settings, q)
 	testing.expect_value(t, settings.post.aa, Aa_Technique.Smaa)
@@ -206,9 +206,13 @@ quality_keeps_to_what_the_device_can_do :: proc(t: ^testing.T) {
 		!clamp_quality(q, {}).shadows.ray_traced,
 		"without Ray_Query, the shadows are maps",
 	)
-	// Without Ray_Query, the world probes are the screen-space cascades alone.
-	testing.expect_value(t, q.gi.technique, Gi_Technique.Split_Cascades)
+	// Without Ray_Query, ReSTIR GI and the split cascades are the screen-space cascades alone.
+	testing.expect_value(t, q.gi.technique, Gi_Technique.Restir)
 	testing.expect_value(t, clamp_quality(q, {}).gi.technique, Gi_Technique.Screen_Cascades)
+	split := preset_quality(.High, {ray_query = true})
+	testing.expect_value(t, split.gi.technique, Gi_Technique.Split_Cascades)
+	testing.expect_value(t, clamp_quality(split, {}).gi.technique, Gi_Technique.Screen_Cascades)
+	testing.expect_value(t, clamp_quality(split, {ray_query = true}), split)
 	testing.expect_value(
 		t,
 		clamp_quality(q, {}).reflections.technique,
@@ -292,7 +296,8 @@ the_default_quality_follows_the_video_memory :: proc(t: ^testing.T) {
 	)
 	// Unknown memory, as on an adapter that shares the CPU's, is High.
 	testing.expect_value(t, quality_preset(default_quality({}), {}), Quality_Preset.High)
-	// Traced shadows, the world probes and the traced reflections from High up, where the device has them.
+	// Traced shadows, the world probes and the traced reflections from High up, where the device has them, with ReSTIR
+	// GI at Ultra.
 	testing.expect(
 		t,
 		!default_quality({ray_query = true, video_memory = 3 << 30}).shadows.ray_traced,
@@ -307,6 +312,17 @@ the_default_quality_follows_the_video_memory :: proc(t: ^testing.T) {
 		t,
 		default_quality({ray_query = true}).gi.technique,
 		Gi_Technique.Split_Cascades,
+	)
+	// A device with the memory for Ultra takes ReSTIR GI.
+	testing.expect_value(
+		t,
+		default_quality({ray_query = true, video_memory = 12 << 30}).gi.technique,
+		Gi_Technique.Restir,
+	)
+	testing.expect_value(
+		t,
+		default_quality({video_memory = 12 << 30}).gi.technique,
+		Gi_Technique.Screen_Cascades,
 	)
 	testing.expect_value(t, default_quality({}).gi.technique, Gi_Technique.Screen_Cascades)
 	testing.expect_value(

@@ -28,7 +28,7 @@ public sealed partial class EditorShell
     public static IReadOnlyList<string> ViewportAaNames { get; } = [GameQualityLabel, "Off", "TAA", "FXAA", "SMAA", "FSR"];
 
     /// <summary>The viewport's global illumination, as the menu shows it, in <see cref="ViewportGi"/>'s order.</summary>
-    public static IReadOnlyList<string> ViewportGiNames { get; } = [GameQualityLabel, "Off", "Screen Cascades", "Split Cascades", "Voxel Cones"];
+    public static IReadOnlyList<string> ViewportGiNames { get; } = [GameQualityLabel, "Off", "Screen Cascades", "Split Cascades", "Voxel Cones", "ReSTIR GI"];
 
     /// <summary>The viewport's reflections, as the menu shows them, in <see cref="ViewportReflections"/>'s order.</summary>
     public static IReadOnlyList<string> ViewportReflectionsNames { get; } = [GameQualityLabel, "Off", "Probes", "Screen Space", "Ray Traced"];

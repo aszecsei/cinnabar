@@ -766,7 +766,7 @@ gi_emitters_wanted :: proc(f: ^Frame) -> bool {
 	if f.extra || !r.caps.ray_query || !pipeline_ready(r.platform, &r.gi.emitters.pipeline) {
 		return false
 	}
-	probes := f.gi != nil && f.gi.settings.technique == .Split_Cascades && gi_probes_ready(r)
+	probes := f.gi != nil && gi_traces_world(f.gi.settings.technique) && gi_probes_ready(r)
 	traced := f.ssr != nil && f.ssr.traced != nil
 	return (probes || traced) && hit_shading_ready(f) && len(f.scene_frame.hit_keys) > 0
 }

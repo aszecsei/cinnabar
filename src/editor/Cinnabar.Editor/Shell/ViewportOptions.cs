@@ -63,7 +63,7 @@ public static class ViewportOptions
         v => EditorShell.ViewportAaNames[(int)v], s => s.AntiAliasing, (s, v) => s with { AntiAliasing = v });
 
     public static ViewportChoice GlobalIllumination { get; } = OfEnum<ViewportGi>(EditorCommands.ViewportGiTechnique, "Global Illumination",
-        "Light the viewport's indirect light with a technique in place of the game's, at the quality's level. Split Cascades need ray queries; elsewhere the viewport uses Screen Cascades.",
+        "Light the viewport's indirect light with a technique in place of the game's, at the quality's level. Split Cascades and ReSTIR GI need ray queries; elsewhere the viewport uses Screen Cascades.",
         v => EditorShell.ViewportGiNames[(int)v], s => s.GlobalIllumination, (s, v) => s with { GlobalIllumination = v });
 
     public static ViewportChoice Reflections { get; } = OfEnum<ViewportReflections>(EditorCommands.ViewportReflections, "Reflections",
