@@ -9,8 +9,8 @@ import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:engine/ecs"
 
-// The world probes (see docs/rendering/global-illumination.md#world-probes): with Gi_Technique.Split_Cascades and
-// Ray_Query, camera-following clipmap levels of probes in world space, which trace the ray scene for the light that
+// The world probes (see docs/rendering/global-illumination.md#world-probes): with Gi_Technique.Split_Cascades or
+// Restir and Ray_Query, camera-following clipmap levels of probes in world space, which trace the ray scene for the light that
 // the screen does not see. Each frame updates a budget of probes, on the compute queue after the prepass: their rays
 // trace the scene, hit shading evaluates the materials at the hits, the hits are lit, the hits that the screen shows
 // take last frame's lit scene there, and the probes blend the rays into their tiles. The cascades' trace, merge and gather then take the probes' light where they took the
@@ -542,7 +542,7 @@ probe_rotation :: proc(frame: u32) -> (rows: [3][4]f32) {
 add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^Gi_Probe_Frame {
 	r := f.renderer
 	platform := r.platform
-	if settings.technique != .Split_Cascades || !gi_probes_ready(r) || !hit_shading_ready(f) {
+	if !gi_traces_world(settings.technique) || !gi_probes_ready(r) || !hit_shading_ready(f) {
 		return nil
 	}
 	params := GI_PROBE_PARAMS[settings.level]

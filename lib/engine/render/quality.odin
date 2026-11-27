@@ -51,10 +51,18 @@ Gi_Technique :: enum u8 {
 	// Voxel cone tracing through a clipmap of voxels around the camera, which the rasterizer voxelizes (see
 	// docs/rendering/global-illumination.md#voxel-cones). It needs no ray queries.
 	Voxel_Cones,
+	// ReSTIR GI: a ray a pixel from the prepass's surfaces, traced through the ray scene, whose samples each pixel
+	// resamples from its last frame's and its neighbours' reservoirs, with the world probes for the light past the
+	// first bounce (see docs/rendering/global-illumination.md#restir-gi). Needs Ray_Query.
+	Restir,
 }
 
 // A code reload keeps a quality's technique by its value.
-#assert(int(Gi_Technique.Split_Cascades) == 2 && int(Gi_Technique.Voxel_Cones) == 3)
+#assert(
+	int(Gi_Technique.Split_Cascades) == 2 &&
+	int(Gi_Technique.Voxel_Cones) == 3 &&
+	int(Gi_Technique.Restir) == 4,
+)
 
 // The reflections' techniques (see docs/rendering/quality.md#quality), in the order that they were added, so a code
 // reload keeps a quality's choice. Each adds its value with its preset and its clamp.
@@ -295,12 +303,16 @@ device_caps :: proc(platform: ^core.Platform_API) -> (caps: Caps) {
 	return
 }
 
-// preset_quality is every feature at a preset's level, with traced shadows, the world probes and the traced reflections
-// from High up where the device has ray queries, the reflection probes at Low, and the screen-space reflections between.
-// Custom gives High's.
+// preset_quality is every feature at a preset's level, with traced shadows, the split cascades and the traced reflections
+// from High up where the device has ray queries, ReSTIR GI in the split cascades' place at Ultra, the reflection probes
+// at Low, and the screen-space reflections between. Custom gives High's.
 preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 	level := preset == .Custom ? Quality_Level.High : Quality_Level(u8(preset))
 	traced := caps.ray_query && level >= .High
+	gi := Gi_Technique.Screen_Cascades
+	if traced {
+		gi = level == .Ultra ? .Restir : .Split_Cascades
+	}
 	reflections := Reflection_Technique.Screen
 	dof := level >= .High ? Dof_Technique.Bokeh : level == .Medium ? .Gather : .Off
 	switch {
@@ -318,7 +330,7 @@ preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 			atlas_cache = true,
 		},
 		ao = {technique = .Gtao, level = level},
-		gi = {technique = traced ? .Split_Cascades : .Screen_Cascades, level = level},
+		gi = {technique = gi, level = level},
 		reflections = {technique = reflections, level = level},
 		fog = level,
 		clouds = level,
@@ -390,8 +402,9 @@ default_quality :: proc(caps: Caps) -> Quality {
 }
 
 // clamp_quality turns off what the device cannot do, and puts each enum back in its range, since a settings file or a
-// script may give any number. An upscaler that the device does not run gives temporal AA, which upscales too, the world
-// probes without Ray_Query give the screen-space cascades alone, and the traced reflections the screen-space ones.
+// script may give any number. An upscaler that the device does not run gives temporal AA, which upscales too, the split
+// cascades and ReSTIR GI without Ray_Query give the screen-space cascades alone, and the traced reflections the
+// screen-space ones.
 clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	q := q
 	clamp_enum :: proc(value: $T, fallback: T) -> T {
@@ -404,7 +417,7 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	q.ao.technique = clamp_enum(q.ao.technique, .Off)
 	q.ao.level = clamp_enum(q.ao.level, .High)
 	q.gi.technique = clamp_enum(q.gi.technique, .Off)
-	if q.gi.technique == .Split_Cascades && !caps.ray_query {
+	if gi_traces_world(q.gi.technique) && !caps.ray_query {
 		q.gi.technique = .Screen_Cascades
 	}
 	q.gi.level = clamp_enum(q.gi.level, .High)

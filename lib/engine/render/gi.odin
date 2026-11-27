@@ -11,8 +11,8 @@ import "cinnabar:core/gpu"
 // specular light from them into history textures, which the forward pass reads in place of the ambient light. After
 // the world pass, the scene is kept, without its pre-exposure, for the next frame's rays. With Split_Cascades, the world
 // probes (gi_probes.odin) give the light beyond the screen and beyond the last cascade in the ambient sky's place, and
-// the split cascades (gi_split.odin) take the screen cascades' place. With Voxel_Cones, the voxel cones (gi_voxel.odin)
-// take it.
+// the split cascades (gi_split.odin) take the screen cascades' place. With Restir, the world probes run, and ReSTIR GI
+// (gi_restir.odin) takes the screen cascades' place. With Voxel_Cones, the voxel cones (gi_voxel.odin) take it.
 
 // The engine's global illumination shaders, by their .meta files.
 GI_TRACE_SHADER :: #load("../content/shaders/gi_trace.hlsl.meta", string)
@@ -54,10 +54,11 @@ GI_PARAMS := [Quality_Level]Gi_Params {
 Gi_Settings :: struct {
 	// Without it, the indirect light is the Environment's ambient light.
 	off:       bool,
-	// Split_Cascades adds the world probes and the split cascades, and Voxel_Cones the voxel cones.
+	// Split_Cascades adds the world probes and the split cascades, Restir the world probes and ReSTIR GI, and
+	// Voxel_Cones the voxel cones.
 	technique: Gi_Technique,
-	// The cascades' GI_PARAMS, the world probes' GI_PROBE_PARAMS, the split cascades' GI_SPLIT_PARAMS and the voxel
-	// cones' GI_VOXEL_PARAMS.
+	// The cascades' GI_PARAMS, the world probes' GI_PROBE_PARAMS, the split cascades' GI_SPLIT_PARAMS, ReSTIR GI's
+	// GI_RESTIR_PARAMS and the voxel cones' GI_VOXEL_PARAMS.
 	level:     Quality_Level,
 }
 
@@ -71,17 +72,19 @@ Gi_Passes :: struct {
 	probes:   Gi_Probes,
 	emitters: Gi_Emitters,
 	split:    Gi_Split,
+	restir:   Gi_Restir,
 	voxel:    Gi_Voxel,
 }
 
 // Gi_State is one view's global illumination between frames, in View_State: the screen cascades' frame count, and the
 // storage and the cursors of the world probes, the split cascades and the voxel cones, each made for the view's own
-// level.
+// level, and ReSTIR GI's frame count, whose reservoirs the graph's history cache keeps.
 Gi_State :: struct {
 	// Counts the frames, for the noise.
 	frame:  u32,
 	probes: Gi_Probe_State,
 	split:  Gi_Split_State,
+	restir: Gi_Restir_State,
 	voxel:  Gi_Voxel_State,
 }
 
@@ -167,6 +170,8 @@ Gi_Frame :: struct {
 	// The split cascades' probes, or the voxel cones' voxels, as the Gi_Probes debug view shows them, which their gather
 	// draws when the view is on.
 	probe_view: Texture,
+	// ReSTIR GI, once its passes are added, or nil.
+	restir:     ^Gi_Restir_Frame,
 	// The voxel cones, once begin_gi has placed their levels, or nil. add_gi_passes makes it nil when they gave way to
 	// the screen cascades, so from then on it is whether they run this frame.
 	voxel:      ^Gi_Voxel_Frame,
@@ -187,6 +192,7 @@ gi_init :: proc(gi: ^Gi_Passes) {
 	gi_probes_init(&gi.probes)
 	gi_emitters_init(&gi.emitters)
 	gi_split_init(&gi.split)
+	gi_restir_init(&gi.restir)
 	gi_voxel_init(&gi.voxel)
 }
 
@@ -197,6 +203,7 @@ gi_destroy :: proc(gi: ^Gi_Passes, platform: ^core.Platform_API) {
 	gi_probes_destroy(&gi.probes, platform)
 	gi_emitters_destroy(&gi.emitters, platform)
 	gi_split_destroy(&gi.split, platform)
+	gi_restir_destroy(&gi.restir, platform)
 	gi_voxel_destroy(&gi.voxel, platform)
 }
 
@@ -211,6 +218,7 @@ sync_gi_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_gi_probe_pipelines(r, force)
 	sync_gi_emitter_pipelines(r, force)
 	sync_gi_split_pipelines(r, force)
+	sync_gi_restir_pipelines(r, force)
 	sync_gi_voxel_pipelines(r, force)
 }
 
@@ -239,7 +247,7 @@ gi_fit :: proc(size: [2]u32, params: Gi_Params) -> Gi_Params {
 }
 
 // begin_gi decides whether the frame has global illumination, before the scene's constants are written, which say so.
-// With Split_Cascades and the probes' pipelines, it requests the ray scene, which the probes trace. With Voxel_Cones,
+// With Split_Cascades or Restir and the probes' pipelines, it requests the ray scene, which the probes trace. With Voxel_Cones,
 // it places the voxel cones' levels, whose voxelization the scene's views draw.
 @(private)
 begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
@@ -268,7 +276,7 @@ begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 	}
 	state.frame += 1
 	gf.settings = settings
-	if settings.technique == .Split_Cascades && gi_probes_ready(r) {
+	if gi_traces_world(settings.technique) && gi_probes_ready(r) {
 		request_ray_scene(f)
 	}
 	gf.voxel = begin_gi_voxels(f, settings)
@@ -298,6 +306,11 @@ begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 	f.gi = gf
 }
 
+// gi_traces_world is whether a technique traces the ray scene with the world probes: the split cascades and ReSTIR GI.
+gi_traces_world :: proc(technique: Gi_Technique) -> bool {
+	return technique == .Split_Cascades || technique == .Restir
+}
+
 // add_gi_world_probes updates the world probes after the prepass, before the cascades, which read them.
 @(private)
 add_gi_world_probes :: proc(f: ^Frame) {
@@ -315,7 +328,8 @@ add_gi_world_probes :: proc(f: ^Frame) {
 
 // add_gi_passes adds the cascades' trace, their merges and the gather after the prepass, on the compute queue, and
 // sets Frame.gi_diffuse and Frame.gi_specular, which the forward pass reads. With the world probes, each reads them,
-// and the split cascades take their place when they can.
+// and the split cascades or ReSTIR GI, whichever the technique is, take their place when they can. ReSTIR GI gives way
+// to the screen cascades, not to the split cascades, whose storage would stay until the view's size changes.
 @(private)
 add_gi_passes :: proc(f: ^Frame) {
 	gf := f.gi
@@ -327,8 +341,17 @@ add_gi_passes :: proc(f: ^Frame) {
 	// Last frame's projection is known once the scene's constants are written.
 	gf.constants.previous =
 		f.previous_view_projection * linalg.matrix4_translate_f32(f.camera_motion)
-	// The voxel cones, or with the world probes the split cascades, take the screen cascades' place.
-	if gf.settings.technique == .Voxel_Cones {
+	// A technique that the frame does not want forgets that it ran, so it does not warn when it is wanted again.
+	if gf.settings.technique != .Split_Cascades {
+		note_split_fallback(f, false)
+	}
+	if gf.settings.technique != .Restir {
+		note_restir_fallback(f, false)
+	}
+	// The voxel cones, or with the world probes the split cascades or ReSTIR GI, take the screen cascades' place.
+	switch gf.settings.technique {
+	case .Off, .Screen_Cascades:
+	case .Voxel_Cones:
 		voxels := add_gi_voxel_passes(f)
 		note_voxel_fallback(f, voxels)
 		if voxels {
@@ -336,12 +359,19 @@ add_gi_passes :: proc(f: ^Frame) {
 		}
 		// The frame takes the screen cascades, so a capture takes no voxel cones either.
 		gf.voxel = nil
-	}
-	split := add_gi_split_passes(f)
-	note_split_fallback(f, split)
-	if split {
-		f.gi_diffuse, f.gi_specular = gf.diffuse.current, gf.specular.current
-		return
+	case .Split_Cascades:
+		split := add_gi_split_passes(f)
+		note_split_fallback(f, split)
+		if split {
+			f.gi_diffuse, f.gi_specular = gf.diffuse.current, gf.specular.current
+			return
+		}
+	case .Restir:
+		restir := add_gi_restir_passes(f)
+		note_restir_fallback(f, restir)
+		if restir {
+			return
+		}
 	}
 	gf.cascades = create_texture(
 		g,

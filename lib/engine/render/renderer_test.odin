@@ -189,6 +189,12 @@ enable_pipelines :: proc(r: ^Renderer) {
 		&r.gi.split.deposit,
 		&r.gi.split.merge,
 		&r.gi.split.gather,
+		// ReSTIR GI, which a quality may choose in the split cascades' place.
+		&r.gi.restir.trace,
+		&r.gi.restir.temporal,
+		&r.gi.restir.spatial,
+		&r.gi.restir.resolve,
+		&r.gi.restir.filter,
 		// The voxel cones, which a quality may choose in the cascades' place.
 		&r.gi.voxel.clear,
 		&r.gi.voxel.inject,

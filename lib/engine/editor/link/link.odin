@@ -760,13 +760,14 @@ Viewport_Aa :: enum u8 {
 }
 
 // The viewport's global illumination, in place of the quality's. Game keeps the quality's; the others match
-// render.Gi_Technique. Split_Cascades needs Ray_Query; without it, the viewport draws the screen cascades.
+// render.Gi_Technique. Split_Cascades and Restir need Ray_Query; without it, the viewport draws the screen cascades.
 Viewport_Gi :: enum u8 {
 	Game,
 	Off,
 	Screen_Cascades,
 	Split_Cascades,
 	Voxel_Cones,
+	Restir,
 }
 
 // The viewport's reflections, in place of the quality's. Game keeps the quality's; the others match

@@ -469,8 +469,9 @@ the_emitters_run_on_the_compute_queue_and_pass_validation :: proc(t: ^testing.T)
 			size     = {64, 32},
 		}
 		f.gi = new(Gi_Frame, platform.frame_allocator)
+		// The emitters run for each technique that lights hits with the world probes.
 		f.gi.settings = {
-			technique = .Split_Cascades,
+			technique = frame == 1 ? .Restir : .Split_Cascades,
 			level     = .Low,
 		}
 		sf := new(Scene_Frame, platform.frame_allocator)
