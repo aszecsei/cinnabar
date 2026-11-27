@@ -11,7 +11,7 @@ The recipes that matter most:
 | `just dev` | `build`, then runs the game in the host's own window, with the sample's `project.settings`. |
 | `just game-dll` | Builds only the game's DLL: `<game>.dll` from the project's `game/` folder, or the standard game's `standard.dll` for a project without one (see [The game package](../world/game-package.md#development)). A running host picks it up and hot-reloads it. |
 | `just watch` | Runs the cook daemon, which cooks content as it changes. A running game swaps the new blobs in place. |
-| `just edit` | Builds everything, including the editor, and opens the sample in it. The editor starts the host and the daemon itself. |
+| `just edit` | Builds everything, including the editor, and opens the sample in it, on `main.scene` or on a scene that it names, as `just edit reference_room`. The editor starts the host and the daemon itself. |
 | `just release` | Cooks the `release` configuration and builds the statically linked `<game>.exe` into `build/release`, with its content and settings beside it. The executable has no console and logs to a file (see [The game package](../world/game-package.md#releases)). |
 | `just engine` | Builds everything that a project outside the repository builds and runs with: the host, the cooker, the standard game, the editor and `cinnabar.exe` (see [Getting started](getting-started.md#the-engine)). |
 | `just sdk` | `engine`, then writes the engine's package, `build/sdk/cinnabar-<version>/` and its zip (see [Releases of the engine](#releases-of-the-engine)). |
@@ -21,6 +21,7 @@ The recipes that matter most:
 | `just gpu-bench` | Times the creation and destruction of thousands of resources on the D3D12 device. It needs a GPU, so `just test` leaves it out (see [GPU: Memory](../gpu/resources-and-pipelines.md#memory)). |
 | `just check`, `vet`, `lint`, `fmt` | Type checks and lints every package, and formats the source. |
 | `just script-types`, `link-schema`, `ltc-fit`, `stbn` | Regenerate derived files: the Luau definition file, the links' JSON schemas, the area lights' tables, and the blue noise of the ambient occlusion and the screen-space reflections. |
+| `just reference` | With the editor open on a reference scene (`just edit reference_room`), compares its Game view with the path traced reference in linear light (see [Rendering: Reference scenes](../rendering/reference-scenes.md#comparing)). |
 | `just screenshot`, `just gif` | With the editor open, write a screenshot or a GIF of its viewport, with a JSON sidecar, into `build/captures` and print the files; `just screenshot --view depth` adds a debug view (see [Editor: Capture](../editor/capture.md#automation)). |
 
 The `VERSION` file is the engine's version. The justfile's variables are the single source of the other versions: the Agility SDK, DXC, the GPU backend collection, and the `LUAU_*` defines. A change there flows into the cache keys of the assets it affects, so the next cook rebuilds them.

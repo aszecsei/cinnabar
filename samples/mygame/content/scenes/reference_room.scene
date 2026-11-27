@@ -1,0 +1,61 @@
+# The reference room (see docs/rendering/reference-scenes.md): Blender's reference.blend, a closed box 4 m square and
+# 21.4 m long with walls 5.8 cm thick, lit only by a sun through a window of 2 m in its west wall, under a black sky. The
+# sun is level, so it lights a patch of the blue end wall and the east wall's corner, and everything else is its bounced
+# light. Cycles' render of it from the camera here, with the same lens and no depth of field, is
+# samples/mygame/reference/room/reference.png; tools/refdiff compares the Game view's screenshot with it. Blender's +z is
+# this scene's +y, and its +y this scene's -z, as the glTF exporter and the cooker's mirror of x leave it. Positions are
+# raw World_Position values in units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
+scene 4
+
+entity 7ef0000000000001
+name = "Camera"
+component 1 Transform
+	position = [0, 0, 335544320]
+	rotation = [0, 1, 0, 0]
+	scale = [1, 1, 1]
+component 32 Camera
+	vertical_fov = 0.2495028
+	near = 0.1
+
+entity 7ef0000000000002
+name = "Global Volume"
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	background = [0, 0, 0]
+	sky = [0, 0, 0]
+	ground = [0, 0, 0]
+	ambient_intensity = 0
+component 44 Exposure
+	mode = Manual
+	exposure = 2
+component 45 Tone_Mapping
+	tone_mapper = AgX
+
+entity 7ef0000000000003
+name = "Sun"
+component 1 Transform
+	position = [73589056, 0, 189135440]
+	rotation = [0, -0.8297303, 0, 0.5581645]
+	scale = [1, 1, 1]
+component 34 Directional_Light
+	color = [1, 1, 1]
+	intensity = 1
+	cast_shadows = true
+	angular_diameter = 0.526
+
+entity 7ef0000000000004
+name = "Room"
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $89c604aed22aa8ac285313810c6d4365
+	materials.0 = $fe81c4a52592438caefcdf5191027570
+	materials.1 = $1876322a887e443397a4082667378a91
+	cast_shadows = true

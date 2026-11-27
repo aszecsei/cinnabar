@@ -111,7 +111,7 @@ release_content := release_dir + "/content"
 script_types := obj_dir + "/script-types/cinnabar.d.luau"
 # check, vet and lint take the standard game's package as the release entry point's project collection.
 check_collections := collections + " -collection:project=lib/engine/game/standard"
-packages := "lib/core lib/core/layout lib/core/math lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/physics/conformance lib/core/audio lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/opus lib/core/lz4 lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/audio/dll lib/core/audio/conformance lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/wire/servetest lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/streaming lib/engine/volume lib/engine/cut lib/engine/random lib/engine/nav lib/engine/ai lib/engine/ai/behavior_tree lib/engine/ai/utility lib/engine/ai/goap lib/engine/ai/goap/search lib/engine/ai/htn lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/cutscene lib/engine/camera lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/save lib/engine/editor lib/engine/editor/link lib/engine/game lib/engine/game/standard/game lib/engine/game/runtime src/host tools/viewer tools/cook tools/cinnabar tools/ltc_fit tools/cloud_scatter tools/stbn tools/editorctl samples/mygame/game"
+packages := "lib/core lib/core/layout lib/core/math lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/physics/conformance lib/core/audio lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/opus lib/core/lz4 lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/audio/dll lib/core/audio/conformance lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/wire/servetest lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/streaming lib/engine/volume lib/engine/cut lib/engine/random lib/engine/nav lib/engine/ai lib/engine/ai/behavior_tree lib/engine/ai/utility lib/engine/ai/goap lib/engine/ai/goap/search lib/engine/ai/htn lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/cutscene lib/engine/camera lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/save lib/engine/editor lib/engine/editor/link lib/engine/game lib/engine/game/standard/game lib/engine/game/runtime src/host tools/viewer tools/cook tools/cinnabar tools/ltc_fit tools/cloud_scatter tools/stbn tools/editorctl tools/refdiff samples/mygame/game"
 
 # =================================
 # Help
@@ -696,6 +696,36 @@ flickerstat:
     mkdir -p "{{tools_dir}}"
     odin build tools/flickerstat -collection:cinnabar=lib -out:"{{tools_dir}}/flickerstat.exe" -o:speed
 
+# Build refdiff, which compares a screenshot with a path traced reference in linear light (see
+# docs/rendering/reference-scenes.md)
+refdiff:
+    mkdir -p "{{tools_dir}}"
+    odin build tools/refdiff -collection:cinnabar=lib -out:"{{tools_dir}}/refdiff.exe" -o:speed
+
+# Compare the running editor's Game view of a reference scene with its path traced reference: open it with
+# just edit reference_<name> first (see docs/rendering/reference-scenes.md). It sets the Game view to the reference's
+# size, with no tone mapping, bloom or post effects, at a quality preset, waits for the light to settle, takes
+# screenshots into build/captures/reference/<name>, and compares their mean. Extra arguments go to refdiff, such as
+# --probe 900,360.
+[script]
+reference name="room" preset="Ultra" settle="20" shots="8" *args: editorctl refdiff
+    set -euo pipefail
+    ctl="./{{tools_dir}}/editorctl.exe"
+    ref="samples/{{game}}/reference/{{name}}/reference.png"
+    out="build/captures/reference/{{name}}"
+    mkdir -p "$out"
+    rm -f "$out"/shot-*.png "$out"/shot-*.json
+    "$ctl" viewport --viewport 4 --set shown=true --set size=1280x720 --set qualityPreset={{preset}} \
+        --set noToneMapping=true --set noBloom=true --set noPostEffects=true > /dev/null
+    sleep {{settle}}
+    shots=()
+    for i in $(seq -w 1 {{shots}}); do
+        "$ctl" screenshot --viewport 4 --out "$(pwd -W 2>/dev/null || pwd)/$out/shot-$i.png" > /dev/null
+        shots+=("$out/shot-$i.png")
+        sleep 0.25
+    done
+    "./{{tools_dir}}/refdiff.exe" "$ref" "${shots[@]}" --out "$out/{{preset}}" {{args}}
+
 # Write a screenshot of the running editor's viewport, with a JSON sidecar, and print the files: just screenshot --view depth
 screenshot *args: editorctl
     "./{{tools_dir}}/editorctl.exe" screenshot {{args}}
@@ -745,9 +775,9 @@ link-schema: host cook
 editor: link-schema
     dotnet build src/editor -nologo -v:quiet
 
-# Build everything and run the game in the editor
-edit: build editor
-    "./{{obj_dir}}/dotnet/bin/Cinnabar.Editor/debug/editor.exe" --host "{{dev_dir}}/host.exe" --game "{{dev_dir}}/{{game_dll_name}}.dll" --scene "{{content_root}}/scenes/main.scene" \
+# Build everything and run the game in the editor, on a scene of the content's scenes: just edit reference_room
+edit scene="main": build editor
+    "./{{obj_dir}}/dotnet/bin/Cinnabar.Editor/debug/editor.exe" --host "{{dev_dir}}/host.exe" --game "{{dev_dir}}/{{game_dll_name}}.dll" --scene "{{content_root}}/scenes/{{scene}}.scene" \
         --cook "{{tools_dir}}/cook.exe" --cache "{{cache_dir}}" --definitions "{{script_types}}" {{shader_tools}} {{roots}} \
         --project "{{project_dir}}/project.settings"
 
@@ -840,7 +870,7 @@ intel-report: cook
 
 # The cooker's tests compile shaders, so they need DXC.
 test: luau jolt opus lz4 vorbis audio-plugin compressonator meshoptimizer lightusd msdfgen recast link-schema install-dxc
-    for p in lib/core lib/core/testlog lib/core/layout lib/core/math lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/lz4 lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/streaming lib/engine/volume lib/engine/cut lib/engine/random lib/engine/nav lib/engine/ai lib/engine/ai/behavior_tree lib/engine/ai/utility lib/engine/ai/goap lib/engine/ai/htn lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/cutscene lib/engine/camera lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/save lib/engine/editor lib/engine/editor/link lib/engine/game src/host tools/cook tools/cinnabar tools/ltc_fit tools/cloud_scatter tools/stbn tools/flickerstat; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" -define:OPUS_VERSION="{{opus_version}}" -define:LZ4_VERSION="{{lz4_version}}" -define:VORBIS_VERSION="{{vorbis_version}}" -define:MSDFGEN_VERSION="{{msdfgen_version}}" -define:RECAST_VERSION="{{recast_version}}" -define:DXC_VERSION="{{dxc_version}}" || exit 1; done
+    for p in lib/core lib/core/testlog lib/core/layout lib/core/math lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/lz4 lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/streaming lib/engine/volume lib/engine/cut lib/engine/random lib/engine/nav lib/engine/ai lib/engine/ai/behavior_tree lib/engine/ai/utility lib/engine/ai/goap lib/engine/ai/htn lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/cutscene lib/engine/camera lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/save lib/engine/editor lib/engine/editor/link lib/engine/game src/host tools/cook tools/cinnabar tools/ltc_fit tools/cloud_scatter tools/stbn tools/flickerstat tools/refdiff; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" -define:OPUS_VERSION="{{opus_version}}" -define:LZ4_VERSION="{{lz4_version}}" -define:VORBIS_VERSION="{{vorbis_version}}" -define:MSDFGEN_VERSION="{{msdfgen_version}}" -define:RECAST_VERSION="{{recast_version}}" -define:DXC_VERSION="{{dxc_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting/embedding.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     # Release builds have no profiler, and everything must still run (see docs/core/profiling.md#builds).
