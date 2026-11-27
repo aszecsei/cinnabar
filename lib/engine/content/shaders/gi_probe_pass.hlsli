@@ -4,9 +4,15 @@
 #ifndef GI_PROBE_PASS_HLSLI
 #define GI_PROBE_PASS_HLSLI
 
-// Matches Probe_Push in lib/engine/render/gi_probes.odin. lights lists the punctual lights that the hits see, after the
-// directional ones. depth is this frame's, and lit the global illumination's lit scene of last frame, when lit_valid.
-// exposure is the frame's, which the update reads.
+#include "gi_translucency.hlsli"
+
+// Matches Probe_Push in lib/engine/render/gi_probes.odin. light_grid is the frame's light grid, whose punctual lights the
+// hits pick from after the directional ones, candidates the lights that each hit weighs, and seed that of its choices.
+// depth is this frame's, and lit the global illumination's lit scene of last frame, when lit_valid. exposure is the
+// frame's, which the update reads. translucency is what the rays and the hits' shadow rays pass through glass by, with
+// the GI's emitters' table and pool, which the update takes their light out of the hits' irradiance with.
+// emitter_samples are the GI's emitters' triangles, emitter_count of them, or 0 without them, which the hits sample.
+// transmit holds each ray's transmittance, the glass that it crossed, when transmit_valid is 1.
 struct Probe_Push {
 	uint shadow_atlas;
 	uint shadow_mask;
@@ -16,14 +22,21 @@ struct Probe_Push {
 	uint surfaces;
 	uint rays;
 	uint accel;
-	uint lights;
-	uint lights_offset;
-	uint light_count;
+	uint light_grid;
+	uint light_grid_offset;
+	uint candidates;
 	uint ray_count;
 	uint depth;
 	uint lit;
 	uint lit_valid;
 	uint exposure;
+	// A nested struct starts on 16 bytes in a constant buffer: this one is at 64.
+	Translucency translucency;
+	uint seed;
+	uint emitter_samples;
+	uint emitter_count;
+	uint transmit;
+	uint transmit_valid;
 };
 #define MATERIAL_PUSH Probe_Push
 // No shading model: the hits need only the light loop's lookups.

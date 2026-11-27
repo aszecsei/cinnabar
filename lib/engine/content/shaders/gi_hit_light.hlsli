@@ -1,6 +1,7 @@
 // The light that a traced ray's hit sends back along the ray (see docs/rendering/global-illumination.md#world-probes):
-// its emission, the direct light of every directional light and of a list of punctual lights, each shadowed by a ray
-// toward it, and the world probes' light at the hit, so light bounces once more each time, for its diffuse part and its
+// its emission, the direct light of every directional light, each shadowed by a ray toward it, and of one punctual
+// light that it picks from the frame's light grid by resampled importance sampling (gi_light_sampling.hlsli), shadowed
+// by one ray, and the world probes' light at the hit, so light bounces once more each time, for its diffuse part and its
 // specular part alike, or the sky's along the hit's reflection for the specular part where no probe counts. A ray that hit nothing sees
 // the ambient light. A back face of a one-sided surface is black, and its distance is negative, which tells the world
 // probes that a probe may be inside geometry. A pass includes it after material_lighting.hlsli, whose lights it reads,
@@ -10,40 +11,70 @@
 
 #include "ray_scene.hlsli"
 #include "gi_probes.hlsli"
+#include "gi_light_sampling.hlsli"
+#include "gi_translucency.hlsli"
 
 // Directional lights' shadow rays stop this far away, in meters.
 static const float HIT_SHADOW_DISTANCE = 1000;
+// A shadow ray that meets more translucent triangles than this counts as shadowed, so its loop is bounded.
+static const uint HIT_SHADOW_MAX_CANDIDATES = 8;
 
-// Hit_Lights are what a hit's light needs beyond the frame constants: the ray scene that the shadow rays trace, and the
-// punctual lights that the hits see, after the directional ones.
+// Hit_Lights are what a hit's light needs beyond the frame constants: the ray scene that the shadow rays trace, with
+// what they pass through glass by (gi_translucency.hlsli); the light grid in a buffer at an offset, whose punctual
+// lights the hits pick from after the directional ones, with the emitters' samples, which hold emitter_count triangles,
+// or none for 0, the lights that each hit weighs, and the seed of its choices.
 struct Hit_Lights {
 	uint accel;
-	uint lights;
-	uint lights_offset;
-	uint light_count;
+	Translucency translucency;
+	uint light_grid;
+	uint light_grid_offset;
+	uint candidates;
+	uint seed;
+	uint emitters;
+	uint emitter_count;
 };
 
-// hit_shadow is whether a light reaches a point relative to the camera, along a direction toward it, within a distance.
-float hit_shadow(uint accel, float3 p, float3 direction, float distance) {
+// hit_shadow is how much of a light reaches a point relative to the camera, along a direction toward it, within a
+// distance. Only an instance with a translucent submesh is not opaque, and the ray passes through that submesh's
+// triangles, each letting its transmittance through: a lantern's glass dims and tints its flame, and a window the sun.
+// The order in which the triangles come does not change the product.
+float3 hit_shadow(Hit_Lights lights, float3 p, float3 direction, float distance) {
 	RayDesc ray;
 	ray.Origin = p + frame.camera_offset.xyz;
 	ray.Direction = direction;
 	ray.TMin = 0;
 	ray.TMax = distance;
-	RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_FORCE_OPAQUE> query;
-	query.TraceRayInline(cn_accel(accel), 0, RAY_MASK_SHADOWS, ray);
-	query.Proceed();
-	return query.CommittedStatus() == COMMITTED_NOTHING ? 1 : 0;
+	RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
+	query.TraceRayInline(cn_accel(lights.accel), 0, RAY_MASK_SHADOWS, ray);
+	uint candidates = 0;
+	float3 through = 1;
+	while (query.Proceed()) {
+		if (query.CandidateType() != CANDIDATE_NON_OPAQUE_TRIANGLE) {
+			continue;
+		}
+		candidates++;
+		float3 transmittance;
+		if (candidates > HIT_SHADOW_MAX_CANDIDATES || !hit_translucent(lights.translucency, query.CandidateInstanceID(), query.CandidatePrimitiveIndex(), transmittance)) {
+			query.CommitNonOpaqueTriangleHit();
+			continue;
+		}
+		through *= transmittance;
+		// Glass that lets almost nothing through is opaque.
+		if (all(through < 1e-3)) {
+			query.CommitNonOpaqueTriangleHit();
+		}
+	}
+	return query.CommittedStatus() == COMMITTED_NOTHING ? through : 0;
 }
 
-float3 hit_direct(uint accel, Light_Record l, float3 p, float3 normal) {
+float3 hit_direct(Hit_Lights lights, Light_Record l, float3 p, float3 normal) {
 	Light light = light_falloff(l, p);
 	float cosine = saturate(dot(normal, light.direction));
 	if (cosine <= 0 || all(light.color <= 0)) {
 		return 0;
 	}
 	float distance = l.type == LIGHT_DIRECTIONAL ? HIT_SHADOW_DISTANCE : length(l.position - p);
-	return light.color * cosine * hit_shadow(accel, p, light.direction, distance);
+	return light.color * cosine * hit_shadow(lights, p, light.direction, distance);
 }
 
 // hit_light is the light that a ray's hit sends back along it, and the ray's distance: the hit's, negative for a back
@@ -70,12 +101,18 @@ float4 hit_light(Hit_Record hit, uint surfaces, uint ray, Hit_Lights lights, Pro
 		float3 origin = p + geometric * epsilon * 4;
 		float3 direct = 0;
 		for (uint i = 0; i < frame.directional_count; i++) {
-			direct += hit_direct(lights.accel, load_light(i), origin, normal);
+			direct += hit_direct(lights, load_light(i), origin, normal);
 		}
-		for (uint k = 0; k < lights.light_count; k++) {
-			uint index = cn_buffer(lights.lights).Load(lights.lights_offset + k * 4);
-			direct += hit_direct(lights.accel, load_light(index), origin, normal);
+		uint state = lowbias32(lights.seed ^ lowbias32(ray));
+		Hit_Choice choice = pick_hit_light(lights.light_grid, lights.light_grid_offset, lights.candidates, lights.emitters, lights.emitter_count, origin, normal, state);
+		float3 emitted = 0;
+		if (choice.weight > 0) {
+			float3 picked = choice.light * choice.weight * hit_shadow(lights, origin, choice.direction, choice.distance);
+			direct += picked;
+			emitted = choice.emitter ? picked : 0;
 		}
+		// The probes' light without the listed emitters', which the hit sampled itself.
+		grid.irradiance = grid.irradiance_hit;
 		float3 bounce;
 		bool probes = sample_probes(grid, p, normal, normal, false, bounce);
 		if (!probes) {
@@ -88,6 +125,8 @@ float4 hit_light(Hit_Record hit, uint surfaces, uint ray, Hit_Lights lights, Pro
 		float3 specular = hit_specular(s);
 		if (any(specular > 0)) {
 			light += specular * (probes ? bounce : frame_sky_specular(reflect(direction, normal), hit_roughness(s)));
+			// The emitters' light, which the probes' light leaves out, as a surrounding as bright would give.
+			light += specular * emitted / PI;
 		}
 	}
 	return float4(light, hit.t);

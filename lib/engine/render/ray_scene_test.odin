@@ -68,12 +68,24 @@ hit_entries_map_each_submeshs_primitives_to_its_block_and_bin :: proc(t: ^testin
 	table := Hit_Table {
 		instances = make([]Hit_Instance, 8, context.temp_allocator),
 		submeshes = make([dynamic]Hit_Submesh, context.temp_allocator),
+		keys      = make([dynamic]Hit_Entry_Key, context.temp_allocator),
 	}
 	// A slot before, so the records start past its.
 	append(&table.submeshes, Hit_Submesh{})
+	append(&table.keys, Hit_Entry_Key{})
 	surfaces := add_hit_entries(&table, 3, &mesh, items, pipelines, test_ready, nil)
 	testing.expect(t, surfaces, "the slot has opaque submeshes")
-	testing.expect_value(t, table.instances[3], Hit_Instance{mesh = 5, first = 1, count = 4})
+	testing.expect_value(
+		t,
+		table.instances[3],
+		Hit_Instance{mesh = 5, first = 1, count = 4, flags = HIT_INSTANCE_TRANSLUCENT},
+	)
+	// Its instance is not opaque, so the hits' shadow rays can pass through its translucent submesh.
+	testing.expect_value(
+		t,
+		hit_instance_flags(table.instances[3]),
+		gpu.Accel_Instance_Flags{.Force_Non_Opaque},
+	)
 	testing.expect_value(
 		t,
 		table.submeshes[1],
@@ -82,7 +94,13 @@ hit_entries_map_each_submeshs_primitives_to_its_block_and_bin :: proc(t: ^testin
 	testing.expect_value(
 		t,
 		table.submeshes[2],
-		Hit_Submesh{first_primitive = 10, primitive_count = 2, block = 32, bin = HIT_TRANSLUCENT},
+		// A translucent submesh keeps its material's bin below HIT_TRANSLUCENT, for the batches that shade it.
+		Hit_Submesh {
+			first_primitive = 10,
+			primitive_count = 2,
+			block = 32,
+			bin = HIT_TRANSLUCENT | 2,
+		},
 	)
 	testing.expect_value(
 		t,
@@ -96,8 +114,17 @@ hit_entries_map_each_submeshs_primitives_to_its_block_and_bin :: proc(t: ^testin
 	)
 	testing.expect(
 		t,
-		table.used[0] && table.used[1] && !table.used[2] && !table.used[3] && !table.used[4],
+		table.used[0] && table.used[1] && table.used[2] && !table.used[3] && !table.used[4],
 	)
+	// Each record has its key: the entity's submesh, its pipeline, and whether hit shading evaluates it.
+	testing.expect_value(t, len(table.keys), len(table.submeshes))
+	testing.expect_value(t, table.keys[1], Hit_Entry_Key{submesh = 0, pipeline = 0, shaded = true})
+	testing.expect_value(
+		t,
+		table.keys[2],
+		Hit_Entry_Key{submesh = 1, pipeline = 1, translucent = true},
+	)
+	testing.expect_value(t, table.keys[3], Hit_Entry_Key{submesh = 2, pipeline = 2})
 
 	// A slot of transparent submeshes only has no surface for rays to shade.
 	glass := Resident_Mesh {
@@ -111,7 +138,30 @@ hit_entries_map_each_submeshs_primitives_to_its_block_and_bin :: proc(t: ^testin
 		t,
 		!add_hit_entries(&table, 4, &glass, {{mesh = 6, bin = 1}}, pipelines, test_ready, nil),
 	)
-	testing.expect_value(t, table.instances[4], Hit_Instance{mesh = 6, first = 5, count = 1})
+	testing.expect_value(
+		t,
+		table.instances[4],
+		Hit_Instance{mesh = 6, first = 5, count = 1, flags = HIT_INSTANCE_TRANSLUCENT},
+	)
+
+	// A slot of opaque submeshes only is opaque, so the hardware commits its hits at once.
+	wall := Resident_Mesh {
+		submesh_count = 1,
+	}
+	wall.submeshes[0] = {
+		first_index = 0,
+		index_count = 3,
+	}
+	testing.expect(
+		t,
+		add_hit_entries(&table, 5, &wall, {{mesh = 7, bin = 0}}, pipelines, test_ready, nil),
+	)
+	testing.expect_value(t, table.instances[5].flags, 0)
+	testing.expect_value(
+		t,
+		hit_instance_flags(table.instances[5]),
+		gpu.Accel_Instance_Flags{.Force_Opaque},
+	)
 }
 
 // hit_blob is an opaque material blob whose variants are fake bytecode, with the hit pass's when hit.
@@ -598,4 +648,27 @@ hit_shading_bins_the_hits_and_dispatches_each_bin_indirectly :: proc(t: ^testing
 		free_all(platform.frame_allocator)
 	}
 	testing.expect(t, r.ray_scene.scratch[0].capacity >= int(rays))
+}
+
+// An instance's mask: the shadow rays see a shadow caster, hit shading an instance with a surface, and the GI's rays,
+// which pass through glass, an instance with a translucent submesh too, whether or not it casts shadows; an instance of
+// none is left out.
+@(test)
+an_instance_with_glass_is_in_the_translucent_mask :: proc(t: ^testing.T) {
+	glass := Hit_Instance {
+		flags = HIT_INSTANCE_TRANSLUCENT,
+	}
+	testing.expect_value(t, hit_instance_mask(false, false, glass), RAY_MASK_TRANSLUCENT)
+	testing.expect_value(
+		t,
+		hit_instance_mask(true, true, glass),
+		RAY_MASK_SHADOWS | RAY_MASK_SURFACES | RAY_MASK_TRANSLUCENT,
+	)
+	testing.expect_value(
+		t,
+		hit_instance_mask(true, true, {}),
+		RAY_MASK_SHADOWS | RAY_MASK_SURFACES,
+	)
+	testing.expect_value(t, hit_instance_mask(false, true, {}), RAY_MASK_SURFACES)
+	testing.expect_value(t, hit_instance_mask(false, false, {}), 0)
 }

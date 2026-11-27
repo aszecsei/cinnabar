@@ -60,5 +60,21 @@ void cs_hit(uint3 id : SV_DispatchThreadID) {
 	float3 specular = shade_indirect(s, p, white);
 #endif
 	float3 emission = shade_emission(s);
+#if MATERIAL_TRANSPARENT
+	// A translucent surface gives the light that passes through it in place of its emission: what alpha blending lets
+	// through, 1 - opacity, tinted toward its albedo by its opacity, or all of it for an additive one, which only adds
+	// its own light.
+	flags |= HIT_SURFACE_TRANSLUCENT;
+#if MATERIAL_ADDITIVE
+	emission = 1;
+#else
+	float opacity = saturate(shade_opacity(s));
+#if SHADING_NO_LIGHTING
+	emission = 1 - opacity;
+#else
+	emission = (1 - opacity) * lerp(1, saturate(albedo), opacity);
+#endif
+#endif
+#endif
 	store_hit_surface(ray, pack_hit_surface(tri.position, normal, tri.facing, albedo, specular, emission, shading_roughness(s), flags));
 }

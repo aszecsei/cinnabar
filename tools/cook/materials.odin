@@ -1444,8 +1444,8 @@ Material_Entry :: struct {
 // depth pass discards in a pixel shader; an opaque one's has none. The opaque passes of a material of meshes have the
 // mesh shader path's entries too, an amplification and a mesh shader each, and the impostor path's, which a
 // billboard has neither of (see docs/rendering/materials.md#permutations). A transparent or
-// additive material has no prepass, forward or depth pass, but the transparent passes; a Transparent one has moments
-// too, which a sorted one draws only in the overdraw debug view.
+// additive material has no prepass, forward or depth pass, but the transparent passes and the hit pass; a Transparent
+// one has moments too, which a sorted one draws only in the overdraw debug view.
 @(private = "file")
 material_entries :: proc(decl: ^Material_Decl) -> []Material_Entry {
 	entries := make([dynamic]Material_Entry, context.temp_allocator)
@@ -1463,6 +1463,11 @@ material_entries :: proc(decl: ^Material_Decl) -> []Material_Entry {
 				Material_Entry{.Moments, {.Vertex, "vs_" + SHADER_MODEL, "vs_forward"}},
 				Material_Entry{.Moments, {.Pixel, "ps_" + SHADER_MODEL, "ps_moments"}},
 			)
+		}
+		// The GI's emitters shade a translucent surface's hits for the light that passes through it (see
+		// docs/rendering/global-illumination.md#emitters).
+		if !decl.patches && !decl.ribbon {
+			append(&entries, Material_Entry{.Hit, {.Compute, "cs_" + SHADER_MODEL, "cs_hit"}})
 		}
 		return entries[:]
 	}

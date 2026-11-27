@@ -21,6 +21,8 @@ MAX_SPLIT_LEVELS :: 8
 MAX_SPLIT_CASCADES :: 4
 // A window's cells along each axis, at the first cascade.
 SPLIT_WINDOW :: 512
+// The rays' directions repeat after this many frames. Match RAY_CYCLE in gi_split_trace.hlsl.
+SPLIT_RAY_CYCLE :: 16
 SPLIT_GROUP :: 64
 SPLIT_SLOT_SIZE :: 16
 SPLIT_ENTRY_SIZE :: 8
@@ -174,29 +176,34 @@ Split_Grid :: struct {
 // Split_Push matches Split_Push in gi_split.hlsli.
 @(private = "file")
 Split_Push :: struct {
-	grid:        u32,
-	grid_offset: u32,
-	phase:       u32,
-	cascade:     u32,
-	slots:       u32,
-	deposits:    u32,
-	index:       u32,
-	lists:       u32,
-	counters:    u32,
-	arguments:   u32,
-	accum:       u32,
-	history:     u32,
-	merged:      u32,
-	atlas:       u32,
-	hits:        u32,
-	rays:        u32,
-	accel:       u32,
-	exposure:    u32,
-	view:        u32,
-	view_output: u32,
+	grid:         u32,
+	grid_offset:  u32,
+	phase:        u32,
+	cascade:      u32,
+	slots:        u32,
+	deposits:     u32,
+	index:        u32,
+	lists:        u32,
+	counters:     u32,
+	arguments:    u32,
+	accum:        u32,
+	history:      u32,
+	merged:       u32,
+	atlas:        u32,
+	hits:         u32,
+	rays:         u32,
+	accel:        u32,
+	exposure:     u32,
+	view:         u32,
+	view_output:  u32,
+	// What the trace passes through glass by, and each ray's transmittance.
+	translucency: Translucency,
+	transmit:     u32,
 }
 
 #assert(size_of(Split_Push) <= 128)
+// HLSL starts a nested struct of a constant buffer on 16 bytes.
+#assert(offset_of(Split_Push, translucency) % 16 == 0)
 
 // Split_Layout is where each cascade's slots, table entries and bins are in the buffers that hold every cascade's.
 Split_Layout :: struct {
@@ -238,6 +245,7 @@ Gi_Split :: struct {
 	hits:         gpu.Buffer,
 	surfaces:     gpu.Buffer,
 	rays:         gpu.Buffer,
+	transmit:     gpu.Buffer,
 	ray_capacity: int,
 }
 
@@ -292,6 +300,7 @@ Gi_Split_Frame :: struct {
 	hits:      Buffer,
 	surfaces:  Buffer,
 	rays:      Buffer,
+	transmit:  Buffer,
 }
 
 gi_split_init :: proc(s: ^Gi_Split) {
@@ -306,10 +315,10 @@ gi_split_destroy :: proc(s: ^Gi_Split, platform: ^core.Platform_API) {
 	for p in ([]^Shader_Pipeline{&s.table, &s.trace, &s.deposit, &s.merge, &s.gather}) {
 		destroy_shader_pipeline(p, platform)
 	}
-	for b in ([]gpu.Buffer{s.hits, s.surfaces, s.rays}) {
+	for b in ([]gpu.Buffer{s.hits, s.surfaces, s.rays, s.transmit}) {
 		platform.gpu_destroy_buffer(b)
 	}
-	s.hits, s.surfaces, s.rays, s.ray_capacity = {}, {}, {}, 0
+	s.hits, s.surfaces, s.rays, s.transmit, s.ray_capacity = {}, {}, {}, {}, 0
 }
 
 // gi_split_state_destroy frees a view's split cascades.
@@ -654,7 +663,7 @@ ensure_split_storage :: proc(
 	}
 	shared := &r.gi.split
 	if rays > shared.ray_capacity {
-		for b in ([]gpu.Buffer{shared.hits, shared.surfaces, shared.rays}) {
+		for b in ([]gpu.Buffer{shared.hits, shared.surfaces, shared.rays, shared.transmit}) {
 			platform.gpu_destroy_buffer(b)
 		}
 		shared.ray_capacity = max(rays, shared.ray_capacity * 2)
@@ -673,6 +682,10 @@ ensure_split_storage :: proc(
 		)
 		shared.rays = platform.gpu_create_buffer(
 			{size = capacity * 16, usage = {.Storage}, label = "gi split rays"},
+			nil,
+		)
+		shared.transmit = platform.gpu_create_buffer(
+			{size = capacity * 4, usage = {.Storage}, label = "gi split transmittance"},
 			nil,
 		)
 	}
@@ -721,6 +734,7 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	sf.atlas = import_texture(g, s.atlas, .Storage)
 	sf.hits = import_buffer(g, shared.hits)
 	sf.surfaces = import_buffer(g, shared.surfaces)
+	sf.transmit = import_buffer(g, shared.transmit)
 	sf.rays = import_buffer(g, shared.rays)
 	if f.debug_view == .Gi_Probes {
 		gf.probe_view = create_texture(
@@ -854,14 +868,20 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	read(g, p, f.depth)
 	read(g, p, f.normals)
 	read_accel(g, p, ray_scene_accel(f))
+	declare_translucency_reads(f, p)
 	write(g, p, sf.hits)
+	write(g, p, sf.transmit)
 	shaded := add_hit_shading(
 		f,
 		reservation,
-		{hits = sf.hits, surfaces = sf.surfaces, count = ray_count},
+		{hits = sf.hits, surfaces = sf.surfaces, count = ray_count, transmit = sf.transmit},
 		.Compute,
 	)
-	add_hit_light_passes(f, &pf.hit_light, "gi split", shaded, sf.rays)
+	// The split's rays repeat every SPLIT_RAY_CYCLE frames, so the lights that their hits pick repeat with them, and a
+	// still view's probes settle on fixed choices.
+	inputs := new_clone(pf.hit_light, f.renderer.platform.frame_allocator)
+	inputs.seed = s.frame % SPLIT_RAY_CYCLE
+	add_hit_light_passes(f, inputs, "gi split", shaded, sf.rays)
 	p = add_compute_pass(
 		g,
 		"gi split deposit",
@@ -1065,6 +1085,8 @@ run_split_pass :: proc(ctx: ^Pass_Context) {
 	}
 	if step.pass == .Trace {
 		push.accel = gpu.read_index(gpu_accel(g, ray_scene_accel(f)))
+		push.translucency = translucency_constants(f, g)
+		push.transmit = gpu.write_index(gpu_buffer(g, sf.transmit))
 	}
 	c := gi_constants(ctx, f)
 	pipeline := s.table.pipeline

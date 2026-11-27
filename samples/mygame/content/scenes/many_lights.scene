@@ -1,0 +1,774 @@
+# The many lights scene (see docs/rendering/global-illumination.md#world-probes): a low, dark hall of 64 point lights
+# on an 8 x 8 grid, each of its own color, between a floor, a ceiling and two long walls, under no sun. The hits of the
+# world probes and the split cascades pick one of the lights around them for each ray, so the light that each light
+# sends to the ceiling bounces down onto the floor around it, from every light, not only the brightest few. Positions are raw World_Position values in units of 2^-24 m. The editor writes this file;
+# see docs/editor/document-and-scenes.md#scenes.
+scene 4
+
+entity 7a1f000000000001
+name = "Camera"
+component 1 Transform
+	position = [-268435456, 50331648, -268435456]
+	rotation = [0.0794, 0.3794, -0.0328, 0.9211]
+	scale = [1, 1, 1]
+component 32 Camera
+behaviour 79650b8e784445cba714fef3fd88eec6
+
+entity 7a1f000000000002
+name = "Global Volume"
+component 1 Transform
+	position = [0, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	background = [0.004, 0.004, 0.006]
+
+entity 7a1f000000000003
+name = "Floor"
+component 1 Transform
+	position = [0, -838861, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [36, 0.1, 36]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 7a1f000000000004
+name = "Wall North"
+component 1 Transform
+	position = [0, 50331648, 301989888]
+	rotation = [0, 0, 0, 1]
+	scale = [36, 6, 0.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 7a1f000000000005
+name = "Wall South"
+component 1 Transform
+	position = [0, 50331648, -301989888]
+	rotation = [0, 0, 0, 1]
+	scale = [36, 6, 0.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 7a1f000000000100
+name = "Ceiling"
+component 1 Transform
+	position = [0, 60397977, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [36, 0.2, 36]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 7a1f000000000006
+name = "Light 1"
+component 1 Transform
+	position = [-234881024, 20132659, -234881024]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.400, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000007
+name = "Light 2"
+component 1 Transform
+	position = [-167772160, 20132659, -234881024]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 0.575, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000008
+name = "Light 3"
+component 1 Transform
+	position = [-100663296, 20132659, -234881024]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.750, 1.000, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000009
+name = "Light 4"
+component 1 Transform
+	position = [-33554432, 20132659, -234881024]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.400, 0.925]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000000a
+name = "Light 5"
+component 1 Transform
+	position = [33554432, 20132659, -234881024]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 1.000, 0.900]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000000b
+name = "Light 6"
+component 1 Transform
+	position = [100663296, 20132659, -234881024]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.725, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000000c
+name = "Light 7"
+component 1 Transform
+	position = [167772160, 20132659, -234881024]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.550, 0.400, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000000d
+name = "Light 8"
+component 1 Transform
+	position = [234881024, 20132659, -234881024]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.426, 1.000, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000000e
+name = "Light 9"
+component 1 Transform
+	position = [-234881024, 20132659, -167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.400, 0.601]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000000f
+name = "Light 10"
+component 1 Transform
+	position = [-167772160, 20132659, -167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 0.776, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000010
+name = "Light 11"
+component 1 Transform
+	position = [-100663296, 20132659, -167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.951, 1.000, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000011
+name = "Light 12"
+component 1 Transform
+	position = [-33554432, 20132659, -167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.874, 0.400, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000012
+name = "Light 13"
+component 1 Transform
+	position = [33554432, 20132659, -167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 1.000, 0.699]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000013
+name = "Light 14"
+component 1 Transform
+	position = [100663296, 20132659, -167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.524, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000014
+name = "Light 15"
+component 1 Transform
+	position = [167772160, 20132659, -167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 0.451, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000015
+name = "Light 16"
+component 1 Transform
+	position = [234881024, 20132659, -167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.626, 1.000, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000016
+name = "Light 17"
+component 1 Transform
+	position = [-234881024, 20132659, -100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.400, 0.801]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000017
+name = "Light 18"
+component 1 Transform
+	position = [-167772160, 20132659, -100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 0.976, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000018
+name = "Light 19"
+component 1 Transform
+	position = [-100663296, 20132659, -100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.849, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000019
+name = "Light 20"
+component 1 Transform
+	position = [-33554432, 20132659, -100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.674, 0.400, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000001a
+name = "Light 21"
+component 1 Transform
+	position = [33554432, 20132659, -100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 1.000, 0.498]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000001b
+name = "Light 22"
+component 1 Transform
+	position = [100663296, 20132659, -100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.400, 0.477]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000001c
+name = "Light 23"
+component 1 Transform
+	position = [167772160, 20132659, -100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 0.652, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000001d
+name = "Light 24"
+component 1 Transform
+	position = [234881024, 20132659, -100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.827, 1.000, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000001e
+name = "Light 25"
+component 1 Transform
+	position = [-234881024, 20132659, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.998, 0.400, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000001f
+name = "Light 26"
+component 1 Transform
+	position = [-167772160, 20132659, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 1.000, 0.823]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000020
+name = "Light 27"
+component 1 Transform
+	position = [-100663296, 20132659, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.648, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000021
+name = "Light 28"
+component 1 Transform
+	position = [-33554432, 20132659, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.473, 0.400, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000022
+name = "Light 29"
+component 1 Transform
+	position = [33554432, 20132659, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.502, 1.000, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000023
+name = "Light 30"
+component 1 Transform
+	position = [100663296, 20132659, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.400, 0.677]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000024
+name = "Light 31"
+component 1 Transform
+	position = [167772160, 20132659, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 0.852, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000025
+name = "Light 32"
+component 1 Transform
+	position = [234881024, 20132659, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.973, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000026
+name = "Light 33"
+component 1 Transform
+	position = [-234881024, 20132659, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.798, 0.400, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000027
+name = "Light 34"
+component 1 Transform
+	position = [-167772160, 20132659, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 1.000, 0.622]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000028
+name = "Light 35"
+component 1 Transform
+	position = [-100663296, 20132659, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.447, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000029
+name = "Light 36"
+component 1 Transform
+	position = [-33554432, 20132659, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 0.528, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000002a
+name = "Light 37"
+component 1 Transform
+	position = [33554432, 20132659, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.703, 1.000, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000002b
+name = "Light 38"
+component 1 Transform
+	position = [100663296, 20132659, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.400, 0.878]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000002c
+name = "Light 39"
+component 1 Transform
+	position = [167772160, 20132659, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 1.000, 0.947]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000002d
+name = "Light 40"
+component 1 Transform
+	position = [234881024, 20132659, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.772, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000002e
+name = "Light 41"
+component 1 Transform
+	position = [-234881024, 20132659, 100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.597, 0.400, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000002f
+name = "Light 42"
+component 1 Transform
+	position = [-167772160, 20132659, 100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 1.000, 0.422]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000030
+name = "Light 43"
+component 1 Transform
+	position = [-100663296, 20132659, 100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.400, 0.553]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000031
+name = "Light 44"
+component 1 Transform
+	position = [-33554432, 20132659, 100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 0.728, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000032
+name = "Light 45"
+component 1 Transform
+	position = [33554432, 20132659, 100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.903, 1.000, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000033
+name = "Light 46"
+component 1 Transform
+	position = [100663296, 20132659, 100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.922, 0.400, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000034
+name = "Light 47"
+component 1 Transform
+	position = [167772160, 20132659, 100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 1.000, 0.746]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000035
+name = "Light 48"
+component 1 Transform
+	position = [234881024, 20132659, 100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.571, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000036
+name = "Light 49"
+component 1 Transform
+	position = [-234881024, 20132659, 167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 0.404, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000037
+name = "Light 50"
+component 1 Transform
+	position = [-167772160, 20132659, 167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.579, 1.000, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000038
+name = "Light 51"
+component 1 Transform
+	position = [-100663296, 20132659, 167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.400, 0.754]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000039
+name = "Light 52"
+component 1 Transform
+	position = [-33554432, 20132659, 167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 0.929, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000003a
+name = "Light 53"
+component 1 Transform
+	position = [33554432, 20132659, 167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.896, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000003b
+name = "Light 54"
+component 1 Transform
+	position = [100663296, 20132659, 167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.721, 0.400, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000003c
+name = "Light 55"
+component 1 Transform
+	position = [167772160, 20132659, 167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 1.000, 0.546]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000003d
+name = "Light 56"
+component 1 Transform
+	position = [234881024, 20132659, 167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.400, 0.429]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000003e
+name = "Light 57"
+component 1 Transform
+	position = [-234881024, 20132659, 234881024]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 0.604, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f00000000003f
+name = "Light 58"
+component 1 Transform
+	position = [-167772160, 20132659, 234881024]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.779, 1.000, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000040
+name = "Light 59"
+component 1 Transform
+	position = [-100663296, 20132659, 234881024]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.400, 0.955]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000041
+name = "Light 60"
+component 1 Transform
+	position = [-33554432, 20132659, 234881024]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.400, 1.000, 0.870]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000042
+name = "Light 61"
+component 1 Transform
+	position = [33554432, 20132659, 234881024]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.695, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000043
+name = "Light 62"
+component 1 Transform
+	position = [100663296, 20132659, 234881024]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.520, 0.400, 1.000]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000044
+name = "Light 63"
+component 1 Transform
+	position = [167772160, 20132659, 234881024]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.455, 1.000, 0.400]
+	intensity = 4
+	range = 4
+
+entity 7a1f000000000045
+name = "Light 64"
+component 1 Transform
+	position = [234881024, 20132659, 234881024]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1.000, 0.400, 0.630]
+	intensity = 4
+	range = 4

@@ -28,6 +28,8 @@ Traced_Reflections :: struct {
 	hits:     gpu.Buffer,
 	surfaces: gpu.Buffer,
 	rays:     gpu.Buffer,
+	// Each ray's transmittance, the glass that it crossed.
+	transmit: gpu.Buffer,
 	capacity: int,
 }
 
@@ -38,7 +40,8 @@ Rtr_Trace_Push :: struct {
 	accel:         u32,
 	hits:          u32,
 	ray_count:     u32,
-	padding:       u32,
+	transmit:      u32,
+	translucency:  Translucency,
 }
 
 // Rtr_Light_Push matches Rtr_Light_Push in rtr_light.hlsl.
@@ -55,9 +58,12 @@ Rtr_Light_Push :: struct {
 	height:       u32,
 	shaded:       u32,
 	radiance_max: f32,
+	transmit:     u32,
 }
 
 #assert(size_of(Rtr_Trace_Push) <= 128 && size_of(Rtr_Light_Push) <= 128)
+// HLSL starts a nested struct of a constant buffer on 16 bytes.
+#assert(offset_of(Rtr_Trace_Push, translucency) % 16 == 0)
 
 // Rtr_Frame is one frame's traced reflections, in frame memory: the rays' buffers, a ray for each trace texel, and what
 // lights their hits.
@@ -66,6 +72,7 @@ Rtr_Frame :: struct {
 	hits:      Buffer,
 	surfaces:  Buffer,
 	rays:      Buffer,
+	transmit:  Buffer,
 	ray_count: u32,
 	inputs:    Hit_Light_Inputs,
 	// The hits as hit shading shaded them, or nil when the frame had no turn at it: then a ray that hit has no weight.
@@ -80,7 +87,7 @@ traced_reflections_init :: proc(t: ^Traced_Reflections) {
 traced_reflections_destroy :: proc(t: ^Traced_Reflections, platform: ^core.Platform_API) {
 	destroy_shader_pipeline(&t.trace, platform)
 	destroy_shader_pipeline(&t.light, platform)
-	for b in ([]gpu.Buffer{t.hits, t.surfaces, t.rays}) {
+	for b in ([]gpu.Buffer{t.hits, t.surfaces, t.rays, t.transmit}) {
 		platform.gpu_destroy_buffer(b)
 	}
 }
@@ -127,7 +134,7 @@ ensure_rtr_storage :: proc(r: ^Renderer, count: int) {
 		return
 	}
 	platform := r.platform
-	for b in ([]gpu.Buffer{t.hits, t.surfaces, t.rays}) {
+	for b in ([]gpu.Buffer{t.hits, t.surfaces, t.rays, t.transmit}) {
 		platform.gpu_destroy_buffer(b)
 	}
 	t.capacity = max(count, t.capacity * 2)
@@ -148,6 +155,10 @@ ensure_rtr_storage :: proc(r: ^Renderer, count: int) {
 		{size = capacity * RTR_LIGHT_STRIDE, usage = {.Storage}, label = "reflections light"},
 		nil,
 	)
+	t.transmit = platform.gpu_create_buffer(
+		{size = capacity * 4, usage = {.Storage}, label = "reflections transmittance"},
+		nil,
+	)
 }
 
 // add_traced_reflection_passes adds the traced reflections' trace, with the depth pyramid when it marches the screen
@@ -161,7 +172,7 @@ add_traced_reflection_passes :: proc(f: ^Frame) -> bool {
 	if !hit_shading_ready(f) {
 		return false
 	}
-	inputs, ok := hit_light_inputs(f, sf.params.distance, sf.lit)
+	inputs, ok := hit_light_inputs(f, sf.params.candidates, u32(f.state.frames), sf.lit)
 	if !ok {
 		return false
 	}
@@ -175,6 +186,7 @@ add_traced_reflection_passes :: proc(f: ^Frame) -> bool {
 	tf.hits = import_buffer(g, r.rtr.hits)
 	tf.surfaces = import_buffer(g, r.rtr.surfaces)
 	tf.rays = import_buffer(g, r.rtr.rays)
+	tf.transmit = import_buffer(g, r.rtr.transmit)
 	if sf.constants.steps > 0 {
 		add_ssr_depth(f)
 	}
@@ -190,7 +202,9 @@ add_traced_reflection_passes :: proc(f: ^Frame) -> bool {
 	read(g, p, sf.lit.previous)
 	read(g, p, f.exposure)
 	read_accel(g, p, ray_scene_accel(f))
+	declare_translucency_reads(f, p)
 	write(g, p, tf.hits)
+	write(g, p, tf.transmit)
 	write(g, p, sf.rays[0])
 	write(g, p, sf.radiance[0])
 
@@ -198,7 +212,7 @@ add_traced_reflection_passes :: proc(f: ^Frame) -> bool {
 		shaded := add_hit_shading(
 			f,
 			reservation,
-			{hits = tf.hits, surfaces = tf.surfaces, count = tf.ray_count},
+			{hits = tf.hits, surfaces = tf.surfaces, count = tf.ray_count, transmit = tf.transmit},
 			.Compute,
 			"reflections",
 		)
@@ -208,6 +222,7 @@ add_traced_reflection_passes :: proc(f: ^Frame) -> bool {
 
 	p = add_compute_pass(g, "reflections ray light", run_rtr_light, f, queue = .Compute)
 	declare_cloud_shadow(f, p)
+	read(g, p, tf.transmit)
 	read(g, p, tf.hits)
 	if tf.shaded != nil {
 		read(g, p, tf.rays)
@@ -241,6 +256,8 @@ run_rtr_trace :: proc(ctx: ^Pass_Context) {
 		accel         = gpu.read_index(gpu_accel(g, ray_scene_accel(f))),
 		hits          = gpu.write_index(gpu_buffer(g, tf.hits)),
 		ray_count     = tf.ray_count,
+		transmit      = gpu.write_index(gpu_buffer(g, tf.transmit)),
+		translucency  = translucency_constants(f, g),
 	}
 	upload, ok := r.platform.gpu_upload(size_of(Ssr_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {
@@ -269,6 +286,7 @@ run_rtr_light :: proc(ctx: ^Pass_Context) {
 		height       = sf.trace_size.y,
 		shaded       = u32(tf.shaded != nil),
 		radiance_max = sf.params.radiance_max,
+		transmit     = gpu.read_index(gpu_buffer(g, tf.transmit)),
 	}
 	if tf.shaded != nil {
 		push.light = gpu.read_index(gpu_buffer(g, tf.rays))

@@ -22,7 +22,8 @@ struct Hit_Bin_Constants {
 	uint hit_submeshes;
 	uint hit_submeshes_offset;
 	uint instance_count;
-	uint padding;
+	// Whether a translucent submesh's hits take its material's bin, as the GI's emitters' do, or the fallback's.
+	uint translucent;
 };
 CN_PASS_CONSTANTS(Hit_Bin_Constants, constants);
 
@@ -76,7 +77,8 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 				uint entry = instance.first + k;
 				Hit_Submesh submesh = cn_buffer(constants.hit_submeshes).Load<Hit_Submesh>(constants.hit_submeshes_offset + entry * sizeof(Hit_Submesh));
 				if (hit.primitive - submesh.first_primitive < submesh.primitive_count) {
-					hit.bin = submesh.bin & HIT_BIN_MASK;
+					bool translucent = (submesh.bin & HIT_TRANSLUCENT) != 0;
+					hit.bin = translucent && constants.translucent == 0 ? 0 : submesh.bin & HIT_BIN_MASK;
 					hit.entry = entry;
 					break;
 				}

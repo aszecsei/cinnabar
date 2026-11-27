@@ -3,7 +3,7 @@
 // view direction by a normal from GGX's distribution of visible normals, at the pixel's roughness, from the blue noise,
 // as the screen-space reflections' rays do. With steps, it first marches the screen (see ssr_march.hlsli): a hit there
 // with its whole weight takes last frame's lit scene, and the ray traces nothing. Otherwise the ray traces the ray
-// scene's surfaces from the pixel's surface, moved off it, with a cone as wide as the pixel or the lobe, so a rough
+// scene's surfaces from the pixel's surface, moved off it, through glass, whose transmittance it stores, with a cone as wide as the pixel or the lobe, so a rough
 // reflection samples coarser textures, and stores its hit for hit shading. A hit past the reach is stored as a miss, so
 // hit shading skips it, and the light pass gives it no weight. The ray texture keeps the ray's direction and pdf, and
 // the radiance texture waits for the light pass with RTR_PENDING.
@@ -25,6 +25,7 @@ void skip(uint ray) {
 	miss.bin = 0;
 	miss.entry = 0;
 	store_hit(push.hits, ray, miss);
+	store_transmittance(push.transmit, ray, 1);
 }
 
 [numthreads(8, 8, 1)]
@@ -75,7 +76,9 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	desc.TMax = RTR_FAR;
 	// The cone widens by a pixel's angle, or by the lobe's, about the GGX alpha in radians.
 	float spread = max(pixel_meters / max(view_of(position).z, 1e-4), ggx_alpha(roughness));
-	Hit_Record hit = trace_hit(cn_accel(push.accel), desc, RAY_MASK_SURFACES, spread);
+	float3 transmittance;
+	Hit_Record hit = trace_hit_through(cn_accel(push.accel), desc, RAY_MASK_SURFACES, spread, push.translucency, transmittance);
+	store_transmittance(push.transmit, index, transmittance);
 	if (!hit_missed(hit) && hit.t > constants.reach) {
 		ray.z = RTR_PAST_REACH;
 		skip(index);

@@ -1,6 +1,6 @@
 // The world probes' screen light (see docs/rendering/global-illumination.md#world-probes): a thread for each ray, after
 // the hits' light. A hit of a front face that the screen shows takes its light from last frame's lit scene instead (see
-// gi_hit_screen.hlsli), so the probes see what the screen sees.
+// gi_hit_screen.hlsli), so the probes see what the screen sees, unless the ray crossed glass on its way.
 #include "gi_probe_pass.hlsli"
 #include "gi_hit_screen.hlsli"
 
@@ -12,6 +12,10 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	}
 	Hit_Record hit = load_hit(push.hits, ray);
 	if (hit_missed(hit)) {
+		return;
+	}
+	// The lit scene behind glass holds the glass's blend already, so a ray that crossed glass keeps its hit's light.
+	if (push.transmit_valid != 0 && any(load_transmittance(push.transmit, ray) < 1)) {
 		return;
 	}
 	Hit_Surface s = load_hit_surface(push.surfaces, ray);

@@ -1,0 +1,5 @@
+material_instance 1
+# A black, rough surface, which sends no light on: the glass shadows scene's lamp boxes inside.
+parent = $88ea45540739212dbccaf95784e26fd6
+base_color = [0, 0, 0, 1]
+roughness = 1

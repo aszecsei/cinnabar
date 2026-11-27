@@ -2,7 +2,8 @@
 // of the screen, which traces one ray from its pixel this frame through the ray scene, as far as the last cascade of
 // its coarser level reaches. The ray starts at the pixel's surface, a little off it, not at a probe's center, so no
 // probe inside a wall darkens what it sees. Its direction is uniform over the sphere: the R2 sequence by the frame,
-// offset for each tile, repeating. A pixel without a surface stores a miss of no length, which the deposit skips.
+// offset for each tile, repeating. It passes through glass, and stores the glass's transmittance beside its hit (see
+// gi_translucency.hlsli). A pixel without a surface stores a miss of no length, which the deposit skips.
 #include "gi_split.hlsli"
 
 // A tile's rays repeat after this many frames, so a still view's probes settle on a fixed set of rays, as a radiance
@@ -50,6 +51,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		miss.bin = 0;
 		miss.entry = 0;
 		store_hit(push.hits, ray, miss);
+		store_transmittance(push.transmit, ray, 1);
 		return;
 	}
 	uint coarse = min(lod.level + (lod.blend > 0 ? 1 : 0), g.level_count - 1);
@@ -61,5 +63,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	desc.TMax = split_reach(g, g.levels[coarse].min.w);
 	// A ray's cone widens as a probe's direction texel does.
 	float spread = SPLIT_SQRT_SPHERE / g.directions;
-	store_hit(push.hits, ray, trace_hit(cn_accel(push.accel), desc, RAY_MASK_SURFACES, spread));
+	float3 transmittance;
+	store_hit(push.hits, ray, trace_hit_through(cn_accel(push.accel), desc, RAY_MASK_SURFACES, spread, push.translucency, transmittance));
+	store_transmittance(push.transmit, ray, transmittance);
 }

@@ -798,6 +798,8 @@ Scene_Frame :: struct {
 	hit_submeshes:      gpu.Upload,
 	hit_instance_count: int,
 	hit_bins:           []u32,
+	// Each hit_submeshes record's key, which the GI's emitters follow from frame to frame.
+	hit_keys:           []Hit_Entry_Key,
 	instances:          Buffer,
 	arguments:          Buffer,
 	mesh_arguments:     Buffer,
@@ -1016,6 +1018,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	if tracing {
 		hits.instances = make([]Hit_Instance, MAX_INSTANCES, r.platform.frame_allocator)
 		hits.submeshes = make([dynamic]Hit_Submesh, r.platform.frame_allocator)
+		hits.keys = make([dynamic]Hit_Entry_Key, r.platform.frame_allocator)
 	}
 
 	it := ecs.query_iter(w, r.meshes.query)
@@ -1096,8 +1099,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 			}
 			// The view model's pose is not its place in the world, so rays do not see it.
 			if tracing && mesh != nil && blas != {} && !view_model {
-				mask: u8 = renderers[i].cast_shadows ? RAY_MASK_SHADOWS : 0
-				if add_hit_entries(
+				surfaces := add_hit_entries(
 					&hits,
 					slot,
 					mesh,
@@ -1105,9 +1107,13 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 					r.materials.pipelines[:],
 					hit_pipeline_ready,
 					r.platform,
-				) {
-					mask |= RAY_MASK_SURFACES
-				}
+					e,
+				)
+				mask := hit_instance_mask(
+					renderers[i].cast_shadows,
+					surfaces,
+					hits.instances[slot],
+				)
 				if mask != 0 {
 					reference := r.platform.gpu_accel_reference(blas)
 					append(
@@ -1117,7 +1123,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 							reference,
 							id = slot,
 							mask = mask,
-							flags = {.Force_Opaque},
+							flags = hit_instance_flags(hits.instances[slot]),
 						),
 					)
 					// The frame's own view refits the skinned structures, over the positions that it posed.
@@ -1381,6 +1387,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	if tracing {
 		sf.hit_instances, sf.hit_submeshes, sf.hit_instance_count =
 			hit_instance_upload, hit_submesh_upload, int(s.high)
+		sf.hit_keys = hits.keys[:]
 		// The fallback's bin is always dispatched: a hit of a submesh that has no record takes it too.
 		bins := make([dynamic]u32, r.platform.frame_allocator)
 		for used, bin in hits.used {

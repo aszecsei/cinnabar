@@ -4,6 +4,7 @@ import "core:strings"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
+import "cinnabar:engine/ecs"
 
 // The ray scene (see docs/rendering/ray-scene.md#ray-scene): the GPU scene's top-level acceleration structure, which
 // any feature that traces requests, and hit shading, which evaluates the materials at a client's ray hits. The first
@@ -14,6 +15,8 @@ import "cinnabar:core/gpu"
 // Mesh_Renderer casts shadows, and hit shading those with an opaque or masked submesh.
 RAY_MASK_SHADOWS :: 0x01
 RAY_MASK_SURFACES :: 0x02
+// An instance with a translucent submesh, which the GI's rays pass through (see gi_translucency.hlsli).
+RAY_MASK_TRANSLUCENT :: 0x04
 // The threads of each group of the binning and of each hit shader. Matches HIT_GROUP_SIZE in ray_scene.hlsli.
 HIT_GROUP_SIZE :: 64
 // Bin 0 is the fallback's, and each material pipeline's hit pass has the bin after its index. Matches MAX_HIT_BINS in
@@ -25,9 +28,13 @@ MAX_HIT_BATCHES :: 4
 // A batch has at most this many rays: the binning and each bin's shading dispatch a group for each HIT_GROUP_SIZE
 // rays, and a dispatch has at most 65535 groups along x.
 MAX_HIT_RAYS :: 65535 * HIT_GROUP_SIZE
-// A Hit_Submesh's bin has this for a transparent or additive material's submesh, which the fallback shades.
+// A Hit_Submesh's bin has this for a transparent or additive material's submesh, which the fallback shades, but in a
+// batch that shades translucent submeshes, the GI's emitters', where its bits below are its material's bin.
 HIT_TRANSLUCENT :: 1 << 24
 HIT_BIN_MASK :: HIT_TRANSLUCENT - 1
+// A Hit_Instance's flags have this when any of its submeshes is translucent: its instance in the scene's structure is
+// not opaque, so the hits' shadow rays pass through those submeshes (see hit_shadow in gi_hit_light.hlsli).
+HIT_INSTANCE_TRANSLUCENT :: 1
 
 // HIT_BIN_SHADER bins a client's hits by their materials (lib/engine/content/shaders/hit_bin.hlsl), and
 // HIT_DEFAULT_SHADER shades the fallback bin (hit_default.hlsl).
@@ -59,8 +66,8 @@ Hit_Surface :: struct {
 #assert(size_of(Hit_Record) == 32 && size_of(Hit_Surface) == 32)
 
 // Hit_Instance and Hit_Submesh match their HLSL structs in ray_scene.hlsli: the frame's hit table. A slot's record
-// names its mesh record and the records of its submeshes; a submesh's has its primitives, its material's block, and its
-// bin with HIT_TRANSLUCENT.
+// names its mesh record and the records of its submeshes, with HIT_INSTANCE_TRANSLUCENT when any of them is
+// translucent; a submesh's has its primitives, its material's block, and its bin with HIT_TRANSLUCENT.
 Hit_Instance :: struct {
 	mesh:  u32,
 	first: u32,
@@ -104,7 +111,7 @@ Hit_Bin_Constants :: struct {
 	hit_submeshes:        u32,
 	hit_submeshes_offset: u32,
 	instance_count:       u32,
-	padding:              u32,
+	translucent:          u32,
 }
 
 @(private = "file")
@@ -153,15 +160,32 @@ Hit_Batch :: struct {
 	hits:     Buffer,
 	surfaces: Buffer,
 	count:    u32,
+	// Each ray's transmittance, the glass that it crossed, or 0 for a client whose rays cross none.
+	transmit: Buffer,
 }
 
 // Hit_Table is the frame's hit table as build_scene makes it: a record for each slot up to the scene's highest, and
-// the submeshes' records. used is whether any submesh is in each bin.
+// the submeshes' records, with a key for each, which the GI's emitters follow from frame to frame. used is whether any
+// submesh is in each bin.
 @(private)
 Hit_Table :: struct {
 	instances: []Hit_Instance,
 	submeshes: [dynamic]Hit_Submesh,
+	keys:      [dynamic]Hit_Entry_Key,
 	used:      [MAX_HIT_BINS]bool,
+}
+
+// Hit_Entry_Key is what a frame knows of a hit table's submesh record beyond the GPU's: its entity and submesh, which
+// stay the same from frame to frame where the record's place does not, its material's pipeline, and whether its
+// material is two-sided and hit shading evaluates it, an opaque or masked material whose hit pipeline is ready, or a
+// translucent material whose hit pipeline is ready, which the GI's emitters' batch evaluates.
+Hit_Entry_Key :: struct {
+	entity:      ecs.Entity,
+	submesh:     u32,
+	pipeline:    u32,
+	two_sided:   bool,
+	shaded:      bool,
+	translucent: bool,
 }
 
 // Hit_Reservation is a batch's turn at hit shading, which reserve_hit_shading takes and add_hit_shading spends: the
@@ -178,6 +202,7 @@ Hit_Shaded :: struct {
 	hits:     Buffer,
 	surfaces: Buffer,
 	count:    u32,
+	transmit: Buffer,
 }
 
 @(private = "file")
@@ -345,7 +370,8 @@ commit_ray_scene :: proc(data: rawptr) {
 
 // add_hit_entries adds a slot's records to the hit table: the slot's, and one for each of its items but impostors, with
 // the bin of its material's hit pipeline. A transparent or additive material's submesh, and one whose pipeline has no
-// hit pass ready, take the fallback's bin. It gives whether the slot has a surface that hit shading evaluates.
+// hit pass ready, take the fallback's bin, and a slot with a translucent submesh has HIT_INSTANCE_TRANSLUCENT. It gives
+// whether the slot has a surface that hit shading evaluates.
 @(private)
 add_hit_entries :: proc(
 	table: ^Hit_Table,
@@ -355,11 +381,13 @@ add_hit_entries :: proc(
 	pipelines: []Material_Pipeline,
 	ready: proc(platform: ^core.Platform_API, pipeline: gpu.Pipeline) -> bool,
 	platform: ^core.Platform_API,
+	entity := ecs.Entity{},
 ) -> (
 	surfaces: bool,
 ) {
 	first := u32(len(table.submeshes))
 	mesh_index: u32
+	flags: u32
 	for item in items {
 		if item.flags & ITEM_IMPOSTOR != 0 || int(item.submesh) >= int(mesh.submesh_count) {
 			continue
@@ -368,15 +396,33 @@ add_hit_entries :: proc(
 		submesh := mesh.submeshes[item.submesh]
 		pipeline := &pipelines[item.bin]
 		bin: u32
+		shaded, translucent := false, false
 		switch {
 		case material_group(pipeline) != .Opaque:
 			bin = HIT_TRANSLUCENT
+			flags |= HIT_INSTANCE_TRANSLUCENT
+			if pipeline.hit != {} && ready(platform, pipeline.hit) {
+				bin |= item.bin + 1
+				translucent = true
+			}
 		case pipeline.hit != {} && ready(platform, pipeline.hit):
 			bin = item.bin + 1
 			surfaces = true
+			shaded = true
 		case:
 			surfaces = true
 		}
+		append(
+			&table.keys,
+			Hit_Entry_Key {
+				entity = entity,
+				submesh = u32(item.submesh),
+				pipeline = item.bin,
+				two_sided = pipeline.two_sided,
+				shaded = shaded,
+				translucent = translucent,
+			},
+		)
 		table.used[bin & HIT_BIN_MASK] = true
 		append(
 			&table.submeshes,
@@ -392,8 +438,29 @@ add_hit_entries :: proc(
 		mesh  = mesh_index,
 		first = first,
 		count = u32(len(table.submeshes)) - first,
+		flags = flags,
 	}
 	return
+}
+
+// hit_instance_mask is a slot's instance's mask in the scene's structure: the shadow rays see it when it casts
+// shadows, hit shading when it has a surface to evaluate, and the GI's rays, which pass through glass, when it has a
+// translucent submesh too. An instance of none is left out.
+hit_instance_mask :: proc(cast_shadows, surfaces: bool, instance: Hit_Instance) -> u8 {
+	mask: u8 = cast_shadows ? RAY_MASK_SHADOWS : 0
+	if surfaces {
+		mask |= RAY_MASK_SURFACES
+	}
+	if instance.flags & HIT_INSTANCE_TRANSLUCENT != 0 {
+		mask |= RAY_MASK_TRANSLUCENT
+	}
+	return mask
+}
+
+// hit_instance_flags are a slot's instance's flags in the scene's structure: opaque, so the hardware commits its hits
+// at once, unless it has a translucent submesh, which the hits' shadow rays look up and pass through.
+hit_instance_flags :: proc(instance: Hit_Instance) -> gpu.Accel_Instance_Flags {
+	return instance.flags & HIT_INSTANCE_TRANSLUCENT != 0 ? {.Force_Non_Opaque} : {.Force_Opaque}
 }
 
 // hit_pipeline_ready is whether a material's hit pipeline has compiled.
@@ -459,6 +526,7 @@ add_hit_shading :: proc(
 	batch: Hit_Batch,
 	queue := gpu.Queue.Graphics,
 	name := "",
+	translucent := false,
 ) -> Hit_Shaded {
 	r := f.renderer
 	sf := f.scene_frame
@@ -468,6 +536,7 @@ add_hit_shading :: proc(
 		hits     = batch.hits,
 		surfaces = batch.surfaces,
 		count    = batch.count,
+		transmit = batch.transmit,
 	}
 	if batch.count == 0 {
 		return shaded
@@ -493,6 +562,7 @@ add_hit_shading :: proc(
 		hit_submeshes        = gpu.read_index(sf.hit_submeshes.buffer),
 		hit_submeshes_offset = sf.hit_submeshes.offset,
 		instance_count       = u32(sf.hit_instance_count),
+		translucent          = u32(translucent),
 	}
 	data.constants = reservation.constants
 	for upload, phase in data.constants {

@@ -11,7 +11,7 @@
 // Matches Rtr_Light_Push in lib/engine/render/traced_reflections.odin. It starts with Material_Push's shadow textures,
 // so the light loop's lookups compile. light holds a float4 for each ray from the hits' light: its light, and its
 // distance, negative for a back face. Without shaded, hit shading did not run, and a hit has no weight. radiance_max is
-// the level's (REFLECTION_PARAMS).
+// the level's (REFLECTION_PARAMS). transmit holds each ray's transmittance.
 struct Rtr_Light_Push {
 	uint shadow_atlas;
 	uint shadow_mask;
@@ -24,6 +24,7 @@ struct Rtr_Light_Push {
 	uint height;
 	uint shaded;
 	float radiance_max;
+	uint transmit;
 };
 #define MATERIAL_PUSH Rtr_Light_Push
 #define SHADING_NO_LIGHTING 1
@@ -47,7 +48,8 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		Hit_Record hit = load_hit(push.hits, index);
 		float exposure = cn_buffer(push.exposure).Load<float>(0);
 		if (hit_missed(hit)) {
-			light = float4(frame_sky_specular(hit_unpack_unit(hit.direction), 0), 1);
+			// The glass that the ray crossed lets through its share of the sky; a hit's light has it already.
+			light = float4(frame_sky_specular(hit_unpack_unit(hit.direction), 0) * load_transmittance(push.transmit, index), 1);
 			ray.z = RTR_FAR;
 		} else if (push.shaded != 0) {
 			float4 lit = cn_buffer(push.light).Load<float4>(index * 16);
