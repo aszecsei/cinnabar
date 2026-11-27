@@ -112,6 +112,32 @@ restir_guide_levels :: proc(f: ^Frame, params: Gi_Restir_Params) -> u32 {
 	return min(params.guide_levels, pf.grid.level_count)
 }
 
+// probe_guide is the ray guide that the world probes draw a share of their rays from this frame, before ReSTIR GI's
+// build: the view's guide, when the technique is ReSTIR GI, the last frame that wanted it ran it, so the build ran
+// then, and its levels are this frame's, so add_restir_guide keeps the buffer. Cells that the boxes moved over since
+// are told by their keys, in the shaders.
+@(private)
+probe_guide :: proc(
+	f: ^Frame,
+	settings: Gi_Settings,
+	probe_levels: u32,
+) -> (
+	guide: gpu.Buffer,
+	levels: u32,
+	ok: bool,
+) {
+	s := &f.state.gi.restir
+	levels = min(GI_RESTIR_PARAMS[settings.level].guide_levels, probe_levels)
+	if settings.technique != .Restir ||
+	   !s.running ||
+	   levels == 0 ||
+	   s.guide.guide == {} ||
+	   s.guide.levels != levels {
+		return {}, 0, false
+	}
+	return s.guide.guide, levels, true
+}
+
 // add_restir_guide adds the guide's build, after the world probes' update, whose radiance it reads, and before the
 // rays' trace, and fills the frame's Restir_Guide in its upload. Without a guide at the level, its grid has no levels,
 // and the rays are all cosine-weighted.

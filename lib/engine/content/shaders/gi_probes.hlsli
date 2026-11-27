@@ -32,7 +32,10 @@ struct Probe_Level {
 // textures and states, for reading and, in the update and the reset, for writing, with the frame's updated probes in
 // jobs, each its level above 24 bits and its storage below. radiance_max is the most pre-exposed luminance that a
 // ray's light keeps in the update. irradiance_hit is the irradiance without the light of the GI's listed emitters,
-// which the hits read, since they sample those emitters themselves (see gi_hit_light.hlsli).
+// which the hits read, since they sample those emitters themselves (see gi_hit_light.hlsli). guide is ReSTIR GI's ray
+// guide as last frame built it, or 0, for its first guide_levels levels: each probe whose cell there is valid draws
+// guide_rays of its rays from it (see gi_probe_pass.hlsli). guide_keys are each level's first world cell, of which a
+// cell's key is the low 32 bits on each axis, and guide_seed the update's, for the guided rays' walks.
 struct Probe_Grid {
 	Probe_Level levels[MAX_PROBE_LEVELS];
 	float4 rotation[3];
@@ -53,6 +56,11 @@ struct Probe_Grid {
 	float radiance_max;
 	uint irradiance_hit;
 	uint irradiance_hit_out;
+	uint guide;
+	uint guide_levels;
+	uint guide_rays;
+	int4 guide_keys[MAX_PROBE_LEVELS];
+	uint guide_seed;
 	uint3 padding;
 };
 
@@ -116,11 +124,11 @@ float3 probe_unfold(float2 p) {
 	return normalize(n);
 }
 
-// probe_ray_direction is a probe's ray: a spherical Fibonacci point, turned by the frame's rotation, so each update
-// sees new directions.
-float3 probe_ray_direction(Probe_Grid grid, uint ray) {
+// probe_fibonacci_direction is a point of a spherical Fibonacci set of count points, turned by the frame's rotation, so
+// each update sees new directions.
+float3 probe_fibonacci_direction(Probe_Grid grid, uint ray, uint count) {
 	float golden = 2.39996323;
-	float z = 1 - (2 * ray + 1) / float(grid.rays);
+	float z = 1 - (2 * ray + 1) / float(count);
 	float r = sqrt(saturate(1 - z * z));
 	float phi = ray * golden;
 	float3 d = float3(r * cos(phi), r * sin(phi), z);

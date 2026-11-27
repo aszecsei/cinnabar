@@ -8,7 +8,11 @@
 // that sees back faces with more than a quarter of its rays is inside geometry and counts for nothing. The hits'
 // irradiance is the same mean without the light of the GI's listed emitters that the rays hit: the hits sample those
 // emitters themselves, so their light through the probes would count twice. It takes out the radiance in the pool, the
-// same that the hits sample, so the two agree while the pool still learns a triangle's emission.
+// same that the hits sample, so the two agree while the pool still learns a triangle's emission. Where some of the rays
+// came from the ray guide, each ray's light takes its weight (probe_ray_weight), and each mean is over the lobe's
+// weight in the Fibonacci rays alone, which is nearly the lobe's integral, so the means stay the light's: over the
+// weights' own sum they would be brighter toward a bright light. The distances and the back faces come from the
+// Fibonacci rays alone too, which reach every direction alike.
 #include "gi_probe_pass.hlsli"
 #include "hit_clamp.hlsli"
 #include "gi_emitter_samples.hlsli"
@@ -24,6 +28,7 @@ static const float BACKFACE_SHARE = 0.25;
 groupshared float4 g_rays[MAX_PROBE_RAYS];
 groupshared float3 g_rays_hit[MAX_PROBE_RAYS];
 groupshared float3 g_directions[MAX_PROBE_RAYS];
+groupshared float g_weights[MAX_PROBE_RAYS];
 
 // listed_emission is the radiance of the listed emitter that a ray hit, through the glass that it crossed, or 0: none where its hit was a back face,
 // which sends out no light, or the frame has no emitters.
@@ -62,13 +67,18 @@ void cs_main(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint ind
 	}
 	Probe probe = job_probe(grid, job);
 	uint rays = min(grid.rays, MAX_PROBE_RAYS);
+	Probe_Rays split = probe_rays(grid, probe);
+	uint fibonacci = min(split.fibonacci, rays);
+	float share = split.guided == 0 ? 1 : float(split.fibonacci + split.guided) / split.fibonacci;
 	if (index < rays) {
 		uint at = job * grid.rays + index;
 		float4 ray = cn_buffer(push.rays).Load<float4>(at * 16);
 		float exposure = cn_buffer(push.exposure).Load<float>(0);
 		g_rays[index] = float4(clamp_hit_light(ray.rgb, exposure, grid.radiance_max), ray.a);
 		g_rays_hit[index] = clamp_hit_light(max(ray.rgb - listed_emission(at, ray.a), 0), exposure, grid.radiance_max);
-		g_directions[index] = probe_ray_direction(grid, index);
+		float3 d = probe_ray(grid, probe, split, index);
+		g_directions[index] = d;
+		g_weights[index] = probe_ray_weight(grid, split, index, d);
 	}
 	GroupMemoryBarrierWithGroupSync();
 
@@ -85,17 +95,20 @@ void cs_main(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint ind
 	for (uint r = 0; r < rays; r++) {
 		float4 v = g_rays[r];
 		float c = saturate(dot(g_directions[r], direction));
-		float distance = min(abs(v.a), probe.distance);
-		backfaces += v.a < 0 ? 1 : 0;
-		irradiance += v.rgb * c;
-		irradiance_hit += g_rays_hit[r] * c;
-		irradiance_total += c;
+		float w = g_weights[r];
 		float sharp = pow(c, RADIANCE_SHARPNESS);
-		radiance += v.rgb * sharp;
-		radiance_total += sharp;
-		float narrow = pow(c, DISTANCE_SHARPNESS);
-		moments += float2(distance, distance * distance) * narrow;
-		moments_total += narrow;
+		irradiance += v.rgb * (c * w);
+		irradiance_hit += g_rays_hit[r] * (c * w);
+		radiance += v.rgb * (sharp * w);
+		if (r < fibonacci) {
+			irradiance_total += c * share;
+			radiance_total += sharp * share;
+			float distance = min(abs(v.a), probe.distance);
+			backfaces += v.a < 0 ? 1 : 0;
+			float narrow = pow(c, DISTANCE_SHARPNESS);
+			moments += float2(distance, distance * distance) * narrow;
+			moments_total += narrow;
+		}
 	}
 
 	uint state_index = probe_state_index(probe.level, probe.storage);
@@ -119,7 +132,7 @@ void cs_main(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint ind
 	irradiance_texture[texel] = lerp(old_irradiance, new_irradiance, alpha);
 	irradiance_hit_texture[texel] = lerp(old_irradiance_hit, new_irradiance_hit, alpha);
 	if (index == 0) {
-		uint inactive = backfaces > BACKFACE_SHARE * rays ? PROBE_INACTIVE : 0;
+		uint inactive = backfaces > BACKFACE_SHARE * fibonacci ? PROBE_INACTIVE : 0;
 		cn_rw_buffer(grid.states_out).Store(state_index, min(updates + 1, PROBE_UPDATES_MASK) | inactive);
 	}
 }

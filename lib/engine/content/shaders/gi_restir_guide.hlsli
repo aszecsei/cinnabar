@@ -12,17 +12,8 @@
 #define GI_RESTIR_GUIDE_HLSLI
 
 #include "gi_restir.hlsli"
+#include "gi_guide.hlsli"
 
-// Match lib/engine/render/gi_restir_guide.odin.
-static const uint GUIDE_SIDE = 8;
-static const uint GUIDE_LEAVES = 64;
-// A cell's floats: its learned light, its quadtree, the rays that it has learned from, its key and its tag.
-static const uint GUIDE_STRIDE = 160;
-static const uint GUIDE_LEARNED = 0;
-static const uint GUIDE_CONFIDENCE = 149;
-static const uint GUIDE_KEY = 150;
-static const uint GUIDE_TAG_AT = 153;
-static const uint GUIDE_TAG = 0x67756964;
 // A cell's sums of this frame's rays: one for each leaf, then their count.
 static const uint GUIDE_ACCUM_STRIDE = 68;
 // The sums are in fixed point, in units of 1 / GUIDE_UNITS, and one ray adds at most GUIDE_DEPOSIT_MAX.
@@ -33,7 +24,6 @@ static const float GUIDE_DEPOSIT_MAX = 64;
 static const float GUIDE_PDF_FLOOR = 0.1;
 // Each node's cosine bound is at least this, so a node below the surface's horizon is still a little likely.
 static const float GUIDE_HORIZON = 0.02;
-static const float GUIDE_PI = 3.14159265;
 
 // Matches Restir_Guide in lib/engine/render/gi_restir_guide.odin: each level's first world cell, the levels that have a
 // guide, the share of the rays that it draws, its buffers, how many rays the world probes' prior counts as, and the
@@ -54,11 +44,6 @@ Restir_Guide restir_guide() {
 	return cn_buffer(push.guide_grid).Load<Restir_Guide>(push.guide_offset);
 }
 
-// guide_level_offset is where a level of a cell's quadtree starts: the root at level 0, the leaves at level 3.
-uint guide_level_offset(uint k) {
-	return k == 0 ? 148 : k == 1 ? 144 : k == 2 ? 128 : 64;
-}
-
 // guide_cell is the cell of a point relative to the camera: the nearest probe of the finest level with a guide whose
 // box holds it, as its level times the probes of a level plus its storage. It is false outside them.
 bool guide_cell(Restir_Guide gd, Probe_Grid grid, float3 p, out uint cell) {
@@ -73,23 +58,6 @@ bool guide_cell(Restir_Guide gd, Probe_Grid grid, float3 p, out uint cell) {
 		}
 	}
 	return false;
-}
-
-// guide_leaf is the leaf of a direction, in the octahedron's square.
-uint2 guide_leaf(float3 d) {
-	float2 uv = probe_octahedral(d) * 0.5 + 0.5;
-	return min(uint2(uv * GUIDE_SIDE), GUIDE_SIDE - 1);
-}
-
-// guide_jacobian is the solid angle of a direction per area of the octahedron's square, from -1 to 1 on each side: the
-// cube of the direction's L1 length, from 1 at the poles to about 5.2 between them.
-float guide_jacobian(float3 d) {
-	float l1 = abs(d.x) + abs(d.y) + abs(d.z);
-	return l1 * l1 * l1;
-}
-
-float guide_load(uint buffer, uint cell, uint at) {
-	return asfloat(cn_buffer(buffer).Load((cell * GUIDE_STRIDE + at) * 4));
 }
 
 // guide_node_weight is how likely a walk that reaches a node's parent takes the node, before its siblings are summed:

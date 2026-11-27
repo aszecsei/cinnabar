@@ -37,6 +37,10 @@ GI_MAX_PROBE_LIGHTS :: 16
 GI_PROBE_BIAS :: 0.25
 // The threads of each group of the reset.
 GI_PROBE_RESET_GROUP :: 64
+// The share of a probe's rays that ReSTIR GI's ray guide draws, where the probe's cell has one; the rest are a
+// Fibonacci set, which alone gives the distances and the back faces (see
+// docs/rendering/global-illumination.md#guided-probe-rays).
+GI_PROBE_GUIDE_SHARE :: 0.5
 
 #assert(GI_PROBE_GRID.x * GI_PROBE_GRID.y * GI_PROBE_GRID.z == GI_PROBE_COUNT)
 
@@ -140,7 +144,8 @@ Probe_Level :: struct {
 	delta: [4]i32,
 }
 
-// Probe_Grid matches Probe_Grid in gi_probes.hlsli.
+// Probe_Grid matches Probe_Grid in gi_probes.hlsli. guide is ReSTIR GI's ray guide as last frame built it, or 0, which
+// the probes of its first guide_levels levels draw guide_rays of their rays from (see probe_guide).
 Probe_Grid :: struct {
 	levels:             [MAX_PROBE_LEVELS]Probe_Level,
 	rotation:           [3][4]f32,
@@ -161,8 +166,15 @@ Probe_Grid :: struct {
 	radiance_max:       f32,
 	irradiance_hit:     u32,
 	irradiance_hit_out: u32,
+	guide:              u32,
+	guide_levels:       u32,
+	guide_rays:         u32,
+	guide_keys:         [MAX_PROBE_LEVELS][4]i32,
+	guide_seed:         u32,
 	padding:            [3]u32,
 }
+
+#assert(size_of(Probe_Grid) % 16 == 0)
 
 // Probe_Push matches Probe_Push in gi_probe_pass.hlsli.
 @(private = "file")
@@ -209,6 +221,8 @@ Gi_Probe_Frame :: struct {
 	surfaces:       Buffer,
 	rays:           Buffer,
 	transmit:       Buffer,
+	// ReSTIR GI's ray guide, which the trace and the update read before its build, or 0 without it.
+	guide:          Buffer,
 	// What the probes' hits and the split cascades' are lit by: these probes, their lights, and the global
 	// illumination's lit scene of last frame, which the hits that the screen shows take their light from.
 	hit_light:      Hit_Light_Inputs,
@@ -616,6 +630,17 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 		bias               = GI_PROBE_BIAS,
 		radiance_max       = params.radiance_max,
 	}
+	if guide, guide_levels, guided := probe_guide(f, settings, params.levels); guided {
+		pf.guide = import_buffer(g, guide)
+		grid.guide = gpu.read_index(guide)
+		grid.guide_levels = guide_levels
+		grid.guide_rays = u32(f32(params.rays) * GI_PROBE_GUIDE_SHARE)
+		grid.guide_seed = p.frame
+		for l in 0 ..< int(guide_levels) {
+			cell := p.levels[l].min_cell
+			grid.guide_keys[l] = {i32(cell.x), i32(cell.y), i32(cell.z), 0}
+		}
+	}
 	(^Probe_Grid)(raw_data(grid_upload.data))^ = grid^
 	pf.upload = grid_upload
 	pf.hit_light = {
@@ -667,6 +692,9 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	declare_translucency_reads(f, pass)
 	write(g, pass, pf.hits)
 	write(g, pass, pf.transmit)
+	if pf.guide != 0 {
+		read(g, pass, pf.guide)
+	}
 	shaded := add_hit_shading(
 		f,
 		reservation,
@@ -687,6 +715,9 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	read(g, pass, f.exposure)
 	if f.emitters != nil {
 		read(g, pass, f.emitters.pool)
+	}
+	if pf.guide != 0 {
+		read(g, pass, pf.guide)
 	}
 	write(g, pass, pf.radiance)
 	write(g, pass, pf.irradiance)

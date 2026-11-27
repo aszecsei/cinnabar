@@ -1,5 +1,6 @@
 package render
 
+import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
@@ -259,6 +260,302 @@ the_guided_estimate_is_unbiased :: proc(t: ^testing.T) {
 				exact,
 				error,
 			)
+		}
+	}
+}
+
+
+// guide_mirror_sphere_pdf is gi_guide.hlsli's guide_sphere_pdf: the chance of a leaf is the leaf over the root.
+guide_mirror_sphere_pdf :: proc(m: ^Guide_Mirror, d: [3]f64) -> f64 {
+	leaf := leaf_of(d)
+	return(
+		m.nodes[64 + leaf.y * GUIDE_SIDE + leaf.x] /
+		m.nodes[148] /
+		(4.0 / GUIDE_LEAVES) /
+		jacobian(d) \
+	)
+}
+
+// guide_mirror_sphere_warp is gi_guide.hlsli's guide_sphere_warp: a point of the unit square warped down the quadtree,
+// the column by u.x, then the row by u.y, each rescaled, and the rest of u the point in the leaf.
+guide_mirror_sphere_warp :: proc(m: ^Guide_Mirror, point: [2]f64) -> [3]f64 {
+	u := point
+	xy: [2]int
+	for k in 1 ..= 3 {
+		side := 1 << uint(k)
+		at := level_offset(k)
+		b := xy * 2
+		n00 := m.nodes[at + b.y * side + b.x]
+		n10 := m.nodes[at + b.y * side + b.x + 1]
+		n01 := m.nodes[at + (b.y + 1) * side + b.x]
+		n11 := m.nodes[at + (b.y + 1) * side + b.x + 1]
+		left, right := n00 + n01, n10 + n11
+		x := u.x * (left + right)
+		col := x < left ? 0 : 1
+		u.x = col == 0 ? x / left : (x - left) / right
+		top, bottom := col == 0 ? n00 : n10, col == 0 ? n01 : n11
+		y := u.y * (top + bottom)
+		row := y < top ? 0 : 1
+		u.y = row == 0 ? y / top : (y - top) / bottom
+		u = {clamp(u.x, 0, 0.99999), clamp(u.y, 0, 0.99999)}
+		xy = b + {col, row}
+	}
+	return unfold(([2]f64{f64(xy.x), f64(xy.y)} + u) / GUIDE_SIDE * 2 - 1)
+}
+
+@(private = "file")
+PROBE_TEXELS :: GI_PROBE_INTERIOR * GI_PROBE_INTERIOR
+@(private = "file")
+PROBE_TEST_RAYS :: 64
+@(private = "file")
+PROBE_TEST_UPDATES :: 20000
+
+// Probe_Test_Light is the light around the probe: a window of 12 degrees, 80 times as bright as its sky.
+@(private = "file")
+Probe_Test_Light :: struct {
+	window:   [3]f64,
+	cos_half: f64,
+	sky:      f64,
+	bright:   f64,
+}
+
+@(private = "file")
+test_light :: proc(l: Probe_Test_Light, d: [3]f64) -> f64 {
+	return linalg.dot(d, l.window) >= l.cos_half ? l.bright : l.sky
+}
+
+// Probe_Test_Lobe is a tile's texels and, for one of the update's lobes, the light's integral over each and the lobe's.
+@(private = "file")
+Probe_Test_Lobe :: struct {
+	texels:    [PROBE_TEXELS][3]f64,
+	sharpness: f64,
+	exact:     [PROBE_TEXELS]f64,
+	total:     [PROBE_TEXELS]f64,
+}
+
+// Probe_Test_Result is a run of updates for each texel: the weighed sums' means and squares, and the means that the
+// update keeps, with their squared errors against the light.
+@(private = "file")
+Probe_Test_Result :: struct {
+	sum, square:  [PROBE_TEXELS]f64,
+	mean, error2: [PROBE_TEXELS]f64,
+}
+
+// random_rotation is a rotation uniform over the rotations (Shoemake), as probe_rotation draws from the Halton sequence.
+@(private = "file")
+random_rotation :: proc(gen: rand.Generator) -> matrix[3, 3]f64 {
+	u1, u2, u3 := rand.float64(gen), rand.float64(gen), rand.float64(gen)
+	a, b := math.sqrt(1 - u1), math.sqrt(u1)
+	q := quaternion(
+		x = a * math.sin(math.TAU * u2),
+		y = a * math.cos(math.TAU * u2),
+		z = b * math.sin(math.TAU * u3),
+		w = b * math.cos(math.TAU * u3),
+	)
+	return linalg.matrix3_from_quaternion(q)
+}
+
+// probe_test_run mirrors gi_probe_update.hlsl's blend of a lobe over many updates. The first rays are a Fibonacci set
+// of their count at a random rotation, and the rest, guided of them, the R2 sequence at a random shift, warped down the
+// guide (probe_ray). Each ray's weight is the maximum heuristic's (probe_ray_weight), and each mean is over the lobe's
+// weight in the Fibonacci rays alone.
+@(private = "file")
+probe_test_run :: proc(
+	guide: ^Guide_Mirror,
+	guided: int,
+	lobe: ^Probe_Test_Lobe,
+	l: Probe_Test_Light,
+	gen: rand.Generator,
+) -> (
+	res: Probe_Test_Result,
+) {
+	fibonacci := PROBE_TEST_RAYS - guided
+	directions: [PROBE_TEST_RAYS][3]f64
+	weights: [PROBE_TEST_RAYS]f64
+	share := f64(PROBE_TEST_RAYS) / f64(fibonacci)
+	for _ in 0 ..< PROBE_TEST_UPDATES {
+		rotation := random_rotation(gen)
+		offset := [2]f64{rand.float64(gen), rand.float64(gen)}
+		for i in 0 ..< PROBE_TEST_RAYS {
+			if i < fibonacci {
+				z := 1 - (2 * f64(i) + 1) / f64(fibonacci)
+				s := math.sqrt(max(1 - z * z, 0))
+				phi := f64(i) * 2.39996323
+				directions[i] = rotation * [3]f64{s * math.cos(phi), s * math.sin(phi), z}
+			} else {
+				point := offset + f64(i - fibonacci) * [2]f64{0.75487766, 0.56984029}
+				directions[i] = guide_mirror_sphere_warp(guide, point - linalg.floor(point))
+			}
+			weights[i] = 1
+			if guided > 0 {
+				f := f64(fibonacci) / (4 * math.PI)
+				g := f64(guided) * guide_mirror_sphere_pdf(guide, directions[i])
+				if i < fibonacci {
+					weights[i] = f >= g ? share : 0
+				} else {
+					weights[i] = g > f ? PROBE_TEST_RAYS / (4 * math.PI * g) : 0
+				}
+			}
+		}
+		for x, k in lobe.texels {
+			sum, total: f64
+			for d, i in directions {
+				c := math.pow(max(linalg.dot(d, x), 0), lobe.sharpness)
+				sum += test_light(l, d) * c * weights[i]
+				if i < fibonacci {
+					total += c * share
+				}
+			}
+			// The weighed sum over a uniform ray's density is the integral's estimate.
+			integral := sum * 4 * math.PI / PROBE_TEST_RAYS
+			res.sum[k] += integral / PROBE_TEST_UPDATES
+			res.square[k] += integral * integral / PROBE_TEST_UPDATES
+			mean := total > 0 ? sum / total : 0
+			res.mean[k] += mean / PROBE_TEST_UPDATES
+			e := mean - lobe.exact[k] / lobe.total[k]
+			res.error2[k] += e * e / PROBE_TEST_UPDATES
+		}
+	}
+	return
+}
+
+// The world probes' update with half of its rays from the guide, as gi_probe_update.hlsl blends them. The weighed sum
+// over each texel's lobe, the cosine's and the radiance's, is the light's integral without bias, with a guide learned
+// from the light and with one that points away from it. The means that the update keeps, over the lobe's weight in the
+// Fibonacci rays, are as near the light as the Fibonacci set's own, and with the learned guide each update's error is
+// smaller. The update blends about 33 updates, which divides its noise but not its bias, so the bias is what must not
+// grow.
+@(test)
+the_probes_guided_update_is_unbiased :: proc(t: ^testing.T) {
+	r := rand.create(23)
+	gen := rand.default_random_generator(&r)
+	l := Probe_Test_Light {
+		window   = linalg.normalize([3]f64{0.6, 0.3, 0.74}),
+		cos_half = math.cos(math.to_radians(f64(12))),
+		sky      = 0.5,
+		bright   = 40,
+	}
+
+	// The texels of a probe's tile, and each one's lobes integrated over a fine grid.
+	lobes := new([2]Probe_Test_Lobe)
+	defer free(lobes)
+	lobes[0].sharpness, lobes[1].sharpness = 1, 8
+	for i in 0 ..< PROBE_TEXELS {
+		x := unfold(
+			{
+				(f64(i % GI_PROBE_INTERIOR) + 0.5) / GI_PROBE_INTERIOR * 2 - 1,
+				(f64(i / GI_PROBE_INTERIOR) + 0.5) / GI_PROBE_INTERIOR * 2 - 1,
+			},
+		)
+		lobes[0].texels[i], lobes[1].texels[i] = x, x
+	}
+	rows :: 300
+	for i in 0 ..< rows {
+		theta := (f64(i) + 0.5) / rows * math.PI
+		for j in 0 ..< 2 * rows {
+			phi := (f64(j) + 0.5) / (2 * rows) * 2 * math.PI
+			d := [3]f64 {
+				math.sin(theta) * math.cos(phi),
+				math.sin(theta) * math.sin(phi),
+				math.cos(theta),
+			}
+			area := math.sin(theta) * (math.PI / rows) * (math.PI / rows)
+			light := test_light(l, d)
+			for &lobe in lobes {
+				for x, k in lobe.texels {
+					c := math.pow(max(linalg.dot(d, x), 0), lobe.sharpness)
+					lobe.exact[k] += light * c * area
+					lobe.total[k] += c * area
+				}
+			}
+		}
+	}
+
+	// A guide learned from the light, each leaf the light through it integrated over it, with the build's floor, and
+	// one that points away from it.
+	learned, wrong: [GUIDE_LEAVES]f64
+	for i in 0 ..< GUIDE_LEAVES {
+		cell := [2]f64{f64(i % GUIDE_SIDE), f64(i / GUIDE_SIDE)}
+		center := unfold((cell + 0.5) / GUIDE_SIDE * 2 - 1)
+		wrong[i] =
+			(linalg.dot(center, -l.window) > 0.7 ? 100.0 : 1.0) *
+			4.0 /
+			GUIDE_LEAVES *
+			jacobian(center)
+		SUB :: 16
+		for y in 0 ..< SUB {
+			for x in 0 ..< SUB {
+				d := unfold((cell + ([2]f64{f64(x), f64(y)} + 0.5) / SUB) / GUIDE_SIDE * 2 - 1)
+				learned[i] += test_light(l, d) * jacobian(d) * 4.0 / (GUIDE_LEAVES * SUB * SUB)
+			}
+		}
+	}
+	for leaves in ([]^[GUIDE_LEAVES]f64{&learned, &wrong}) {
+		total: f64
+		for v in leaves {
+			total += v
+		}
+		for &v in leaves {
+			v += GUIDE_FLOOR * total / GUIDE_LEAVES
+		}
+	}
+	guides := []Guide_Mirror{guide_mirror_build(learned), guide_mirror_build(wrong)}
+
+	for &lobe in lobes {
+		plain := probe_test_run(&guides[0], 0, &lobe, l, gen)
+		for &guide, g in guides {
+			res := probe_test_run(&guide, PROBE_TEST_RAYS / 2, &lobe, l, gen)
+			error_plain, error_guided, bias_plain, bias_guided: f64
+			for k in 0 ..< PROBE_TEXELS {
+				// The weighed sum, within four standard errors of the light's integral.
+				se := math.sqrt(
+					max(res.square[k] - res.sum[k] * res.sum[k], 0) / PROBE_TEST_UPDATES,
+				)
+				testing.expectf(
+					t,
+					abs(res.sum[k] - lobe.exact[k]) < 4 * se + 2e-3 * lobe.exact[k],
+					"guide %d, lobe %v, texel %d: %v, not %v, with a standard error of %v",
+					g,
+					lobe.sharpness,
+					k,
+					res.sum[k],
+					lobe.exact[k],
+					se,
+				)
+				truth := lobe.exact[k] / lobe.total[k]
+				bias_plain = max(bias_plain, abs(plain.mean[k] - truth) / truth)
+				bias_guided = max(bias_guided, abs(res.mean[k] - truth) / truth)
+				error_plain += math.sqrt(plain.error2[k]) / truth / PROBE_TEXELS
+				error_guided += math.sqrt(res.error2[k]) / truth / PROBE_TEXELS
+			}
+			log.infof(
+				"guide %d, lobe %v: error per update %.3f -> %.3f, largest bias %.4f -> %.4f",
+				g,
+				lobe.sharpness,
+				error_plain,
+				error_guided,
+				bias_plain,
+				bias_guided,
+			)
+			testing.expectf(
+				t,
+				bias_guided < max(2 * bias_plain, 0.01),
+				"guide %d, lobe %v: the means' bias %v against the Fibonacci set's %v",
+				g,
+				lobe.sharpness,
+				bias_guided,
+				bias_plain,
+			)
+			if g == 0 {
+				testing.expectf(
+					t,
+					error_guided < error_plain,
+					"lobe %v: a learned guide's error %v, not below the Fibonacci set's %v",
+					lobe.sharpness,
+					error_guided,
+					error_plain,
+				)
+			}
 		}
 	}
 }
