@@ -59,6 +59,7 @@ Read them in this order the first time.
 | `gi.odin` | Screen-space radiance cascades ([Global illumination](global-illumination.md#global-illumination)) |
 | `gi_probes.odin` | The world probes: their levels, schedule, storage and passes ([World probes](global-illumination.md#world-probes)) |
 | `gi_split.odin` | The split radiance cascades: their windows, tables, storage and passes ([Split cascades](global-illumination.md#split-cascades)) |
+| `gi_restir.odin` | ReSTIR GI: its tiles, reservoirs and passes ([ReSTIR GI](global-illumination.md#restir-gi)) |
 | `gi_voxel.odin` | The voxel cones: their clipmap's levels, schedule, storage, voxelization views and passes ([Voxel cones](global-illumination.md#voxel-cones)) |
 | `reflections.odin` | The reflections' `REFLECTION_PARAMS` and `Reflection_Settings` ([Quality](quality.md#quality)) |
 | `reflection_probes.odin` | The reflection probes: their slots, the capture's turns and faces, its prefilter into the cube array, and their records ([Reflection probes](lighting-and-shadows.md#reflection-probes)) |
