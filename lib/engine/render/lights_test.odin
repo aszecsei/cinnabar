@@ -565,6 +565,8 @@ the_atlas_fits_near_point_lights_in_halved_slots :: proc(t: ^testing.T) {
 	for record in frame.lights.records {
 		if record.type == .Point && record.shadow >= 0 {
 			lit += 1
+			// 8 cubes at 1024 need 48 cells of the 12 past the cascades; at 512 they fill those 12.
+			testing.expect_value(t, frame.shadows.viewports[record.shadow].z, 512)
 		}
 	}
 	testing.expect_value(t, lit, 8)
