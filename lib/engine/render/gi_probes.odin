@@ -191,6 +191,7 @@ Probe_Push :: struct {
 	emitter_table:        u32,
 	emitter_table_offset: u32,
 	emitter_pool:         u32,
+	emitter_table_valid:  u32,
 }
 
 #assert(size_of(Probe_Push) <= 128)
@@ -666,7 +667,7 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	read(g, pass, pf.rays)
 	read(g, pass, pf.hits)
 	read(g, pass, f.exposure)
-	if hit_emitters(&pf.hit_light) {
+	if f.emitters != nil {
 		read(g, pass, f.emitters.pool)
 	}
 	write(g, pass, pf.radiance)
@@ -703,6 +704,9 @@ add_hit_light_passes :: proc(
 	read(g, pass, hits)
 	read(g, pass, surfaces)
 	declare_cloud_shadow(f, pass)
+	if inputs.emitters != nil {
+		read(g, pass, inputs.emitters.pool)
+	}
 	if hit_emitters(inputs) {
 		read(g, pass, inputs.emitters.samples)
 	}
@@ -832,12 +836,17 @@ run_probe_pass :: proc(ctx: ^Pass_Context) {
 		hit_submeshes        = gpu.read_index(f.scene_frame.hit_submeshes.buffer),
 		hit_submeshes_offset = f.scene_frame.hit_submeshes.offset,
 	}
-	if hit_emitters(inputs) {
-		push.emitter_samples = gpu.read_index(gpu_buffer(g, inputs.emitters.samples))
-		push.emitter_count = inputs.emitters.triangles
+	// The table and the pool give the translucent triangles' transmittance whenever the emitters run, and the samples
+	// only when they have triangles.
+	if inputs.emitters != nil {
 		push.emitter_table = gpu.read_index(inputs.emitters.table.buffer)
 		push.emitter_table_offset = inputs.emitters.table.offset
 		push.emitter_pool = gpu.read_index(gpu_buffer(g, inputs.emitters.pool))
+		push.emitter_table_valid = 1
+	}
+	if hit_emitters(inputs) {
+		push.emitter_samples = gpu.read_index(gpu_buffer(g, inputs.emitters.samples))
+		push.emitter_count = inputs.emitters.triangles
 	}
 	if step.pass == .Update {
 		push.exposure = gpu.read_index(gpu_buffer(g, f.exposure))

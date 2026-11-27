@@ -22,6 +22,10 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	lights.seed = push.seed;
 	lights.emitters = push.emitter_samples;
 	lights.emitter_count = push.emitter_count;
+	lights.emitter_table = push.emitter_table;
+	lights.emitter_table_offset = push.emitter_table_offset;
+	lights.emitter_pool = push.emitter_pool;
+	lights.emitter_table_valid = push.emitter_table_valid != 0;
 	float4 result = hit_light(load_hit(push.hits, ray), push.surfaces, ray, lights, frame_probe_grid());
 	cn_rw_buffer(push.rays).Store<float4>(ray * 16, result);
 }

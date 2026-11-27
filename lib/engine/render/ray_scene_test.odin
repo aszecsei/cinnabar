@@ -94,7 +94,13 @@ hit_entries_map_each_submeshs_primitives_to_its_block_and_bin :: proc(t: ^testin
 	testing.expect_value(
 		t,
 		table.submeshes[2],
-		Hit_Submesh{first_primitive = 10, primitive_count = 2, block = 32, bin = HIT_TRANSLUCENT},
+		// A translucent submesh keeps its material's bin below HIT_TRANSLUCENT, for the batches that shade it.
+		Hit_Submesh {
+			first_primitive = 10,
+			primitive_count = 2,
+			block = 32,
+			bin = HIT_TRANSLUCENT | 2,
+		},
 	)
 	testing.expect_value(
 		t,
@@ -108,12 +114,16 @@ hit_entries_map_each_submeshs_primitives_to_its_block_and_bin :: proc(t: ^testin
 	)
 	testing.expect(
 		t,
-		table.used[0] && table.used[1] && !table.used[2] && !table.used[3] && !table.used[4],
+		table.used[0] && table.used[1] && table.used[2] && !table.used[3] && !table.used[4],
 	)
 	// Each record has its key: the entity's submesh, its pipeline, and whether hit shading evaluates it.
 	testing.expect_value(t, len(table.keys), len(table.submeshes))
 	testing.expect_value(t, table.keys[1], Hit_Entry_Key{submesh = 0, pipeline = 0, shaded = true})
-	testing.expect_value(t, table.keys[2], Hit_Entry_Key{submesh = 1, pipeline = 1})
+	testing.expect_value(
+		t,
+		table.keys[2],
+		Hit_Entry_Key{submesh = 1, pipeline = 1, translucent = true},
+	)
 	testing.expect_value(t, table.keys[3], Hit_Entry_Key{submesh = 2, pipeline = 2})
 
 	// A slot of transparent submeshes only has no surface for rays to shade.

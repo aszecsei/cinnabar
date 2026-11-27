@@ -17,12 +17,15 @@ static const uint EMITTER_FLIPPED = 2;
 static const uint EMITTER_SEARCH_STEPS = 15;
 
 // Matches Emitter_Table_Header in lib/engine/render/gi_emitters.odin: the listed submeshes and their triangles this
-// frame, and where hit_emitters, the listed submesh of each hit table record or ~0, starts, in bytes.
+// frame, where hit_emitters, the listed submesh of each hit table record or ~0, starts, in bytes, the records, and
+// where hit_transmitters, each record's first cell of the pool's transmittance or ~0, starts.
 struct Emitter_Table_Header {
 	uint count;
 	uint triangles;
 	uint hit_emitters;
 	uint entries;
+	uint hit_transmitters;
+	uint3 padding;
 };
 
 // Matches Emitter_Submesh in lib/engine/render/gi_emitters.odin.

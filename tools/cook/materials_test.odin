@@ -414,8 +414,8 @@ transparent_materials_cook_their_transparent_passes_only :: proc(t: ^testing.T) 
 		testing.expect(t, format.material_code(data, blob, 0, .Forward, .Vertex) == nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Prepass, .Vertex) == nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Depth, .Vertex) == nil)
-		// Rays pass through no transparent surface, so the fallback shades its hits.
-		testing.expect(t, format.material_code(data, blob, 0, .Hit, .Compute) == nil)
+		// The hit pass gives the light that passes through it, for the GI's shadow rays.
+		testing.expect(t, format.material_code(data, blob, 0, .Hit, .Compute) != nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Transparent, .Pixel) != nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Transparent_Ids, .Pixel) != nil)
 		testing.expect(t, .Cast_Shadows not_in blob.flags)

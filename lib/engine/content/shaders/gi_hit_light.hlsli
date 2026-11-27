@@ -21,7 +21,8 @@ static const uint HIT_SHADOW_MAX_CANDIDATES = 8;
 static const uint HIT_MAX_SUBMESHES = 16;
 
 // Hit_Lights are what a hit's light needs beyond the frame constants: the ray scene that the shadow rays trace, with
-// its hit table, whose translucent submeshes they pass through; the light grid in a buffer at an offset, whose punctual
+// its hit table, whose translucent submeshes they pass through, and the GI's emitters' table and pool, whose cells give
+// those submeshes' transmittance, when emitter_table_valid; the light grid in a buffer at an offset, whose punctual
 // lights the hits pick from after the directional ones, with the emitters' samples, which hold emitter_count triangles,
 // or none for 0, the lights that each hit weighs, and the seed of its choices.
 struct Hit_Lights {
@@ -36,27 +37,50 @@ struct Hit_Lights {
 	uint seed;
 	uint emitters;
 	uint emitter_count;
+	uint emitter_table;
+	uint emitter_table_offset;
+	uint emitter_pool;
+	// Whether the emitters' table and pool are this frame's: a bindless index of 0 is a buffer too.
+	bool emitter_table_valid;
 };
 
-// hit_translucent is whether a primitive of a slot is a translucent submesh's, by the hit table.
-bool hit_translucent(Hit_Lights lights, uint slot, uint primitive) {
+// hit_translucent is whether a primitive of a slot is a translucent submesh's, by the hit table, and the light that
+// passes through it: its cell of the emitters' pool, or all of it while it has none or no ray has reached its cell.
+bool hit_translucent(Hit_Lights lights, uint slot, uint primitive, out float3 transmittance) {
+	transmittance = 1;
 	Hit_Instance instance = cn_buffer(lights.hit_instances).Load<Hit_Instance>(lights.hit_instances_offset + slot * sizeof(Hit_Instance));
 	if ((instance.flags & HIT_INSTANCE_TRANSLUCENT) == 0) {
 		return false;
 	}
 	for (uint k = 0; k < min(instance.count, HIT_MAX_SUBMESHES); k++) {
-		Hit_Submesh submesh = cn_buffer(lights.hit_submeshes).Load<Hit_Submesh>(lights.hit_submeshes_offset + (instance.first + k) * sizeof(Hit_Submesh));
-		if (primitive - submesh.first_primitive < submesh.primitive_count) {
-			return (submesh.bin & HIT_TRANSLUCENT) != 0;
+		uint entry = instance.first + k;
+		Hit_Submesh submesh = cn_buffer(lights.hit_submeshes).Load<Hit_Submesh>(lights.hit_submeshes_offset + entry * sizeof(Hit_Submesh));
+		if (primitive - submesh.first_primitive >= submesh.primitive_count) {
+			continue;
 		}
+		if ((submesh.bin & HIT_TRANSLUCENT) == 0) {
+			return false;
+		}
+		if (lights.emitter_table_valid) {
+			Emitter_Table_Header header = load_emitter_header(lights.emitter_table, lights.emitter_table_offset);
+			if (entry < header.entries) {
+				uint base = cn_buffer(lights.emitter_table).Load(lights.emitter_table_offset + header.hit_transmitters + entry * 4);
+				if (base != ~0u) {
+					float4 cell = cn_buffer(lights.emitter_pool).Load<float4>((base + primitive - submesh.first_primitive) * 16);
+					transmittance = cell.w > 0 ? saturate(cell.rgb) : 1;
+				}
+			}
+		}
+		return true;
 	}
 	return false;
 }
 
-// hit_shadow is whether a light reaches a point relative to the camera, along a direction toward it, within a distance.
-// Only an instance with a translucent submesh is not opaque, and the ray passes through that submesh's triangles: a
-// lantern's glass does not hide its flame, and a window lets the sun in.
-float hit_shadow(Hit_Lights lights, float3 p, float3 direction, float distance) {
+// hit_shadow is how much of a light reaches a point relative to the camera, along a direction toward it, within a
+// distance. Only an instance with a translucent submesh is not opaque, and the ray passes through that submesh's
+// triangles, each letting its transmittance through: a lantern's glass dims and tints its flame, and a window the sun.
+// The order in which the triangles come does not change the product.
+float3 hit_shadow(Hit_Lights lights, float3 p, float3 direction, float distance) {
 	RayDesc ray;
 	ray.Origin = p + frame.camera_offset.xyz;
 	ray.Direction = direction;
@@ -65,16 +89,24 @@ float hit_shadow(Hit_Lights lights, float3 p, float3 direction, float distance) 
 	RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
 	query.TraceRayInline(cn_accel(lights.accel), 0, RAY_MASK_SHADOWS, ray);
 	uint candidates = 0;
+	float3 through = 1;
 	while (query.Proceed()) {
 		if (query.CandidateType() != CANDIDATE_NON_OPAQUE_TRIANGLE) {
 			continue;
 		}
 		candidates++;
-		if (candidates > HIT_SHADOW_MAX_CANDIDATES || !hit_translucent(lights, query.CandidateInstanceID(), query.CandidatePrimitiveIndex())) {
+		float3 transmittance;
+		if (candidates > HIT_SHADOW_MAX_CANDIDATES || !hit_translucent(lights, query.CandidateInstanceID(), query.CandidatePrimitiveIndex(), transmittance)) {
+			query.CommitNonOpaqueTriangleHit();
+			continue;
+		}
+		through *= transmittance;
+		// Glass that lets almost nothing through is opaque.
+		if (all(through < 1e-3)) {
 			query.CommitNonOpaqueTriangleHit();
 		}
 	}
-	return query.CommittedStatus() == COMMITTED_NOTHING ? 1 : 0;
+	return query.CommittedStatus() == COMMITTED_NOTHING ? through : 0;
 }
 
 float3 hit_direct(Hit_Lights lights, Light_Record l, float3 p, float3 normal) {

@@ -15,7 +15,9 @@ import "cinnabar:engine/ecs"
 // Each listed submesh keeps a range of the radiance pool, a cell for each triangle, which the refresh's rays blend each
 // triangle's emission into. Each frame, the build pass places the listed triangles relative to the camera, with their
 // power, the radiance of the cell times the area, and a scan turns the powers into a distribution that the hits draw
-// triangles from (see gi_light_sampling.hlsli). Only the frame's own view runs them.
+// triangles from (see gi_light_sampling.hlsli). Each translucent submesh whose hit pass is ready keeps a range of the
+// pool too, which the refresh blends its triangles' transmittance into, the light that passes through them, which the
+// hits' shadow rays take (see gi_hit_light.hlsli). Only the frame's own view runs them.
 
 // The most submeshes and triangles listed at once, and the most triangles of one listed submesh. Match
 // gi_emitters.hlsl and gi_light_sampling.hlsli.
@@ -28,7 +30,9 @@ EMITTER_DISCOVERY_SAMPLES :: 8
 EMITTER_DISCOVERY_JOBS :: EMITTER_DISCOVERY_SUBMESHES * EMITTER_DISCOVERY_SAMPLES
 // The refresh's triangles a frame.
 EMITTER_REFRESH_JOBS :: 4096
-MAX_EMITTER_JOBS :: EMITTER_DISCOVERY_JOBS + EMITTER_REFRESH_JOBS
+// The translucent triangles whose transmittance the refresh reads a frame, in turn.
+EMITTER_TRANSMIT_JOBS :: 1024
+MAX_EMITTER_JOBS :: EMITTER_DISCOVERY_JOBS + EMITTER_REFRESH_JOBS + EMITTER_TRANSMIT_JOBS
 // A submesh is listed when a point's emitted luminance is at least this much, and unlisted after this many scans in a
 // row find all its points darker.
 EMITTER_MIN_LUMINANCE :: 1e-3
@@ -83,13 +87,16 @@ Emitter_Submesh :: struct {
 
 EMITTER_TWO_SIDED :: 1
 
-// Emitter_Table_Header matches the emitter table's header in gi_emitters.hlsl: the listed submeshes, their triangles,
-// and the byte offset of hit_emitters, which gives each hit table record's listed submesh, or ~0.
+// Emitter_Table_Header matches the emitter table's header in gi_emitter_samples.hlsli: the listed submeshes, their
+// triangles, the byte offset of hit_emitters, which gives each hit table record's listed submesh, or ~0, the records,
+// and the byte offset of hit_transmitters, which gives each record's first cell of the pool's transmittance, or ~0.
 Emitter_Table_Header :: struct {
-	count:        u32,
-	triangles:    u32,
-	hit_emitters: u32,
-	entries:      u32,
+	count:            u32,
+	triangles:        u32,
+	hit_emitters:     u32,
+	entries:          u32,
+	hit_transmitters: u32,
+	_:                [3]u32,
 }
 
 // Emitter_Push matches Emitter_Push in gi_emitters.hlsl.
@@ -113,7 +120,7 @@ Emitter_Push :: struct {
 #assert(
 	size_of(Emitter_Job) == 16 &&
 	size_of(Emitter_Submesh) == 32 &&
-	size_of(Emitter_Table_Header) == 16,
+	size_of(Emitter_Table_Header) == 32,
 )
 
 // Emitter_Key is a submesh that stays the same from frame to frame: its entity's, by its index in the mesh.
@@ -165,18 +172,21 @@ Pool_Range :: struct {
 // the batch, the readback slots and their scans, the listed submeshes, the pool's free ranges, and the cursors of the
 // discovery and the refresh.
 Gi_Emitters :: struct {
-	pipeline:  Shader_Pipeline,
-	pool:      gpu.Buffer,
-	hits:      gpu.Buffer,
-	surfaces:  gpu.Buffer,
-	results:   gpu.Buffer,
-	samples:   gpu.Buffer,
-	readbacks: [READBACK_COPIES]gpu.Buffer,
-	scans:     [READBACK_COPIES]Maybe(Emitter_Scan),
-	listed:    map[Emitter_Key]Emitter,
-	free:      [dynamic]Pool_Range,
-	discovery: u32,
-	refresh:   u32,
+	pipeline:     Shader_Pipeline,
+	pool:         gpu.Buffer,
+	hits:         gpu.Buffer,
+	surfaces:     gpu.Buffer,
+	results:      gpu.Buffer,
+	samples:      gpu.Buffer,
+	readbacks:    [READBACK_COPIES]gpu.Buffer,
+	scans:        [READBACK_COPIES]Maybe(Emitter_Scan),
+	listed:       map[Emitter_Key]Emitter,
+	// The translucent submeshes, each with its range of the pool, as sync_transmitters keeps them.
+	transmitters: map[Emitter_Key]Emitter,
+	free:         [dynamic]Pool_Range,
+	discovery:    u32,
+	refresh:      u32,
+	transmit:     u32,
 }
 
 // Gi_Emitter_Frame is one frame's emitters, in frame memory: the table and the jobs in the upload ring, the frame's
@@ -199,6 +209,7 @@ Gi_Emitter_Frame :: struct {
 	fills:           []Emitter_Fill,
 	next_discovery:  u32,
 	next_refresh:    u32,
+	next_transmit:   u32,
 }
 
 // Emitter_Fill is how far the frame's refresh reached into a listed submesh's triangles.
@@ -220,6 +231,7 @@ gi_emitters_destroy :: proc(e: ^Gi_Emitters, platform: ^core.Platform_API) {
 		platform.gpu_destroy_buffer(b)
 	}
 	delete(e.listed)
+	delete(e.transmitters)
 	delete(e.free)
 	e^ = {
 		pipeline = e.pipeline,
@@ -443,15 +455,18 @@ emitter_signature :: proc(key: Hit_Entry_Key, submesh: Hit_Submesh) -> Emitter_S
 // the listed submeshes this frame, by their records, with hit_emitters for each record, the jobs, the scan's
 // submeshes, how far the refresh reaches into each new submesh, and the cursors after.
 Emitter_Plan :: struct {
-	submeshes:      []Emitter_Submesh,
-	hit_emitters:   []u32,
-	triangles:      u32,
-	jobs:           []Emitter_Job,
-	discovery:      u32,
-	scan:           Emitter_Scan,
-	fills:          []Emitter_Fill,
-	next_discovery: u32,
-	next_refresh:   u32,
+	submeshes:        []Emitter_Submesh,
+	hit_emitters:     []u32,
+	triangles:        u32,
+	jobs:             []Emitter_Job,
+	discovery:        u32,
+	scan:             Emitter_Scan,
+	fills:            []Emitter_Fill,
+	next_discovery:   u32,
+	next_refresh:     u32,
+	// Each record's first cell of the pool's transmittance, or ~0, and the cursor of the transmittance's refresh after.
+	hit_transmitters: []u32,
+	next_transmit:    u32,
 }
 
 // plan_gi_emitters unlists the listed submeshes that the frame's hit table no longer has as they were, and plans the
@@ -526,6 +541,16 @@ plan_gi_emitters :: proc(
 		plan.triangles += submeshes[i].primitive_count
 	}
 	plan.submeshes = listed[:]
+	transmitted := sync_transmitters(e, submeshes, keys, slots, allocator)
+	plan.hit_transmitters = make([]u32, len(keys), allocator)
+	for &cell in plan.hit_transmitters {
+		cell = ~u32(0)
+	}
+	transmitted_triangles: u32
+	for t in transmitted {
+		plan.hit_transmitters[t.entry] = t.base
+		transmitted_triangles += t.count
+	}
 
 	jobs := make([dynamic]Emitter_Job, allocator)
 	seed := frame * 0x9e3779b9
@@ -623,8 +648,114 @@ plan_gi_emitters :: proc(
 		}
 		plan.next_refresh = (cursor + n) % plan.triangles
 	}
+	// The transmittance's refresh: the translucent triangles in turn. A cell that no ray has reached lets all the
+	// light through, as a translucent submesh without a cell does.
+	plan.next_transmit = e.transmit
+	if transmitted_triangles > 0 {
+		cursor := e.transmit % transmitted_triangles
+		n := min(u32(EMITTER_TRANSMIT_JOBS), transmitted_triangles)
+		at, first := 0, u32(0)
+		for k in 0 ..< n {
+			t := (cursor + k) % transmitted_triangles
+			if k == 0 || t == 0 {
+				at, first = 0, 0
+				for first + transmitted[at].count <= t {
+					first += transmitted[at].count
+					at += 1
+				}
+			}
+			for t >= first + transmitted[at].count {
+				first += transmitted[at].count
+				at += 1
+			}
+			sub := transmitted[at]
+			local := t - first
+			append(
+				&jobs,
+				Emitter_Job {
+					slot = sub.slot,
+					primitive = sub.first_primitive + local,
+					target = sub.base + local,
+					seed = split_hash(seed ~ t ~ 0x27d4eb2f),
+				},
+			)
+		}
+		plan.next_transmit = (cursor + n) % transmitted_triangles
+	}
 	plan.jobs = jobs[:]
 	return
+}
+
+// Transmitted is a translucent submesh of the frame with its range of the pool: its record, slot, primitives and first
+// cell.
+Transmitted :: struct {
+	entry:           int,
+	slot:            u32,
+	first_primitive: u32,
+	count:           u32,
+	base:            u32,
+}
+
+// sync_transmitters is the one writer of the translucent submeshes' ranges of the pool (see
+// docs/overview/conventions.md#state-with-a-lifecycle): it frees the range of each that the frame's hit table no longer
+// has as it was, gives a range to each new one while the pool has room, and gives the frame's in the records' order.
+sync_transmitters :: proc(
+	e: ^Gi_Emitters,
+	submeshes: []Hit_Submesh,
+	keys: []Hit_Entry_Key,
+	slots: []u32,
+	allocator := context.allocator,
+) -> []Transmitted {
+	records := make(map[Emitter_Key]int, len(keys), allocator)
+	for key, i in keys {
+		count := submeshes[i].primitive_count
+		if key.translucent && count > 0 && count <= MAX_EMITTER_SUBMESH_TRIANGLES {
+			records[{key.entity, key.submesh}] = i
+		}
+	}
+	gone := make([dynamic]Emitter_Key, allocator)
+	for key, t in e.transmitters {
+		i, found := records[key]
+		if !found || emitter_signature(keys[i], submeshes[i]) != t.signature {
+			append(&gone, key)
+		}
+	}
+	for key in gone {
+		t := e.transmitters[key]
+		pool_free(&e.free, t.base, t.signature.primitive_count)
+		delete_key(&e.transmitters, key)
+	}
+	frame := make([dynamic]Transmitted, allocator)
+	for key, i in keys {
+		k := Emitter_Key{key.entity, key.submesh}
+		if _, present := records[k]; !present {
+			continue
+		}
+		t, found := e.transmitters[k]
+		if !found {
+			signature := emitter_signature(key, submeshes[i])
+			base, ok := pool_allocate(&e.free, signature.primitive_count)
+			if !ok {
+				continue
+			}
+			t = {
+				signature = signature,
+				base      = base,
+			}
+			e.transmitters[k] = t
+		}
+		append(
+			&frame,
+			Transmitted {
+				entry = i,
+				slot = slots[i],
+				first_primitive = submeshes[i].first_primitive,
+				count = submeshes[i].primitive_count,
+				base = t.base,
+			},
+		)
+	}
+	return frame[:]
 }
 
 // gi_emitters_wanted is whether the frame's hits sample the emitters: on the frame's own view, with the ray scene and
@@ -685,7 +816,8 @@ add_gi_emitter_passes :: proc(f: ^Frame) -> ^Gi_Emitter_Frame {
 		) + u32(len(plan.submeshes)) * size_of(Emitter_Submesh),
 		entries      = u32(len(plan.hit_emitters)),
 	}
-	table_size := int(header.hit_emitters) + len(plan.hit_emitters) * 4
+	header.hit_transmitters = header.hit_emitters + header.entries * 4
+	table_size := int(header.hit_transmitters) + len(plan.hit_transmitters) * 4
 	table, table_ok := platform.gpu_upload(table_size, 16)
 	jobs, jobs_ok := platform.gpu_upload(max(len(plan.jobs), 1) * size_of(Emitter_Job), 16)
 	if !table_ok || !jobs_ok {
@@ -701,6 +833,7 @@ add_gi_emitter_passes :: proc(f: ^Frame) -> ^Gi_Emitter_Frame {
 	(^Emitter_Table_Header)(raw_data(table.data))^ = header
 	copy(table.data[size_of(Emitter_Table_Header):], slice.to_bytes(plan.submeshes))
 	copy(table.data[header.hit_emitters:], slice.to_bytes(plan.hit_emitters))
+	copy(table.data[header.hit_transmitters:], slice.to_bytes(plan.hit_transmitters))
 	copy(jobs.data, slice.to_bytes(plan.jobs))
 
 	g := f.graph
@@ -722,6 +855,7 @@ add_gi_emitter_passes :: proc(f: ^Frame) -> ^Gi_Emitter_Frame {
 		fills           = plan.fills,
 		next_discovery  = plan.next_discovery,
 		next_refresh    = plan.next_refresh,
+		next_transmit   = plan.next_transmit,
 	}
 	step :: proc(ef: ^Gi_Emitter_Frame, phase: Emitter_Phase) -> ^Emitter_Step {
 		return new_clone(Emitter_Step{ef, phase}, ef.frame.renderer.platform.frame_allocator)
@@ -743,6 +877,7 @@ add_gi_emitter_passes :: proc(f: ^Frame) -> ^Gi_Emitter_Frame {
 			{hits = ef.hits, surfaces = ef.surfaces, count = ef.job_count},
 			.Compute,
 			"gi emitter",
+			translucent = true,
 		)
 		p = add_compute_pass(
 			g,
@@ -803,7 +938,7 @@ add_gi_emitter_passes :: proc(f: ^Frame) -> ^Gi_Emitter_Frame {
 commit_gi_emitters :: proc(data: rawptr) {
 	ef := (^Gi_Emitter_Frame)(data)
 	e := &ef.frame.renderer.gi.emitters
-	e.discovery, e.refresh = ef.next_discovery, ef.next_refresh
+	e.discovery, e.refresh, e.transmit = ef.next_discovery, ef.next_refresh, ef.next_transmit
 	for fill in ef.fills {
 		if listed, found := &e.listed[fill.key]; found {
 			listed.filled = max(listed.filled, fill.filled)

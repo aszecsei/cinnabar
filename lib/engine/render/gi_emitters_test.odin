@@ -515,3 +515,56 @@ the_emitters_run_on_the_compute_queue_and_pass_validation :: proc(t: ^testing.T)
 	}
 	testing.expect_value(t, len(r.gi.emitters.listed), 1)
 }
+
+// Each translucent record whose hit pass is ready takes a range of the pool, which the transmittance's refresh reads
+// in turn and hit_transmitters gives the shadow rays; a record that goes, or changes its material, frees its range.
+@(test)
+a_translucent_submesh_keeps_its_transmittance_in_the_pool :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	allocator := virtual.arena_allocator(&arena)
+	e: Gi_Emitters
+	defer delete(e.listed)
+	defer delete(e.transmitters)
+	defer delete(e.free)
+	append(&e.free, Pool_Range{0, MAX_EMITTER_TRIANGLES})
+	window := ecs.Entity(7)
+	instances := []Hit_Instance{{}, {mesh = 1, first = 0, count = 2}}
+	submeshes := []Hit_Submesh {
+		{first_primitive = 0, primitive_count = 10},
+		{first_primitive = 10, primitive_count = 4, bin = HIT_TRANSLUCENT | 3},
+	}
+	keys := []Hit_Entry_Key {
+		{entity = window, submesh = 0, pipeline = 1, shaded = true},
+		{entity = window, submesh = 1, pipeline = 2, translucent = true},
+	}
+	plan := plan_gi_emitters(&e, instances, submeshes, keys, false, 0, allocator)
+	testing.expect_value(t, len(e.transmitters), 1)
+	testing.expect_value(t, plan.hit_transmitters[0], ~u32(0))
+	testing.expect_value(t, plan.hit_transmitters[1], 0)
+	testing.expect_value(t, len(plan.jobs), 4)
+	for job, k in plan.jobs {
+		testing.expect_value(t, job, Emitter_Job{1, 10 + u32(k), u32(k), job.seed})
+	}
+	testing.expect_value(t, plan.next_transmit, 0)
+	testing.expect_value(t, e.free[0], Pool_Range{4, MAX_EMITTER_TRIANGLES - 4})
+
+	// The same record keeps its range from frame to frame.
+	plan = plan_gi_emitters(&e, instances, submeshes, keys, false, 1, allocator)
+	testing.expect_value(t, plan.hit_transmitters[1], 0)
+
+	// Another material frees it, and the record takes a new one.
+	keys[1].pipeline = 5
+	plan = plan_gi_emitters(&e, instances, submeshes, keys, false, 2, allocator)
+	testing.expect_value(t, len(e.transmitters), 1)
+	testing.expect_value(t, plan.hit_transmitters[1], 0)
+
+	// A record whose hit pass is not ready has none, and its range is free again.
+	keys[1].translucent = false
+	plan = plan_gi_emitters(&e, instances, submeshes, keys, false, 3, allocator)
+	testing.expect_value(t, len(e.transmitters), 0)
+	testing.expect_value(t, plan.hit_transmitters[1], ~u32(0))
+	testing.expect_value(t, len(plan.jobs), 0)
+	testing.expect_value(t, e.free[0], Pool_Range{0, MAX_EMITTER_TRIANGLES})
+}

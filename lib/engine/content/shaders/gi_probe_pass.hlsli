@@ -10,7 +10,8 @@
 // frame's, which the update reads. hit_instances and hit_submeshes are the frame's hit table, which the hits' shadow
 // rays read to pass through translucent submeshes. emitter_samples are the GI's emitters' triangles, emitter_count of
 // them, or 0 without them, which the hits sample, with the emitters' table and their radiance pool, which the update
-// takes their light out of the hits' irradiance with.
+// takes their light out of the hits' irradiance with, and whose pool gives the hits' shadow rays the translucent
+// triangles' transmittance, when emitter_table_valid is 1.
 struct Probe_Push {
 	uint shadow_atlas;
 	uint shadow_mask;
@@ -38,6 +39,7 @@ struct Probe_Push {
 	uint emitter_table;
 	uint emitter_table_offset;
 	uint emitter_pool;
+	uint emitter_table_valid;
 };
 #define MATERIAL_PUSH Probe_Push
 // No shading model: the hits need only the light loop's lookups.

@@ -1,0 +1,556 @@
+# The glass shadows scene (see docs/rendering/global-illumination.md#many-lights): three closed white corridors side by
+# side, each lit only by a point light in a black box behind a window in its south wall. The first window is deep red
+# glass, which casts shadows, the second is open, and the third is a white panel. The global illumination's rays see
+# through a window of glass alone into the black box, which gives them nothing, so the corridor's light reaches them
+# only through their hits' shadow rays toward the light, which pass through the glass dimmed and tinted by its
+# transmittance. Compare the Gi_Diffuse view in each corridor from (x - 1.1, 1.5, 0.5) facing the south wall beside its
+# window, x being -4, 0 and 4, where neither the window nor a lit surface is on the screen: red and dim behind the
+# glass, white behind the open window, dark behind the panel, at one manual exposure and no ambient light. Positions are raw World_Position
+# values in units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
+scene 4
+
+entity 61a5000000000001
+name = "Camera"
+component 1 Transform
+	position = [-85563802, 25165824, 8388608]
+	rotation = [0, 1, 0, 0]
+	scale = [1, 1, 1]
+component 32 Camera
+behaviour 79650b8e784445cba714fef3fd88eec6
+
+entity 61a5000000000002
+name = "Global Volume"
+component 1 Transform
+	position = [0, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	background = [0, 0, 0]
+	sky = [0, 0, 0]
+	ground = [0, 0, 0]
+	ambient_intensity = 0
+component 44 Exposure
+	mode = Manual
+	exposure = 4
+
+entity 61a5000000000003
+name = "Glass Floor"
+component 1 Transform
+	position = [-67108864, -1677722, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [3.4, 0.2, 8.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a5000000000004
+name = "Glass Roof"
+component 1 Transform
+	position = [-67108864, 52009370, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [3.4, 0.2, 8.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a5000000000005
+name = "Glass West Wall"
+component 1 Transform
+	position = [-93952410, 25165824, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.2, 3, 8]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a5000000000006
+name = "Glass East Wall"
+component 1 Transform
+	position = [-40265318, 25165824, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.2, 3, 8]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a5000000000007
+name = "Glass North Wall"
+component 1 Transform
+	position = [-67108864, 25165824, 135895450]
+	rotation = [0, 0, 0, 1]
+	scale = [3, 3, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a5000000000008
+name = "Glass South Wall Left"
+component 1 Transform
+	position = [-84724941, 25165824, -1677722]
+	rotation = [0, 0, 0, 1]
+	scale = [0.9, 3, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a5000000000009
+name = "Glass South Wall Right"
+component 1 Transform
+	position = [-49492787, 25165824, -1677722]
+	rotation = [0, 0, 0, 1]
+	scale = [0.9, 3, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a500000000000a
+name = "Glass South Wall Below"
+component 1 Transform
+	position = [-67108864, 7549747, -1677722]
+	rotation = [0, 0, 0, 1]
+	scale = [1.2, 0.9, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a500000000000b
+name = "Glass South Wall Above"
+component 1 Transform
+	position = [-67108864, 42781901, -1677722]
+	rotation = [0, 0, 0, 1]
+	scale = [1.2, 0.9, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a500000000000c
+name = "Glass Lamp Back"
+component 1 Transform
+	position = [-67108864, 25165824, -28521267]
+	rotation = [0, 0, 0, 1]
+	scale = [2, 2, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $be74506e74ce4f13b156b6ad045d80cc
+	cast_shadows = true
+
+entity 61a500000000000d
+name = "Glass Lamp Left"
+component 1 Transform
+	position = [-85563802, 25165824, -15099494]
+	rotation = [0, 0, 0, 1]
+	scale = [0.2, 2, 1.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $be74506e74ce4f13b156b6ad045d80cc
+	cast_shadows = true
+
+entity 61a500000000000e
+name = "Glass Lamp Right"
+component 1 Transform
+	position = [-48653926, 25165824, -15099494]
+	rotation = [0, 0, 0, 1]
+	scale = [0.2, 2, 1.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $be74506e74ce4f13b156b6ad045d80cc
+	cast_shadows = true
+
+entity 61a500000000000f
+name = "Glass Lamp Top"
+component 1 Transform
+	position = [-67108864, 43620762, -15099494]
+	rotation = [0, 0, 0, 1]
+	scale = [2.4, 0.2, 1.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $be74506e74ce4f13b156b6ad045d80cc
+	cast_shadows = true
+
+entity 61a5000000000010
+name = "Glass Lamp Bottom"
+component 1 Transform
+	position = [-67108864, 6710886, -15099494]
+	rotation = [0, 0, 0, 1]
+	scale = [2.4, 0.2, 1.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $be74506e74ce4f13b156b6ad045d80cc
+	cast_shadows = true
+
+entity 61a5000000000012
+name = "Glass Lamp Light"
+component 1 Transform
+	position = [-67108864, 25165824, -15099494]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1, 1, 1]
+	intensity = 4
+	range = 12
+	cast_shadows = true
+
+entity 61a5000000000013
+name = "Glass Window"
+component 1 Transform
+	position = [-67108864, 25165824, -1677722]
+	rotation = [0, 0, 0, 1]
+	scale = [1.2, 1.2, 0.04]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $332d5005070447ada7f7a25052eba953
+	cast_shadows = true
+
+entity 61a5000000000014
+name = "Open Floor"
+component 1 Transform
+	position = [0, -1677722, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [3.4, 0.2, 8.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a5000000000015
+name = "Open Roof"
+component 1 Transform
+	position = [0, 52009370, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [3.4, 0.2, 8.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a5000000000016
+name = "Open West Wall"
+component 1 Transform
+	position = [-26843546, 25165824, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.2, 3, 8]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a5000000000017
+name = "Open East Wall"
+component 1 Transform
+	position = [26843546, 25165824, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.2, 3, 8]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a5000000000018
+name = "Open North Wall"
+component 1 Transform
+	position = [0, 25165824, 135895450]
+	rotation = [0, 0, 0, 1]
+	scale = [3, 3, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a5000000000019
+name = "Open South Wall Left"
+component 1 Transform
+	position = [-17616077, 25165824, -1677722]
+	rotation = [0, 0, 0, 1]
+	scale = [0.9, 3, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a500000000001a
+name = "Open South Wall Right"
+component 1 Transform
+	position = [17616077, 25165824, -1677722]
+	rotation = [0, 0, 0, 1]
+	scale = [0.9, 3, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a500000000001b
+name = "Open South Wall Below"
+component 1 Transform
+	position = [0, 7549747, -1677722]
+	rotation = [0, 0, 0, 1]
+	scale = [1.2, 0.9, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a500000000001c
+name = "Open South Wall Above"
+component 1 Transform
+	position = [0, 42781901, -1677722]
+	rotation = [0, 0, 0, 1]
+	scale = [1.2, 0.9, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a500000000001d
+name = "Open Lamp Back"
+component 1 Transform
+	position = [0, 25165824, -28521267]
+	rotation = [0, 0, 0, 1]
+	scale = [2, 2, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $be74506e74ce4f13b156b6ad045d80cc
+	cast_shadows = true
+
+entity 61a500000000001e
+name = "Open Lamp Left"
+component 1 Transform
+	position = [-18454938, 25165824, -15099494]
+	rotation = [0, 0, 0, 1]
+	scale = [0.2, 2, 1.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $be74506e74ce4f13b156b6ad045d80cc
+	cast_shadows = true
+
+entity 61a500000000001f
+name = "Open Lamp Right"
+component 1 Transform
+	position = [18454938, 25165824, -15099494]
+	rotation = [0, 0, 0, 1]
+	scale = [0.2, 2, 1.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $be74506e74ce4f13b156b6ad045d80cc
+	cast_shadows = true
+
+entity 61a5000000000020
+name = "Open Lamp Top"
+component 1 Transform
+	position = [0, 43620762, -15099494]
+	rotation = [0, 0, 0, 1]
+	scale = [2.4, 0.2, 1.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $be74506e74ce4f13b156b6ad045d80cc
+	cast_shadows = true
+
+entity 61a5000000000021
+name = "Open Lamp Bottom"
+component 1 Transform
+	position = [0, 6710886, -15099494]
+	rotation = [0, 0, 0, 1]
+	scale = [2.4, 0.2, 1.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $be74506e74ce4f13b156b6ad045d80cc
+	cast_shadows = true
+
+entity 61a5000000000023
+name = "Open Lamp Light"
+component 1 Transform
+	position = [0, 25165824, -15099494]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1, 1, 1]
+	intensity = 4
+	range = 12
+	cast_shadows = true
+
+entity 61a5000000000024
+name = "Closed Floor"
+component 1 Transform
+	position = [67108864, -1677722, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [3.4, 0.2, 8.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a5000000000025
+name = "Closed Roof"
+component 1 Transform
+	position = [67108864, 52009370, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [3.4, 0.2, 8.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a5000000000026
+name = "Closed West Wall"
+component 1 Transform
+	position = [40265318, 25165824, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.2, 3, 8]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a5000000000027
+name = "Closed East Wall"
+component 1 Transform
+	position = [93952410, 25165824, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.2, 3, 8]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a5000000000028
+name = "Closed North Wall"
+component 1 Transform
+	position = [67108864, 25165824, 135895450]
+	rotation = [0, 0, 0, 1]
+	scale = [3, 3, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a5000000000029
+name = "Closed South Wall Left"
+component 1 Transform
+	position = [49492787, 25165824, -1677722]
+	rotation = [0, 0, 0, 1]
+	scale = [0.9, 3, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a500000000002a
+name = "Closed South Wall Right"
+component 1 Transform
+	position = [84724941, 25165824, -1677722]
+	rotation = [0, 0, 0, 1]
+	scale = [0.9, 3, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a500000000002b
+name = "Closed South Wall Below"
+component 1 Transform
+	position = [67108864, 7549747, -1677722]
+	rotation = [0, 0, 0, 1]
+	scale = [1.2, 0.9, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a500000000002c
+name = "Closed South Wall Above"
+component 1 Transform
+	position = [67108864, 42781901, -1677722]
+	rotation = [0, 0, 0, 1]
+	scale = [1.2, 0.9, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 61a500000000002d
+name = "Closed Lamp Back"
+component 1 Transform
+	position = [67108864, 25165824, -28521267]
+	rotation = [0, 0, 0, 1]
+	scale = [2, 2, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $be74506e74ce4f13b156b6ad045d80cc
+	cast_shadows = true
+
+entity 61a500000000002e
+name = "Closed Lamp Left"
+component 1 Transform
+	position = [48653926, 25165824, -15099494]
+	rotation = [0, 0, 0, 1]
+	scale = [0.2, 2, 1.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $be74506e74ce4f13b156b6ad045d80cc
+	cast_shadows = true
+
+entity 61a500000000002f
+name = "Closed Lamp Right"
+component 1 Transform
+	position = [85563802, 25165824, -15099494]
+	rotation = [0, 0, 0, 1]
+	scale = [0.2, 2, 1.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $be74506e74ce4f13b156b6ad045d80cc
+	cast_shadows = true
+
+entity 61a5000000000030
+name = "Closed Lamp Top"
+component 1 Transform
+	position = [67108864, 43620762, -15099494]
+	rotation = [0, 0, 0, 1]
+	scale = [2.4, 0.2, 1.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $be74506e74ce4f13b156b6ad045d80cc
+	cast_shadows = true
+
+entity 61a5000000000031
+name = "Closed Lamp Bottom"
+component 1 Transform
+	position = [67108864, 6710886, -15099494]
+	rotation = [0, 0, 0, 1]
+	scale = [2.4, 0.2, 1.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $be74506e74ce4f13b156b6ad045d80cc
+	cast_shadows = true
+
+entity 61a5000000000033
+name = "Closed Lamp Light"
+component 1 Transform
+	position = [67108864, 25165824, -15099494]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1, 1, 1]
+	intensity = 4
+	range = 12
+	cast_shadows = true
+
+entity 61a5000000000034
+name = "Closed Window"
+component 1 Transform
+	position = [67108864, 25165824, -1677722]
+	rotation = [0, 0, 0, 1]
+	scale = [1.2, 1.2, 0.04]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true

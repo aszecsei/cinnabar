@@ -40,12 +40,15 @@ struct Hit_Record {
 };
 
 // Hit_Surface's flags, in the high byte of albedo. A fallback surface's material was not evaluated: a translucent one,
-// or one whose hit pipeline is not ready. A cutout is a masked material's hole, which rays do not pass through. A
+// outside the GI's emitters' batch, or one whose hit pipeline is not ready. A cutout is a masked material's hole, which rays do not pass through. A
 // surface without lighting gives only its emission. A back is a back face of a one-sided surface.
 static const uint HIT_SURFACE_FALLBACK = 1;
 static const uint HIT_SURFACE_CUTOUT = 2;
 static const uint HIT_SURFACE_NO_LIGHTING = 4;
 static const uint HIT_SURFACE_BACK = 8;
+// A translucent surface, which only the GI's emitters' batch shades with its material: its emission holds the light
+// that passes through it, its transmittance (see material_hit.hlsli).
+static const uint HIT_SURFACE_TRANSLUCENT = 16;
 
 // Matches Hit_Surface in lib/engine/render/ray_scene.odin: what hit shading gives for one ray's hit. position is
 // relative to the render origin. normal is the shading normal and geometric the triangle's, toward the side the ray came
