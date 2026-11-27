@@ -1122,14 +1122,31 @@ declare_reflection_probe_reads :: proc(f: ^Frame, p: Pass) {
 	read(f.graph, p, pf.clusters)
 }
 
-// add_reflection_probe_shadow gives the capture its own shadow view of the first directional light that casts, in a
-// slot of the atlas: an orthographic view of the sphere around the probe's boxes, since the camera's cascades do not
-// cover a probe far from the camera.
+// reflection_probe_takes_shadow says whether the frame's capture asks for a slot of the atlas: while a probe captures
+// and a directional light casts shadows.
 @(private)
-add_reflection_probe_shadow :: proc(f: ^Frame, sf: ^Shadow_Frame, slot: int, max_views: int) {
+reflection_probe_takes_shadow :: proc(f: ^Frame) -> bool {
 	pf := f.reflection_probes
 	lf := f.lights
-	if pf == nil || !pf.capturing || slot >= max_views {
+	if pf == nil || !pf.capturing {
+		return false
+	}
+	for i in 0 ..< lf.directional_count {
+		if lf.casts[i] {
+			return true
+		}
+	}
+	return false
+}
+
+// add_reflection_probe_shadow gives the capture its own shadow view of the first directional light that casts, in a
+// slot of the atlas: an orthographic view of the sphere around the probe's boxes, since the camera's cascades do not
+// cover a probe far from the camera. A slot of size 0, when the atlas has no room, gives none.
+@(private)
+add_reflection_probe_shadow :: proc(f: ^Frame, sf: ^Shadow_Frame, slot: Atlas_Slot) {
+	pf := f.reflection_probes
+	lf := f.lights
+	if pf == nil || !pf.capturing || slot.size == 0 {
 		return
 	}
 	for i in 0 ..< lf.directional_count {

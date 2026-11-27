@@ -685,7 +685,7 @@ run_probe_frame :: proc(
 	}
 	begin_reflection_probes(f, w, nil, settings, DEFAULT_AMBIENT)
 	if pf := f.reflection_probes; pf != nil && pf.capturing {
-		add_reflection_probe_shadow(f, f.shadows, 0, max_shadow_views(f.shadows.params))
+		add_reflection_probe_shadow(f, f.shadows, {0, 0, i32(f.shadows.params.max_slot / 2)})
 	}
 	upload_reflection_probe_lights(f)
 	// The camera's prepass, ambient occlusion and global illumination, and the scene's constants: the camera's, then the

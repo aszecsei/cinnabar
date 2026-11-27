@@ -136,7 +136,7 @@ float2 vogel(uint i, uint count, float2 turn) {
 // ratio of two distances is the inverse ratio of their depths, and the near plane cancels out. The light is size /
 // (z * texel) texels wide at the point's distance z. The search reaches as far as a blocker at the near plane could
 // stand from the point, which is that times (z / near - 1), and the penumbra is that times (z / z_blocker - 1), each at
-// most frame.shadow_soft_radius. The view's guard band (see render.soft_guard) holds what lies past the view's edge out
+// most frame.shadow_soft_radius of the slot's side, so a penumbra is as wide in a slot of any size. The view's guard band (see render.soft_guard) holds what lies past the view's edge out
 // to that reach, so the taps never reach a neighbouring view.
 //
 // A wide filter's taps on a sloped surface compare against the surface's own depth there, not the point's, or the
@@ -187,9 +187,10 @@ float soft_shadow_map(uint view_index, float3 p, float3 normal, float3 to_light,
 	float angle = noise.x * 6.28318531;
 	float2 turn = float2(cos(angle), sin(angle));
 	float light_texels = size / max(clip.w * view.texel, 1e-7);
+	float reach = frame.shadow_soft_radius * view.rect.z * atlas_size.x;
 
 	// The blockers: the texels nearer the light than the receiver plane, whose depths are larger.
-	float search = min(light_texels * (1 / ndc.z - 1), frame.shadow_soft_radius);
+	float search = min(light_texels * (1 / ndc.z - 1), reach);
 	SamplerState gather_sampler = cn_sampler(frame.shadow_depth_sampler);
 	float blockers = 0;
 	float inverse_depths = 0;
@@ -211,7 +212,7 @@ float soft_shadow_map(uint view_index, float3 p, float3 normal, float3 to_light,
 	}
 	// The blockers' mean distance over the receiver's is the mean of their inverse depths times the receiver's depth.
 	float distance_ratio = ndc.z * inverse_depths / blockers;
-	float radius = clamp(light_texels * (1 / distance_ratio - 1), 1, frame.shadow_soft_radius);
+	float radius = clamp(light_texels * (1 / distance_ratio - 1), 1, reach);
 
 	SamplerComparisonState s = cn_comparison_sampler(frame.shadow_sampler);
 	float lit = 0;
