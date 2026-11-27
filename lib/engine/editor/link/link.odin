@@ -820,6 +820,9 @@ Viewport_Settings :: struct {
 	render_scale:         f32,
 	reflections:          Viewport_Reflections,
 	reflections_level:    Viewport_Level,
+	// Turns every directional light about the world's up axis, in radians, so a measurement can change the light at
+	// once (see docs/editor/capture.md#automation).
+	sun_yaw:              f32,
 }
 
 // Editor to game: how a viewport draws. The editor sends it when it changes, and when the link connects. Each viewport

@@ -1,0 +1,6 @@
+material_instance 1
+# The reference room's walls, as Blender's Principled BSDF has them (see docs/rendering/reference-scenes.md).
+parent = $88ea45540739212dbccaf95784e26fd6
+base_color = [0.8, 0.8, 0.8, 1]
+roughness = 0.2
+metallic = 0.1

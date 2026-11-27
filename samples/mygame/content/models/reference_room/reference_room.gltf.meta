@@ -1,0 +1,4 @@
+# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).
+guid = 7274af19d745426a9a31dc886f3a635d
+collision = false
+mesh.Room = 89c604aed22aa8ac285313810c6d4365

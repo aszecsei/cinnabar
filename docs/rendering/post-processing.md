@@ -83,7 +83,7 @@ The two smallest levels are a few hundred pixels each, so their cost is two pass
 
 ## Debug views
 
-The editor shows what makes the frame in its viewport (see [Editor](../editor/viewport.md#viewport)): `Frame_Desc.debug_view` replaces the lit scene, `Frame_Desc.disable` turns features off, and `Frame_Desc.exposure_offset` adds stops to the exposure. A game passes them from the editor while it edits, and leaves them zero otherwise (`lib/engine/render/debug_views.odin`).
+The editor shows what makes the frame in its viewport (see [Editor](../editor/viewport.md#viewport)): `Frame_Desc.debug_view` replaces the lit scene, `Frame_Desc.disable` turns features off, `Frame_Desc.exposure_offset` adds stops to the exposure, and `Frame_Desc.sun_yaw` turns the directional lights about the world's up axis, for a measurement of a change in the light (see [Flicker](../editor/capture.md#flicker)). A game passes them from the editor while it edits, and leaves them zero otherwise (`lib/engine/render/debug_views.odin`).
 
 | View | Drawn by | Shows | Shaded |
 |---|---|---|---|

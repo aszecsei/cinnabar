@@ -567,6 +567,21 @@ light_pose :: proc(
 
 // forward_of is a pose's +z in the world, where a light shines.
 @(private)
+// turn_directional_lights turns a frame's directional lights about the world's up axis by yaw radians, as the
+// editor's sunYaw asks, before the sky, the shadows and the hits read them.
+turn_directional_lights :: proc(lf: ^Light_Frame, yaw: f32) {
+	if yaw == 0 {
+		return
+	}
+	c, s := math.cos(yaw), math.sin(yaw)
+	for &record in lf.records {
+		if record.type == .Directional {
+			d := record.direction
+			record.direction = {c * d.x + s * d.z, d.y, -s * d.x + c * d.z}
+		}
+	}
+}
+
 forward_of :: proc(pose: ecs.Transform) -> [3]f32 {
 	return linalg.normalize(linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{0, 0, 1}))
 }

@@ -26,6 +26,7 @@ Read them in this order the first time.
 | [Clouds](clouds.md) | The ray-marched cloud layer over the sky: its weather and noise, its lighting, its shadow map, its history and its composite. |
 | [Post-processing](post-processing.md) | Temporal AA, exposure, bloom, tone mapping, debug views and post effects. |
 | [Anti-aliasing](anti-aliasing.md) | The quality's techniques: temporal AA, FSR, FXAA and SMAA 1x, upscaling, and the tone map pass before FXAA and SMAA. |
+| [Reference scenes](reference-scenes.md) | Scenes with a path traced image of the same view, and `refdiff`, which compares the engine's with it in linear light. |
 | [Assets and components](assets.md) | GPU residency, asset fields and the renderer's components. |
 
 ## Overview
