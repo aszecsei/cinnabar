@@ -320,7 +320,10 @@ restir_bytes :: proc(size: [2]u32, params: Gi_Restir_Params) -> int {
 // receiver: the cosine at the sample toward the receiver over the one toward the neighbour, times the neighbour's
 // squared distance over the receiver's. A sample at infinity, a ray that hit nothing, keeps its solid angle. Matches
 // restir_jacobian in gi_restir.hlsli.
-restir_jacobian :: proc(receiver, neighbour, sample, sample_normal: [3]f32, infinite: bool) -> f32 {
+restir_jacobian :: proc(
+	receiver, neighbour, sample, sample_normal: [3]f32,
+	infinite: bool,
+) -> f32 {
 	if infinite {
 		return 1
 	}
@@ -372,9 +375,18 @@ ensure_restir_rays :: proc(r: ^Renderer, count: int) {
 // restir_histories are a view's reservoirs between frames, at their size: the zero value when the cache has no room.
 @(private = "file")
 restir_histories :: proc(g: ^Graph, size: [2]u32) -> (sample, light, normal: History, ok: bool) {
-	sample = history_texture(g, {size = size, format = RESTIR_SAMPLE_FORMAT, label = "gi restir sample"})
-	light = history_texture(g, {size = size, format = RESTIR_LIGHT_FORMAT, label = "gi restir light"})
-	normal = history_texture(g, {size = size, format = RESTIR_NORMAL_FORMAT, label = "gi restir normal"})
+	sample = history_texture(
+		g,
+		{size = size, format = RESTIR_SAMPLE_FORMAT, label = "gi restir sample"},
+	)
+	light = history_texture(
+		g,
+		{size = size, format = RESTIR_LIGHT_FORMAT, label = "gi restir light"},
+	)
+	normal = history_texture(
+		g,
+		{size = size, format = RESTIR_NORMAL_FORMAT, label = "gi restir normal"},
+	)
 	ok = sample.current != 0 && light.current != 0 && normal.current != 0
 	return
 }
@@ -464,7 +476,13 @@ add_gi_restir_passes :: proc(f: ^Frame) -> bool {
 	inputs.seed = s.frame
 	add_hit_light_passes(f, inputs, "gi restir", shaded, rf.rays)
 
-	p := add_compute_pass(g, "gi restir temporal", run_restir_pass, restir_step(rf, .Temporal), queue = .Compute)
+	p := add_compute_pass(
+		g,
+		"gi restir temporal",
+		run_restir_pass,
+		restir_step(rf, .Temporal),
+		queue = .Compute,
+	)
 	read(g, p, f.depth)
 	read(g, p, f.normals)
 	read(g, p, f.velocity)
@@ -478,7 +496,13 @@ add_gi_restir_passes :: proc(f: ^Frame) -> bool {
 	declare_probe_reads(f, p)
 	declare_sky_cube_reads(f, p)
 
-	p = add_compute_pass(g, "gi restir spatial", run_restir_pass, restir_step(rf, .Spatial), queue = .Compute)
+	p = add_compute_pass(
+		g,
+		"gi restir spatial",
+		run_restir_pass,
+		restir_step(rf, .Spatial),
+		queue = .Compute,
+	)
 	read(g, p, f.depth)
 	read(g, p, f.normals)
 	read_accel(g, p, ray_scene_accel(f))
@@ -506,7 +530,10 @@ restir_transient_reservoirs :: proc(g: ^Graph, size: [2]u32) -> Restir_Reservoir
 
 @(private = "file")
 restir_step :: proc(rf: ^Gi_Restir_Frame, pass: Restir_Pass) -> ^Restir_Step {
-	return new_clone(Restir_Step{restir = rf, pass = pass}, rf.frame.renderer.platform.frame_allocator)
+	return new_clone(
+		Restir_Step{restir = rf, pass = pass},
+		rf.frame.renderer.platform.frame_allocator,
+	)
 }
 
 // add_restir_trace adds the rays' trace from the tiles' pixels, into the frame's hits and their transmittance, which
@@ -515,7 +542,13 @@ restir_step :: proc(rf: ^Gi_Restir_Frame, pass: Restir_Pass) -> ^Restir_Step {
 add_restir_trace :: proc(rf: ^Gi_Restir_Frame) {
 	f := rf.frame
 	g := f.graph
-	p := add_compute_pass(g, "gi restir trace", run_restir_pass, restir_step(rf, .Trace), queue = .Compute)
+	p := add_compute_pass(
+		g,
+		"gi restir trace",
+		run_restir_pass,
+		restir_step(rf, .Trace),
+		queue = .Compute,
+	)
 	read(g, p, f.depth)
 	read(g, p, f.normals)
 	read_accel(g, p, ray_scene_accel(f))
@@ -533,7 +566,13 @@ add_restir_denoise :: proc(rf: ^Gi_Restir_Frame) {
 	gf := f.gi
 	params := rf.params
 	platform := f.renderer.platform
-	p := add_compute_pass(g, "gi restir resolve", run_restir_pass, restir_step(rf, .Resolve), queue = .Compute)
+	p := add_compute_pass(
+		g,
+		"gi restir resolve",
+		run_restir_pass,
+		restir_step(rf, .Resolve),
+		queue = .Compute,
+	)
 	read(g, p, f.depth)
 	read(g, p, f.normals)
 	read(g, p, f.velocity)
@@ -557,7 +596,13 @@ add_restir_denoise :: proc(rf: ^Gi_Restir_Frame) {
 	for i in 0 ..< params.filter_passes {
 		output := rf.filtered[i % 2]
 		filter := new_clone(
-			Restir_Step{restir = rf, pass = .Filter, step = 1 << i, input = input, output = output},
+			Restir_Step {
+				restir = rf,
+				pass = .Filter,
+				step = 1 << i,
+				input = input,
+				output = output,
+			},
 			platform.frame_allocator,
 		)
 		p = add_compute_pass(g, "gi restir filter", run_restir_pass, filter, queue = .Compute)
@@ -650,22 +695,32 @@ run_restir_pass :: proc(ctx: ^Pass_Context) {
 		push.rays = gpu.read_index(gpu_buffer(g, rf.rays))
 		push.transmit = gpu.read_index(gpu_buffer(g, rf.transmit))
 		push.sample_in, push.light_in, push.normal_in =
-			read_index(g, rf.previous.sample), read_index(g, rf.previous.light), read_index(g, rf.previous.normal)
+			read_index(g, rf.previous.sample),
+			read_index(g, rf.previous.light),
+			read_index(g, rf.previous.normal)
 		push.sample_out, push.light_out, push.normal_out =
-			write_index(g, rf.temporal.sample), write_index(g, rf.temporal.light), write_index(g, rf.temporal.normal)
+			write_index(g, rf.temporal.sample),
+			write_index(g, rf.temporal.light),
+			write_index(g, rf.temporal.normal)
 		c.velocity = read_index(g, f.velocity)
 	case .Spatial:
 		pipeline, dispatch = s.spatial.pipeline, groups(rf.grid.reservoirs, POST_GROUP_SIZE)
 		push.accel = gpu.read_index(gpu_accel(g, ray_scene_accel(f)))
 		push.translucency = translucency_constants(f, g)
 		push.sample_in, push.light_in, push.normal_in =
-			read_index(g, rf.temporal.sample), read_index(g, rf.temporal.light), read_index(g, rf.temporal.normal)
+			read_index(g, rf.temporal.sample),
+			read_index(g, rf.temporal.light),
+			read_index(g, rf.temporal.normal)
 		push.sample_out, push.light_out, push.normal_out =
-			write_index(g, rf.spatial.sample), write_index(g, rf.spatial.light), write_index(g, rf.spatial.normal)
+			write_index(g, rf.spatial.sample),
+			write_index(g, rf.spatial.light),
+			write_index(g, rf.spatial.normal)
 	case .Resolve:
 		pipeline, dispatch = s.resolve.pipeline, groups(f.size, POST_GROUP_SIZE)
 		push.sample_in, push.light_in, push.normal_in =
-			read_index(g, rf.spatial.sample), read_index(g, rf.spatial.light), read_index(g, rf.spatial.normal)
+			read_index(g, rf.spatial.sample),
+			read_index(g, rf.spatial.light),
+			read_index(g, rf.spatial.normal)
 		c = gather_constants(ctx, f)
 		c.velocity = read_index(g, f.velocity)
 		c.history_diffuse = read_index(g, gf.diffuse.previous)
