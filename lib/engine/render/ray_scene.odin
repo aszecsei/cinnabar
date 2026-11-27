@@ -15,6 +15,8 @@ import "cinnabar:engine/ecs"
 // Mesh_Renderer casts shadows, and hit shading those with an opaque or masked submesh.
 RAY_MASK_SHADOWS :: 0x01
 RAY_MASK_SURFACES :: 0x02
+// An instance with a translucent submesh, which the GI's rays pass through (see gi_translucency.hlsli).
+RAY_MASK_TRANSLUCENT :: 0x04
 // The threads of each group of the binning and of each hit shader. Matches HIT_GROUP_SIZE in ray_scene.hlsli.
 HIT_GROUP_SIZE :: 64
 // Bin 0 is the fallback's, and each material pipeline's hit pass has the bin after its index. Matches MAX_HIT_BINS in
@@ -158,6 +160,8 @@ Hit_Batch :: struct {
 	hits:     Buffer,
 	surfaces: Buffer,
 	count:    u32,
+	// Each ray's transmittance, the glass that it crossed, or 0 for a client whose rays cross none.
+	transmit: Buffer,
 }
 
 // Hit_Table is the frame's hit table as build_scene makes it: a record for each slot up to the scene's highest, and
@@ -198,6 +202,7 @@ Hit_Shaded :: struct {
 	hits:     Buffer,
 	surfaces: Buffer,
 	count:    u32,
+	transmit: Buffer,
 }
 
 @(private = "file")
@@ -438,6 +443,20 @@ add_hit_entries :: proc(
 	return
 }
 
+// hit_instance_mask is a slot's instance's mask in the scene's structure: the shadow rays see it when it casts
+// shadows, hit shading when it has a surface to evaluate, and the GI's rays, which pass through glass, when it has a
+// translucent submesh too. An instance of none is left out.
+hit_instance_mask :: proc(cast_shadows, surfaces: bool, instance: Hit_Instance) -> u8 {
+	mask: u8 = cast_shadows ? RAY_MASK_SHADOWS : 0
+	if surfaces {
+		mask |= RAY_MASK_SURFACES
+	}
+	if instance.flags & HIT_INSTANCE_TRANSLUCENT != 0 {
+		mask |= RAY_MASK_TRANSLUCENT
+	}
+	return mask
+}
+
 // hit_instance_flags are a slot's instance's flags in the scene's structure: opaque, so the hardware commits its hits
 // at once, unless it has a translucent submesh, which the hits' shadow rays look up and pass through.
 hit_instance_flags :: proc(instance: Hit_Instance) -> gpu.Accel_Instance_Flags {
@@ -517,6 +536,7 @@ add_hit_shading :: proc(
 		hits     = batch.hits,
 		surfaces = batch.surfaces,
 		count    = batch.count,
+		transmit = batch.transmit,
 	}
 	if batch.count == 0 {
 		return shaded

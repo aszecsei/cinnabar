@@ -1,5 +1,5 @@
 // The world probes' hit lighting (see docs/rendering/global-illumination.md#world-probes): a thread for each ray, which
-// takes its hit's light (see gi_hit_light.hlsli). gi_probe_screen.hlsl then gives the hits that the screen shows their
+// takes its hit's light (see gi_hit_light.hlsli), times the transmittance of the glass that the ray crossed. gi_probe_screen.hlsl then gives the hits that the screen shows their
 // light there.
 #include "gi_probe_pass.hlsli"
 #include "gi_hit_light.hlsli"
@@ -12,20 +12,17 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	}
 	Hit_Lights lights;
 	lights.accel = push.accel;
-	lights.hit_instances = push.hit_instances;
-	lights.hit_instances_offset = push.hit_instances_offset;
-	lights.hit_submeshes = push.hit_submeshes;
-	lights.hit_submeshes_offset = push.hit_submeshes_offset;
+	lights.translucency = push.translucency;
 	lights.light_grid = push.light_grid;
 	lights.light_grid_offset = push.light_grid_offset;
 	lights.candidates = push.candidates;
 	lights.seed = push.seed;
 	lights.emitters = push.emitter_samples;
 	lights.emitter_count = push.emitter_count;
-	lights.emitter_table = push.emitter_table;
-	lights.emitter_table_offset = push.emitter_table_offset;
-	lights.emitter_pool = push.emitter_pool;
-	lights.emitter_table_valid = push.emitter_table_valid != 0;
 	float4 result = hit_light(load_hit(push.hits, ray), push.surfaces, ray, lights, frame_probe_grid());
+	// The glass that the ray crossed lets through its share of the light, a hit's or the sky's.
+	if (push.transmit_valid != 0) {
+		result.rgb *= load_transmittance(push.transmit, ray);
+	}
 	cn_rw_buffer(push.rays).Store<float4>(ray * 16, result);
 }

@@ -649,3 +649,26 @@ hit_shading_bins_the_hits_and_dispatches_each_bin_indirectly :: proc(t: ^testing
 	}
 	testing.expect(t, r.ray_scene.scratch[0].capacity >= int(rays))
 }
+
+// An instance's mask: the shadow rays see a shadow caster, hit shading an instance with a surface, and the GI's rays,
+// which pass through glass, an instance with a translucent submesh too, whether or not it casts shadows; an instance of
+// none is left out.
+@(test)
+an_instance_with_glass_is_in_the_translucent_mask :: proc(t: ^testing.T) {
+	glass := Hit_Instance {
+		flags = HIT_INSTANCE_TRANSLUCENT,
+	}
+	testing.expect_value(t, hit_instance_mask(false, false, glass), RAY_MASK_TRANSLUCENT)
+	testing.expect_value(
+		t,
+		hit_instance_mask(true, true, glass),
+		RAY_MASK_SHADOWS | RAY_MASK_SURFACES | RAY_MASK_TRANSLUCENT,
+	)
+	testing.expect_value(
+		t,
+		hit_instance_mask(true, true, {}),
+		RAY_MASK_SHADOWS | RAY_MASK_SURFACES,
+	)
+	testing.expect_value(t, hit_instance_mask(false, true, {}), RAY_MASK_SURFACES)
+	testing.expect_value(t, hit_instance_mask(false, false, {}), 0)
+}

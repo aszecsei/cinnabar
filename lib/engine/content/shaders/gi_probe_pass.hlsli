@@ -4,14 +4,15 @@
 #ifndef GI_PROBE_PASS_HLSLI
 #define GI_PROBE_PASS_HLSLI
 
+#include "gi_translucency.hlsli"
+
 // Matches Probe_Push in lib/engine/render/gi_probes.odin. light_grid is the frame's light grid, whose punctual lights the
 // hits pick from after the directional ones, candidates the lights that each hit weighs, and seed that of its choices.
 // depth is this frame's, and lit the global illumination's lit scene of last frame, when lit_valid. exposure is the
-// frame's, which the update reads. hit_instances and hit_submeshes are the frame's hit table, which the hits' shadow
-// rays read to pass through translucent submeshes. emitter_samples are the GI's emitters' triangles, emitter_count of
-// them, or 0 without them, which the hits sample, with the emitters' table and their radiance pool, which the update
-// takes their light out of the hits' irradiance with, and whose pool gives the hits' shadow rays the translucent
-// triangles' transmittance, when emitter_table_valid is 1.
+// frame's, which the update reads. translucency is what the rays and the hits' shadow rays pass through glass by, with
+// the GI's emitters' table and pool, which the update takes their light out of the hits' irradiance with.
+// emitter_samples are the GI's emitters' triangles, emitter_count of them, or 0 without them, which the hits sample.
+// transmit holds each ray's transmittance, the glass that it crossed, when transmit_valid is 1.
 struct Probe_Push {
 	uint shadow_atlas;
 	uint shadow_mask;
@@ -29,17 +30,13 @@ struct Probe_Push {
 	uint lit;
 	uint lit_valid;
 	uint exposure;
+	// A nested struct starts on 16 bytes in a constant buffer: this one is at 64.
+	Translucency translucency;
 	uint seed;
-	uint hit_instances;
-	uint hit_instances_offset;
-	uint hit_submeshes;
-	uint hit_submeshes_offset;
 	uint emitter_samples;
 	uint emitter_count;
-	uint emitter_table;
-	uint emitter_table_offset;
-	uint emitter_pool;
-	uint emitter_table_valid;
+	uint transmit;
+	uint transmit_valid;
 };
 #define MATERIAL_PUSH Probe_Push
 // No shading model: the hits need only the light loop's lookups.

@@ -1099,8 +1099,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 			}
 			// The view model's pose is not its place in the world, so rays do not see it.
 			if tracing && mesh != nil && blas != {} && !view_model {
-				mask: u8 = renderers[i].cast_shadows ? RAY_MASK_SHADOWS : 0
-				if add_hit_entries(
+				surfaces := add_hit_entries(
 					&hits,
 					slot,
 					mesh,
@@ -1109,9 +1108,12 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 					hit_pipeline_ready,
 					r.platform,
 					e,
-				) {
-					mask |= RAY_MASK_SURFACES
-				}
+				)
+				mask := hit_instance_mask(
+					renderers[i].cast_shadows,
+					surfaces,
+					hits.instances[slot],
+				)
 				if mask != 0 {
 					reference := r.platform.gpu_accel_reference(blas)
 					append(

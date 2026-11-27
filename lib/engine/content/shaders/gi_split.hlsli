@@ -12,6 +12,7 @@
 #include "gi_common.hlsli"
 #include "ray_scene.hlsli"
 #include "hash.hlsli"
+#include "gi_translucency.hlsli"
 
 // Match lib/engine/render/gi_split.odin.
 static const uint MAX_SPLIT_LEVELS = 8;
@@ -68,6 +69,9 @@ struct Split_Push {
 	uint exposure;
 	uint view;
 	uint view_output;
+	// What the rays pass through glass by, and each ray's transmittance.
+	Translucency translucency;
+	uint transmit;
 };
 CN_PUSH_CONSTANTS(Split_Push, push);
 

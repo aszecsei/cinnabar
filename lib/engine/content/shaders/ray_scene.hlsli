@@ -7,10 +7,12 @@
 
 #include "cinnabar.hlsli"
 
-// Match RAY_MASK_SHADOWS and RAY_MASK_SURFACES in lib/engine/render/ray_scene.odin: the instance mask bits of the
-// scene's structure. The shadow rays see the instances that cast shadows, and hit shading those with a surface.
+// Match RAY_MASK_SHADOWS, RAY_MASK_SURFACES and RAY_MASK_TRANSLUCENT in lib/engine/render/ray_scene.odin: the instance
+// mask bits of the scene's structure. The shadow rays see the instances that cast shadows, hit shading those with a
+// surface, and the GI's rays, which pass through glass, those with a translucent submesh too.
 static const uint RAY_MASK_SHADOWS = 0x01;
 static const uint RAY_MASK_SURFACES = 0x02;
+static const uint RAY_MASK_TRANSLUCENT = 0x04;
 
 // Matches HIT_GROUP_SIZE in lib/engine/render/ray_scene.odin: the threads of each group of the binning and of each
 // hit shader.
@@ -128,29 +130,43 @@ float3 hit_unpack_unit(uint word) {
 // trace_hit traces a ray, whose origin is relative to the render origin as the structure is, against the instances of
 // mask, nearest hit first, and gives its record. Each triangle is opaque. spread is the cone's angle per meter of
 // distance, which cone_width grows by.
+// make_miss is the record of a ray that hit nothing: its whole length.
+Hit_Record make_miss(RayDesc ray) {
+	Hit_Record hit;
+	hit.instance = HIT_MISS;
+	hit.primitive = 0;
+	hit.barycentrics = 0;
+	hit.direction = hit_pack_unit(ray.Direction);
+	hit.t = ray.TMax;
+	hit.cone_width = 0;
+	hit.bin = 0;
+	hit.entry = 0;
+	return hit;
+}
+
+// make_hit is the record of a ray's committed triangle.
+Hit_Record make_hit(RayDesc ray, float spread, uint instance, bool front, uint primitive, float2 barycentrics, float t) {
+	Hit_Record hit;
+	float2 b = saturate(barycentrics);
+	hit.instance = instance | (front ? HIT_FRONT : 0);
+	hit.primitive = primitive;
+	hit.barycentrics = uint(round(b.x * 65535)) | (uint(round(b.y * 65535)) << 16);
+	hit.direction = hit_pack_unit(ray.Direction);
+	hit.t = t;
+	hit.cone_width = spread * t;
+	hit.bin = 0;
+	hit.entry = 0;
+	return hit;
+}
+
 Hit_Record trace_hit(RaytracingAccelerationStructure accel, RayDesc ray, uint mask, float spread) {
 	RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_FORCE_OPAQUE> query;
 	query.TraceRayInline(accel, 0, mask, ray);
 	query.Proceed();
-	Hit_Record hit;
-	hit.direction = hit_pack_unit(ray.Direction);
-	hit.bin = 0;
-	hit.entry = 0;
 	if (query.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
-		hit.instance = HIT_MISS;
-		hit.primitive = 0;
-		hit.barycentrics = 0;
-		hit.t = ray.TMax;
-		hit.cone_width = 0;
-		return hit;
+		return make_miss(ray);
 	}
-	float2 b = saturate(query.CommittedTriangleBarycentrics());
-	hit.instance = query.CommittedInstanceID() | (query.CommittedTriangleFrontFace() ? HIT_FRONT : 0);
-	hit.primitive = query.CommittedPrimitiveIndex();
-	hit.barycentrics = uint(round(b.x * 65535)) | (uint(round(b.y * 65535)) << 16);
-	hit.t = query.CommittedRayT();
-	hit.cone_width = spread * hit.t;
-	return hit;
+	return make_hit(ray, spread, query.CommittedInstanceID(), query.CommittedTriangleFrontFace(), query.CommittedPrimitiveIndex(), query.CommittedTriangleBarycentrics(), query.CommittedRayT());
 }
 
 bool hit_missed(Hit_Record hit) {

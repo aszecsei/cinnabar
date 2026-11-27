@@ -3,14 +3,18 @@
 #ifndef RTR_COMMON_HLSLI
 #define RTR_COMMON_HLSLI
 
+#include "gi_translucency.hlsli"
+
 // Matches Rtr_Trace_Push in lib/engine/render/traced_reflections.odin. hits holds a Hit_Record for each trace texel,
-// row by row. camera_offset is the camera's position relative to the render origin, which the ray scene is placed by.
+// row by row, and transmit each ray's transmittance, the glass that it crossed. camera_offset is the camera's position
+// relative to the render origin, which the ray scene is placed by. translucency is what the rays pass glass by.
 struct Rtr_Trace_Push {
 	float4 camera_offset;
 	uint accel;
 	uint hits;
 	uint ray_count;
-	uint padding;
+	uint transmit;
+	Translucency translucency;
 };
 
 // How far a ray traces, in meters: past the level's reach, so a ray that finds nothing at all sees the sky, and one that

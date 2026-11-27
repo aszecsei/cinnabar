@@ -105,6 +105,8 @@ Gi_Probes :: struct {
 	hits:         gpu.Buffer,
 	surfaces:     gpu.Buffer,
 	rays:         gpu.Buffer,
+	// Each ray's transmittance, the glass that it crossed.
+	transmit:     gpu.Buffer,
 	ray_capacity: int,
 }
 
@@ -165,36 +167,33 @@ Probe_Grid :: struct {
 // Probe_Push matches Probe_Push in gi_probe_pass.hlsli.
 @(private = "file")
 Probe_Push :: struct {
-	shadow_atlas:         u32,
-	shadow_mask:          u32,
-	grid:                 u32,
-	grid_offset:          u32,
-	hits:                 u32,
-	surfaces:             u32,
-	rays:                 u32,
-	accel:                u32,
-	light_grid:           u32,
-	light_grid_offset:    u32,
-	candidates:           u32,
-	ray_count:            u32,
-	depth:                u32,
-	lit:                  u32,
-	lit_valid:            u32,
-	exposure:             u32,
-	seed:                 u32,
-	hit_instances:        u32,
-	hit_instances_offset: u32,
-	hit_submeshes:        u32,
-	hit_submeshes_offset: u32,
-	emitter_samples:      u32,
-	emitter_count:        u32,
-	emitter_table:        u32,
-	emitter_table_offset: u32,
-	emitter_pool:         u32,
-	emitter_table_valid:  u32,
+	shadow_atlas:      u32,
+	shadow_mask:       u32,
+	grid:              u32,
+	grid_offset:       u32,
+	hits:              u32,
+	surfaces:          u32,
+	rays:              u32,
+	accel:             u32,
+	light_grid:        u32,
+	light_grid_offset: u32,
+	candidates:        u32,
+	ray_count:         u32,
+	depth:             u32,
+	lit:               u32,
+	lit_valid:         u32,
+	exposure:          u32,
+	translucency:      Translucency,
+	seed:              u32,
+	emitter_samples:   u32,
+	emitter_count:     u32,
+	transmit:          u32,
+	transmit_valid:    u32,
 }
 
 #assert(size_of(Probe_Push) <= 128)
+// HLSL starts a nested struct of a constant buffer on 16 bytes.
+#assert(offset_of(Probe_Push, translucency) % 16 == 0)
 
 // Gi_Probe_Frame is one frame's world probes, in frame memory.
 @(private)
@@ -209,6 +208,7 @@ Gi_Probe_Frame :: struct {
 	hits:           Buffer,
 	surfaces:       Buffer,
 	rays:           Buffer,
+	transmit:       Buffer,
 	// What the probes' hits and the split cascades' are lit by: these probes, their lights, and the global
 	// illumination's lit scene of last frame, which the hits that the screen shows take their light from.
 	hit_light:      Hit_Light_Inputs,
@@ -244,7 +244,7 @@ gi_probes_destroy :: proc(p: ^Gi_Probes, platform: ^core.Platform_API) {
 	for s in ([]^Shader_Pipeline{&p.reset, &p.trace, &p.light, &p.screen, &p.update}) {
 		destroy_shader_pipeline(s, platform)
 	}
-	for b in ([]gpu.Buffer{p.hits, p.surfaces, p.rays}) {
+	for b in ([]gpu.Buffer{p.hits, p.surfaces, p.rays, p.transmit}) {
 		platform.gpu_destroy_buffer(b)
 	}
 }
@@ -462,7 +462,7 @@ ensure_probe_storage :: proc(
 	}
 	shared := &r.gi.probes
 	if rays > shared.ray_capacity {
-		for b in ([]gpu.Buffer{shared.hits, shared.surfaces, shared.rays}) {
+		for b in ([]gpu.Buffer{shared.hits, shared.surfaces, shared.rays, shared.transmit}) {
 			platform.gpu_destroy_buffer(b)
 		}
 		shared.ray_capacity = max(rays, shared.ray_capacity * 2)
@@ -481,6 +481,10 @@ ensure_probe_storage :: proc(
 		)
 		shared.rays = platform.gpu_create_buffer(
 			{size = capacity * 16, usage = {.Storage}, label = "gi probe rays"},
+			nil,
+		)
+		shared.transmit = platform.gpu_create_buffer(
+			{size = capacity * 4, usage = {.Storage}, label = "gi probe transmittance"},
 			nil,
 		)
 	}
@@ -566,6 +570,7 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	pf.hits = import_buffer(g, shared.hits)
 	pf.surfaces = import_buffer(g, shared.surfaces)
 	pf.rays = import_buffer(g, shared.rays)
+	pf.transmit = import_buffer(g, shared.transmit)
 
 	grid := &pf.grid
 	for l in 0 ..< int(params.levels) {
@@ -629,7 +634,17 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 
 	step :: proc(f: ^Frame, pf: ^Gi_Probe_Frame, pass: Probe_Pass, ray_count: u32) -> ^Probe_Step {
 		return new_clone(
-			Probe_Step{f, pf, &pf.hit_light, pass, ray_count, pf.hits, pf.surfaces, pf.rays},
+			Probe_Step {
+				f,
+				pf,
+				&pf.hit_light,
+				pass,
+				ray_count,
+				pf.hits,
+				pf.surfaces,
+				pf.rays,
+				pf.transmit,
+			},
 			f.renderer.platform.frame_allocator,
 		)
 	}
@@ -649,11 +664,13 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 		queue = .Compute,
 	)
 	read_accel(g, pass, ray_scene_accel(f))
+	declare_translucency_reads(f, pass)
 	write(g, pass, pf.hits)
+	write(g, pass, pf.transmit)
 	shaded := add_hit_shading(
 		f,
 		reservation,
-		{hits = pf.hits, surfaces = pf.surfaces, count = ray_count},
+		{hits = pf.hits, surfaces = pf.surfaces, count = ray_count, transmit = pf.transmit},
 		.Compute,
 	)
 	add_hit_light_passes(f, &pf.hit_light, "gi probe", shaded, pf.rays)
@@ -666,6 +683,7 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	)
 	read(g, pass, pf.rays)
 	read(g, pass, pf.hits)
+	read(g, pass, pf.transmit)
 	read(g, pass, f.exposure)
 	if f.emitters != nil {
 		read(g, pass, f.emitters.pool)
@@ -697,15 +715,19 @@ add_hit_light_passes :: proc(
 		g,
 		light_name,
 		run_probe_pass,
-		new_clone(Probe_Step{f, nil, inputs, .Light, ray_count, hits, surfaces, rays}, allocator),
+		new_clone(
+			Probe_Step{f, nil, inputs, .Light, ray_count, hits, surfaces, rays, shaded.transmit},
+			allocator,
+		),
 		queue = .Compute,
 	)
 	read_accel(g, pass, ray_scene_accel(f))
 	read(g, pass, hits)
 	read(g, pass, surfaces)
 	declare_cloud_shadow(f, pass)
-	if inputs.emitters != nil {
-		read(g, pass, inputs.emitters.pool)
+	declare_translucency_reads(f, pass)
+	if shaded.transmit != 0 {
+		read(g, pass, shaded.transmit)
 	}
 	if hit_emitters(inputs) {
 		read(g, pass, inputs.emitters.samples)
@@ -724,7 +746,17 @@ add_hit_light_passes :: proc(
 			screen_name,
 			run_probe_pass,
 			new_clone(
-				Probe_Step{f, nil, inputs, .Screen, ray_count, hits, surfaces, rays},
+				Probe_Step {
+					f,
+					nil,
+					inputs,
+					.Screen,
+					ray_count,
+					hits,
+					surfaces,
+					rays,
+					shaded.transmit,
+				},
 				allocator,
 			),
 			queue = .Compute,
@@ -733,6 +765,9 @@ add_hit_light_passes :: proc(
 		read(g, pass, surfaces)
 		read(g, pass, f.depth)
 		read(g, pass, inputs.lit.previous)
+		if shaded.transmit != 0 {
+			read(g, pass, shaded.transmit)
+		}
 		write(g, pass, rays)
 	}
 }
@@ -804,6 +839,8 @@ Probe_Step :: struct {
 	hits:      Buffer,
 	surfaces:  Buffer,
 	rays:      Buffer,
+	// The rays' transmittance, or 0 for a batch without one.
+	transmit:  Buffer,
 }
 
 // run_probe_pass dispatches a probe pass: a thread for each probe of each level, or for each ray, or a group for each
@@ -819,30 +856,24 @@ run_probe_pass :: proc(ctx: ^Pass_Context) {
 	g := ctx.graph
 	hits, rays := gpu_buffer(g, step.hits), gpu_buffer(g, step.rays)
 	push := Probe_Push {
-		grid                 = gpu.read_index(inputs.grid.buffer),
-		grid_offset          = inputs.grid.offset,
-		hits                 = step.pass == .Trace ? gpu.write_index(hits) : gpu.read_index(hits),
-		surfaces             = gpu.read_index(gpu_buffer(g, step.surfaces)),
-		rays                 = step.pass == .Light || step.pass == .Screen ? gpu.write_index(rays) : gpu.read_index(rays),
-		accel                = gpu.read_index(gpu_accel(g, ray_scene_accel(f))),
-		light_grid           = gpu.read_index(inputs.light_grid.buffer),
-		light_grid_offset    = inputs.light_grid.offset,
-		candidates           = inputs.candidates,
-		ray_count            = step.ray_count,
-		lit_valid            = u32(inputs.lit.valid),
-		seed                 = inputs.seed,
-		hit_instances        = gpu.read_index(f.scene_frame.hit_instances.buffer),
-		hit_instances_offset = f.scene_frame.hit_instances.offset,
-		hit_submeshes        = gpu.read_index(f.scene_frame.hit_submeshes.buffer),
-		hit_submeshes_offset = f.scene_frame.hit_submeshes.offset,
+		grid              = gpu.read_index(inputs.grid.buffer),
+		grid_offset       = inputs.grid.offset,
+		hits              = step.pass == .Trace ? gpu.write_index(hits) : gpu.read_index(hits),
+		surfaces          = gpu.read_index(gpu_buffer(g, step.surfaces)),
+		rays              = step.pass == .Light || step.pass == .Screen ? gpu.write_index(rays) : gpu.read_index(rays),
+		accel             = gpu.read_index(gpu_accel(g, ray_scene_accel(f))),
+		light_grid        = gpu.read_index(inputs.light_grid.buffer),
+		light_grid_offset = inputs.light_grid.offset,
+		candidates        = inputs.candidates,
+		ray_count         = step.ray_count,
+		lit_valid         = u32(inputs.lit.valid),
+		seed              = inputs.seed,
+		translucency      = translucency_constants(f, g),
 	}
-	// The table and the pool give the translucent triangles' transmittance whenever the emitters run, and the samples
-	// only when they have triangles.
-	if inputs.emitters != nil {
-		push.emitter_table = gpu.read_index(inputs.emitters.table.buffer)
-		push.emitter_table_offset = inputs.emitters.table.offset
-		push.emitter_pool = gpu.read_index(gpu_buffer(g, inputs.emitters.pool))
-		push.emitter_table_valid = 1
+	if step.transmit != 0 {
+		transmit := gpu_buffer(g, step.transmit)
+		push.transmit = step.pass == .Trace ? gpu.write_index(transmit) : gpu.read_index(transmit)
+		push.transmit_valid = 1
 	}
 	if hit_emitters(inputs) {
 		push.emitter_samples = gpu.read_index(gpu_buffer(g, inputs.emitters.samples))

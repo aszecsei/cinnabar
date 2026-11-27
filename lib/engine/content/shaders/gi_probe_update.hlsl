@@ -25,7 +25,7 @@ groupshared float4 g_rays[MAX_PROBE_RAYS];
 groupshared float3 g_rays_hit[MAX_PROBE_RAYS];
 groupshared float3 g_directions[MAX_PROBE_RAYS];
 
-// listed_emission is the radiance of the listed emitter that a ray hit, or 0: none where its hit was a back face,
+// listed_emission is the radiance of the listed emitter that a ray hit, through the glass that it crossed, or 0: none where its hit was a back face,
 // which sends out no light, or the frame has no emitters.
 float3 listed_emission(uint ray, float distance) {
 	if (push.emitter_count == 0 || distance < 0) {
@@ -35,21 +35,22 @@ float3 listed_emission(uint ray, float distance) {
 	if (hit_missed(hit) || hit.entry == ~0u) {
 		return 0;
 	}
-	Emitter_Table_Header header = load_emitter_header(push.emitter_table, push.emitter_table_offset);
+	Emitter_Table_Header header = load_emitter_header(push.translucency.table, push.translucency.table_offset);
 	if (hit.entry >= header.entries) {
 		return 0;
 	}
-	uint listed = cn_buffer(push.emitter_table).Load(push.emitter_table_offset + header.hit_emitters + hit.entry * 4);
+	uint listed = cn_buffer(push.translucency.table).Load(push.translucency.table_offset + header.hit_emitters + hit.entry * 4);
 	if (listed >= header.count) {
 		return 0;
 	}
-	Emitter_Submesh sub = load_emitter_submesh(push.emitter_table, push.emitter_table_offset, listed);
+	Emitter_Submesh sub = load_emitter_submesh(push.translucency.table, push.translucency.table_offset, listed);
 	uint local = hit.primitive - sub.first_primitive;
 	if (local >= sub.primitive_count) {
 		return 0;
 	}
-	float4 cell = cn_buffer(push.emitter_pool).Load<float4>((sub.radiance_base + local) * 16);
-	return cell.w > 0 ? unpack_rgb9e5(pack_rgb9e5(cell.rgb)) : 0;
+	float4 cell = cn_buffer(push.translucency.pool).Load<float4>((sub.radiance_base + local) * 16);
+	float3 through = push.transmit_valid != 0 ? load_transmittance(push.transmit, ray) : 1;
+	return cell.w > 0 ? unpack_rgb9e5(pack_rgb9e5(cell.rgb)) * through : 0;
 }
 
 [numthreads(PROBE_TILE, PROBE_TILE, 1)]
