@@ -2,7 +2,7 @@
 
 A reference scene is a scene of the sample with a path traced image of the same view: Blender's Cycles, with the same geometry, materials, sun and camera. `tools/refdiff` compares the engine's image with it in linear light, so the global illumination can be tuned toward a known answer instead of toward what looks right (`samples/mygame/reference/`, `tools/refdiff`).
 
-**In this document:** [The reference room](#the-reference-room) · [Comparing](#comparing) · [Making a reference](#making-a-reference) · [What the room shows](#what-the-room-shows)
+**In this document:** [The reference room](#the-reference-room) · [Comparing](#comparing) · [Measuring a change](#measuring-a-change) · [Making a reference](#making-a-reference) · [What the room shows](#what-the-room-shows)
 
 ## The reference room
 
@@ -25,12 +25,22 @@ just reference                                    # room, at Ultra
 just reference room High 20 8 --probe 900,360     # a name, a preset, seconds to settle, screenshots, then refdiff's flags
 ```
 
-- **The view.** It sets the Game view to the reference's 1280 × 720, at the preset, with `noToneMapping`, `noBloom` and `noPostEffects`, and waits for the light to settle. Then it takes the screenshots into `build/captures/reference/<name>`, and `refdiff` compares their mean, so the noise between frames does not count as error.
+- **The view.** It sets the Game view to the reference's 1280 × 720, at the preset, with `noToneMapping`, `noBloom` and `noPostEffects`, and the sun where the scene has it (`sunYaw` of 0), and waits for the light to settle. Then it takes the screenshots into `build/captures/reference/<name>`, and `refdiff` compares their mean, so the noise between frames does not count as error.
 - **Linear light.** The reference is a 16-bit PNG of Blender's Standard view: sRGB-encoded scene-linear light, times its exposure of 2. Without tone mapping, the engine's output rolls off as `h / (1 + h)` before it encodes sRGB (see [Post-processing](post-processing.md#post-processing)), so `refdiff` undoes that with `c / (1 - c)` and divides by the scene's exposure of 2. Both are then radiance in the same units, and neither tone curve enters the comparison.
 - **The report.** It gives each image's mean radiance and their difference in stops, by channel and in luminance, and the median, 90th and 99th percentiles of each pixel's difference in stops. A pixel darker than 10⁻⁴ in both images has no ratio. Then it gives the difference over a grid of 8 × 4 regions, top row first, with each region's reference luminance under it, and each `--probe` pixel's radiance in both.
 - **The images.** `<preset>.ratio.png` is each pixel's difference: blue where the engine is darker, red where it is brighter and black where they agree, full at 2 stops, and grey where a pixel has no ratio. `<preset>.side.png` is the reference and the engine side by side, at one exposure and one curve.
 
 The comparison needs a GPU and an editor, so `just test` does not run it. `refdiff`'s own tests check its decoding and its report.
+
+## Measuring a change
+
+A change to the global illumination is worth its cost when it brings the image nearer the reference, or keeps it as near with less noise or lag. Each setting needs runs of its own, each in an editor opened fresh, since runs of one setting differ too.
+
+- **Accuracy:** `refdiff` of the mean of many screenshots, its mean and its pixels' and regions' stops.
+- **Noise:** `refdiff` of single screenshots, whose stops grow with the noise, and [`flickerstat`](../editor/capture.md#flicker) over the screenshots of the lit view and of the `Gi_Diffuse` and `Gi_Specular` debug views. `Gi_Specular` is the world probes' radiance along each pixel's reflection, so it shows their noise, which the screen's own light can hide.
+- **Lag:** `editorctl viewport --viewport 4 --set sunYaw=0.15` turns the sun, and its patch moves. The mean difference of the screenshots that follow from the view where it settles shows how fast the light follows.
+
+The world probes' guided rays (#675) were measured so, two runs of each, at Ultra. With the guide, the mean luminance was 0.17 and 0.18 stops brighter than Cycles, against 0.19 in both runs without it. The dark half of the room was 0.77 to 1.09 stops brighter, against 0.88 to 1.11. The world probes' `Gi_Specular` view, which was the same in every screenshot without the guide (a median spread of 0 codes), flickered with it (0.23 and 0.29 codes, and a p99 step of 6.0 against 4.6 and 5.2). The lit view 1.65 s after a turn of the sun was 1.44 codes from where it settled, against 1.49. The change was not merged.
 
 ## Making a reference
 

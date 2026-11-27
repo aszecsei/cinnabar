@@ -704,7 +704,8 @@ refdiff:
 
 # Compare the running editor's Game view of a reference scene with its path traced reference: open it with
 # just edit reference_<name> first (see docs/rendering/reference-scenes.md). It sets the Game view to the reference's
-# size, with no tone mapping, bloom or post effects, at a quality preset, waits for the light to settle, takes
+# size, with no tone mapping, bloom or post effects and the sun where the scene has it, at a quality preset, waits for
+# the light to settle, takes
 # screenshots into build/captures/reference/<name>, and compares their mean. Extra arguments go to refdiff, such as
 # --probe 900,360.
 [script]
@@ -716,7 +717,7 @@ reference name="room" preset="Ultra" settle="20" shots="8" *args: editorctl refd
     mkdir -p "$out"
     rm -f "$out"/shot-*.png "$out"/shot-*.json
     "$ctl" viewport --viewport 4 --set shown=true --set size=1280x720 --set qualityPreset={{preset}} \
-        --set noToneMapping=true --set noBloom=true --set noPostEffects=true > /dev/null
+        --set noToneMapping=true --set noBloom=true --set noPostEffects=true --set sunYaw=0 > /dev/null
     sleep {{settle}}
     shots=()
     for i in $(seq -w 1 {{shots}}); do

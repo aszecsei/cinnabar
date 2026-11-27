@@ -284,6 +284,8 @@ Render_Overrides :: struct {
 	debug_view:      render.Debug_View,
 	disable:         render.Features,
 	exposure_offset: f32,
+	// Radians that every directional light turns about the world's up axis.
+	sun_yaw:         f32,
 	// Count the forward pass's quads for render.shading_stats.
 	shading_stats:   bool,
 }
@@ -298,6 +300,7 @@ render_overrides :: proc(e: ^Editor, viewport: int) -> (o: Render_Overrides) {
 	s := e.session.view.viewports[viewport].settings
 	o.debug_view = render.Debug_View(s.debug_view)
 	o.exposure_offset = s.exposure_offset
+	o.sun_yaw = s.sun_yaw
 	o.shading_stats = s.shading_stats
 	flags := [render.Feature]bool {
 		.Temporal_Aa       = s.no_temporal_aa,

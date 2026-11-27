@@ -200,6 +200,9 @@ Frame_Desc :: struct {
 	debug_view:      Debug_View,
 	disable:         Features,
 	exposure_offset: f32,
+	// The editor's turn of every directional light about the world's up axis, in radians, which a measurement of a
+	// change in the light sets (see docs/editor/capture.md#automation). 0 leaves the lights as they are.
+	sun_yaw:         f32,
 	// Count the forward pass's quads and their pixels for shading_stats, which costs the forward pass a little (see
 	// docs/rendering/lighting-and-shadows.md#quad-overdraw).
 	shading_stats:   bool,
@@ -264,6 +267,7 @@ Extra_View :: struct {
 	debug_view:      Debug_View,
 	disable:         Features,
 	exposure_offset: f32,
+	sun_yaw:         f32,
 	hooks:           Frame_Hooks,
 	overlay:         Frame_Overlay,
 	// The view draws into a rect of the own view's target, which must have a rect of the same target_size, after it,
@@ -283,7 +287,7 @@ use_view :: proc(desc: ^Frame_Desc, v: Extra_View) {
 		v.quality, v.settings, v.keep_ids, v.no_debug
 	desc.debug_view, desc.disable, desc.exposure_offset, desc.hooks =
 		v.debug_view, v.disable, v.exposure_offset, v.hooks
-	desc.overlay, desc.rect, desc.cut = v.overlay, v.rect, v.cut
+	desc.overlay, desc.rect, desc.cut, desc.sun_yaw = v.overlay, v.rect, v.cut, v.sun_yaw
 }
 
 // Frame_Overlay is a second hook beside Frame_Hooks, with a data pointer of its own: it runs in every view after the
@@ -730,7 +734,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 			ev.view, ev.size, ev.keep_ids, ev.no_debug, ev.debug_view
 		view.disable, view.hooks, view.exposure_offset, view.settings =
 			ev.disable, ev.hooks, ev.exposure_offset, ev.settings
-		view.overlay, view.rect, view.cut = ev.overlay, ev.rect, ev.cut
+		view.overlay, view.rect, view.cut, view.sun_yaw = ev.overlay, ev.rect, ev.cut, ev.sun_yaw
 		view.extra_views, view.previews, view.playing, view.delta, view.shading_stats =
 			nil, nil, nil, 0, false
 		view_quality := ev.quality != nil ? clamp_quality(ev.quality^, r.caps) : quality
@@ -879,6 +883,7 @@ draw_view :: proc(
 	}
 	build_scene(f, w, desc.hidden, desc.skins)
 	f.lights = extract_lights(f, w, desc.hidden)
+	turn_directional_lights(f.lights, desc.sun_yaw)
 	if .Shadows in desc.disable {
 		for &casts in f.lights.casts {
 			casts = false

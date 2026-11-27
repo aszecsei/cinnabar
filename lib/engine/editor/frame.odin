@@ -181,6 +181,7 @@ plan_game_extra :: proc(
 	}
 	view.disable += overrides.disable
 	view.exposure_offset += overrides.exposure_offset
+	view.sun_yaw += overrides.sun_yaw
 	from := ev.quality != nil ? ev.quality^ : (game_quality != nil ? game_quality^ : base)
 	quality, _ := viewport_quality(e, from, caps, v.viewport)
 	view.quality = new_clone(quality, e.platform.frame_allocator)
@@ -211,6 +212,7 @@ plan_view :: proc(
 		debug_view      = overrides.debug_view != .Lit ? overrides.debug_view : desc.debug_view,
 		disable         = desc.disable + overrides.disable,
 		exposure_offset = desc.exposure_offset + overrides.exposure_offset,
+		sun_yaw         = desc.sun_yaw + overrides.sun_yaw,
 		hooks           = desc.hooks,
 		overlay         = desc.overlay,
 	}
