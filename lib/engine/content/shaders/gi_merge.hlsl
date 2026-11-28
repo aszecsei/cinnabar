@@ -2,7 +2,8 @@
 // to the first. Each texel adds what gets through its interval from beyond: the next cascade's light in its direction,
 // the four finer directions that it splits into, at the four probes of the next cascade around it, weighted by how
 // near they are and whether they are on the same surface (see probe_weight). The last cascade takes the light from
-// beyond its probe's surface: the world probes', or the ambient sky's. The merge writes the cascades in place.
+// beyond its probe's surface: the world probes', or the ambient sky's. The merge writes the cascades in place. A probe
+// without a surface, on the sky or the view model, keeps what the trace wrote: its probe weight is 0, so nothing reads it.
 #include "gi_common.hlsli"
 
 [numthreads(8, 8, 1)]
@@ -20,11 +21,13 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	if (here.a <= 0) {
 		return;
 	}
-	float3 beyond = 0;
 	float3 position;
 	float z;
 	int2 pixel = probe_pixel(k, probe);
-	surface_at(pixel, position, z);
+	if (!surface_at(pixel, position, z)) {
+		return;
+	}
+	float3 beyond = 0;
 	float3 normal = octahedral_normal(pixel);
 	float3 direction = direction_of(direction_texel, directions, 0.5);
 	if (k + 1 >= constants.cascade_count) {
