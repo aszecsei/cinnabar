@@ -1,12 +1,15 @@
 // ReSTIR GI's temporal pass (see docs/rendering/global-illumination.md#restir-gi): a thread for each reservoir makes
 // this frame's sample from its ray, then merges it with last frame's reservoir at the place that the velocity gives.
-// A hit is the hit's point, with its light from the hit light passes; a ray past the reach is a sample at infinity
-// along it, with the world probes' light from that direction, or the ambient light without them; a back face is a
-// sample of no light. The sample's weight is its target over the pdf of its ray's direction, which the trace stored,
-// and the ray's light over that pdf teaches the ray guide's cell of the pixel (see guide_deposit). Last frame's reservoir counts
-// while the surface that it was for is this one, by its depth, and while its sample is younger than the grid's
-// max_age, and counts as at most temporal_max_m samples, so the light follows a change within a few frames. Its sample
-// point moves back by the camera's motion, as the points are relative to the camera.
+// A hit is the hit's point, with its light from the hit light passes; a ray past the reach, or one that started inside
+// geometry, is a sample at infinity along it, with the world probes' light from that direction, or the ambient light
+// without them; another back face is a sample of no light. The sample's weight is its target over the pdf of its ray's
+// direction, which the trace stored, and the ray's light over that pdf teaches the ray guide's cell of the pixel (see
+// guide_deposit). Last frame's reservoir counts while the surface that it was for is this one, by its depth, and while
+// its sample is younger than the grid's max_age, and counts as at most temporal_max_m samples, so the light follows a
+// change within a few frames. Dropping it by its sample's age chooses the reservoirs to drop by their samples, which
+// makes the light a little too bright, by an amount that moves with the rays' pdf (see
+// docs/rendering/global-illumination.md#ray-guiding). Its sample point moves back by the camera's motion, as the
+// points are relative to the camera.
 #include "gi_restir_guide.hlsli"
 
 [numthreads(8, 8, 1)]
@@ -31,9 +34,18 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	Hit_Record hit = load_hit(push.hits, ray);
 	float4 light = cn_buffer(push.rays).Load<float4>(ray * 16);
 	float3 direction = hit_unpack_unit(hit.direction);
+	// A back face this near the pixel means that the ray started inside geometry, as where two meshes meet. Its hit says
+	// nothing of the light, so it is a sample at infinity with the world probes' light, which the resolve also gives a
+	// pixel whose reservoir has none. It still counts: dropping it would choose the samples by their directions, so the
+	// light would move with the pdf that drew them, and so with the ray guide.
+	bool inside = !hit_missed(hit) && light.a < 0 && abs(light.a) < 4 * g.bias * pixel_meters(z);
 	Restir_Reservoir s = restir_empty();
 	s.depth = z;
-	if (hit_missed(hit)) {
+	if (inside) {
+		s.infinite = true;
+		s.position = direction;
+		s.light = beyond_light(p, normal, direction);
+	} else if (hit_missed(hit)) {
 		s.infinite = true;
 		s.position = direction;
 		s.light = beyond_light(p, normal, direction) * load_transmittance(push.transmit, ray);
@@ -59,14 +71,10 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 
 	Restir_Reservoir r = restir_empty();
 	r.depth = z;
-	// A back face this near the pixel means that the ray started inside geometry, as where two meshes meet, and the
-	// sample counts for nothing, as the split cascades' deposit does.
-	bool inside = !hit_missed(hit) && light.a < 0 && abs(light.a) < 4 * g.bias * pixel_meters(z);
-	if (!inside) {
-		restir_merge(r, s, weight, 1, state);
-		if (cosine > 0 && pdf > 0) {
-			guide_deposit(p, direction, luminance * exposure / max(pdf, GUIDE_PDF_FLOOR), state);
-		}
+	restir_merge(r, s, weight, 1, state);
+	// The guide learns only from what the rays found.
+	if (!inside && cosine > 0 && pdf > 0) {
+		guide_deposit(p, direction, luminance * exposure / max(pdf, GUIDE_PDF_FLOOR), state);
 	}
 
 	// Last frame's reservoir.
