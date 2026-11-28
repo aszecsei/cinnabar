@@ -480,7 +480,12 @@ the_spatial_plain_shares_are_dark_by_the_pdf :: proc(t: ^testing.T) {
 	guided := [N]f64{0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.35, 0.35}
 	// The reservoir's light, summed over every pair of samples: the sum of the merged weights is the winner's light times
 	// its W, whichever sample wins.
-	expectation :: proc(light: [N]f64, merges: [N]bool, own, neighbours: [N]f64, balance: bool) -> f64 {
+	expectation :: proc(
+		light: [N]f64,
+		merges: [N]bool,
+		own, neighbours: [N]f64,
+		balance: bool,
+	) -> f64 {
 		total: f64
 		for y0 in 0 ..< N {
 			for y1 in 0 ..< N {
@@ -504,7 +509,10 @@ the_spatial_plain_shares_are_dark_by_the_pdf :: proc(t: ^testing.T) {
 		return total
 	}
 	for neighbours in ([][N]f64{uniform, guided}) {
-		testing.expect(t, abs(expectation(light, merges, uniform, neighbours, true) - exact) < 1e-9 * exact)
+		testing.expect(
+			t,
+			abs(expectation(light, merges, uniform, neighbours, true) - exact) < 1e-9 * exact,
+		)
 	}
 	plain_uniform := expectation(light, merges, uniform, uniform, false)
 	plain_guided := expectation(light, merges, uniform, guided, false)
