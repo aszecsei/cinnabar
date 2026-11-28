@@ -1,6 +1,6 @@
 // tools/refdiff compares a screenshot of the engine with a path traced reference of the same view (see
 // docs/rendering/reference-scenes.md): both go back to scene-linear radiance, and it reports how bright each is, by
-// channel and over a grid of regions, in stops of the capture against the reference.
+// channel and over a grid of regions, in stops of the capture against the reference, to a thousandth of a stop.
 //
 //   refdiff <reference.png> <capture.png>... [--reference-exposure <x>] [--capture-exposure <x>] [--out <prefix>]
 //           [--probe <x>,<y>]...
@@ -214,7 +214,7 @@ num :: proc(v: f32) -> string {
 print_report :: proc(r: Report) {
 	ratio :: proc(a, b: f32) -> string {
 		s, ok := stops(a, b)
-		return ok ? fmt.tprintf("%+.2f", s) : "    -"
+		return ok ? fmt.tprintf("%+.3f", s) : "     -"
 	}
 	fmt.printfln("mean radiance      %10s %10s %10s %10s", "r", "g", "b", "luma")
 	fmt.printfln(
@@ -255,7 +255,7 @@ print_report :: proc(r: Report) {
 	for row in r.regions {
 		fmt.print(" ")
 		for cell in row {
-			fmt.printf(" %6s", ratio(luma(cell.capture), luma(cell.reference)))
+			fmt.printf(" %7s", ratio(luma(cell.capture), luma(cell.reference)))
 		}
 		fmt.println()
 	}
@@ -263,7 +263,15 @@ print_report :: proc(r: Report) {
 	for row in r.regions {
 		fmt.print(" ")
 		for cell in row {
-			fmt.printf(" %.4f", luma(cell.reference))
+			fmt.printf(" %.5f", luma(cell.reference))
+		}
+		fmt.println()
+	}
+	fmt.println("regions' capture luma:")
+	for row in r.regions {
+		fmt.print(" ")
+		for cell in row {
+			fmt.printf(" %.5f", luma(cell.capture))
 		}
 		fmt.println()
 	}
