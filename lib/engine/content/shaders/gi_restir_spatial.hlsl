@@ -5,9 +5,24 @@
 // neighbour's solid angle, and a neighbour whose Jacobian is past jacobian_max either way, or whose sample faces away
 // from this surface, does not count. With visibility, a shadow ray to each neighbour's sample keeps the light
 // from leaking through a thin wall between them. The neighbours count as at most spatial_max_m samples together, and
-// the weights are the plain share of their samples, which is biased a little darker at the edges of surfaces. The
-// result does not feed the next frame's temporal pass, so the reservoirs do not grow alike from frame to frame.
+// the weights are the plain share of their samples, which is biased a little darker at the edges of surfaces. A
+// reservoir that lost its history, as where the camera's motion just brought its pixel into view, merges more
+// neighbours on a wider disk, and a neighbour past the grid's edge is mirrored back onto it. The result does not feed
+// the next frame's temporal pass, so the reservoirs do not grow alike from frame to frame.
 #include "gi_restir.hlsli"
+
+// A reservoir of at most this many samples lost its history, as where the camera's motion just brought its pixel into
+// view, and merges RESTIR_FRESH_SAMPLES times the neighbours on a disk RESTIR_FRESH_RADIUS times as wide.
+static const float RESTIR_FRESH_M = 4;
+static const uint RESTIR_FRESH_SAMPLES = 3;
+static const float RESTIR_FRESH_RADIUS = 2;
+
+// restir_fold keeps a neighbour on the grid: one past an edge is mirrored back across it, so a reservoir at the
+// screen's edge has as many neighbours as one inside it.
+int2 restir_fold(int2 q, int2 size) {
+	q = abs(q);
+	return min(q, 2 * (size - 1) - q);
+}
 
 [numthreads(8, 8, 1)]
 void cs_main(uint3 id : SV_DispatchThreadID) {
@@ -28,11 +43,14 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	Restir_Reservoir r = restir_empty();
 	r.depth = z;
 	restir_merge(r, center, restir_target(center, p, normal) * center.W * center.M, center.M, state);
-	float share = g.spatial_max_m / max(float(g.spatial_samples), 1);
-	for (uint i = 0; i < g.spatial_samples; i++) {
+	bool fresh = center.M <= RESTIR_FRESH_M;
+	uint samples = g.spatial_samples * (fresh ? RESTIR_FRESH_SAMPLES : 1);
+	float reach = g.spatial_radius * (fresh ? RESTIR_FRESH_RADIUS : 1);
+	float share = g.spatial_max_m / max(float(samples), 1);
+	for (uint i = 0; i < samples; i++) {
 		float angle = 2 * RESTIR_PI * random_unit(state);
-		float radius = g.spatial_radius * sqrt(random_unit(state));
-		int2 q = texel + int2(round(float2(cos(angle), sin(angle)) * radius));
+		float radius = reach * sqrt(random_unit(state));
+		int2 q = restir_fold(texel + int2(round(float2(cos(angle), sin(angle)) * radius)), int2(g.reservoirs));
 		if (all(q == texel)) {
 			continue;
 		}
