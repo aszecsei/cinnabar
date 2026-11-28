@@ -2,6 +2,7 @@ package render
 
 import "base:runtime"
 import "core:math"
+import "core:math/rand"
 import "core:mem/virtual"
 import "core:strings"
 import "core:sync"
@@ -378,4 +379,143 @@ a_frame_that_loses_restir_gi_warns_once :: proc(t: ^testing.T) {
 	)
 	testing.expect_value(t, count_later, 1)
 	testing.expect_value(t, count_by_choice, 1)
+}
+
+
+// The temporal pass drops last frame's reservoir when its sample has won for max_age frames, which keeps a sample's
+// light from growing stale, but chooses the reservoirs to drop by their samples. This is a model of one reservoir over
+// many frames, each frame's sample drawn from a pdf over a few points of light, with a light that is itself an estimate,
+// as hit shading's one light is, merged into last frame's reservoir as the pass merges it, with the same cap of samples
+// and the same limit of frames. Dropping by the sample's age makes the light too bright, by an amount that moves with
+// the pdf, so the ray guide changes it (see docs/rendering/global-illumination.md#ray-guiding); dropping every
+// max_age frames whatever the sample gives the light at every pdf, at the cost of the noise of each start over.
+@(test)
+the_temporal_age_limit_is_too_bright_by_the_pdf :: proc(t: ^testing.T) {
+	N :: 8
+	light := [N]f64{0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 3, 0.5}
+	exact: f64
+	for v in light {
+		exact += v
+	}
+	SEED :: 7
+	Rule :: enum {
+		Sample_Age,
+		Cycle,
+	}
+	estimate :: proc(light: [N]f64, pdf: [N]f64, rule: Rule, seed: u64) -> f64 {
+		state := rand.create(seed)
+		gen := rand.default_random_generator(&state)
+		max_age :: 50
+		max_m :: 20
+		frames :: 4_000_000
+		// The reservoir's sample is the light that its ray found, which is an estimate of its own: hit shading picks
+		// one light, so a point's light is four times its mean a quarter of the time and none otherwise.
+		value, W, M: f64
+		age := 0
+		total: f64
+		for frame in 0 ..< frames {
+			u := rand.float64(gen)
+			x := N - 1
+			for p, i in pdf {
+				if u < p {
+					x = i
+					break
+				}
+				u -= p
+			}
+			found := rand.float64(gen) < 0.25 ? 4 * light[x] : 0
+			sum, count := found / pdf[x], 1.0
+			chosen, chosen_age := found, 0
+			expired := rule == .Cycle ? frame % max_age == 0 : age + 1 >= max_age
+			if M > 0 && !expired {
+				m := min(M, max_m)
+				w := value * W * m
+				sum += w
+				count += m
+				if w > 0 && rand.float64(gen) * sum < w {
+					chosen, chosen_age = value, age + 1
+				}
+			}
+			value, age, M = chosen, chosen_age, count
+			W = value > 0 ? sum / (M * value) : 0
+			total += value * W
+		}
+		return total / frames
+	}
+	uniform: [N]f64
+	for &p in uniform {
+		p = 1.0 / N
+	}
+	guided := [N]f64{0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.6, 0.16}
+	by_age: [2]f64
+	for pdf, i in ([][N]f64{uniform, guided}) {
+		cycle := estimate(light, pdf, .Cycle, SEED + u64(i))
+		by_age[i] = estimate(light, pdf, .Sample_Age, SEED + u64(i))
+		testing.expect(t, abs(cycle - exact) < 0.01 * exact)
+	}
+	testing.expect(t, by_age[0] > 1.01 * exact)
+	testing.expect(t, by_age[0] - by_age[1] > 0.01 * exact)
+}
+
+// The spatial pass shares each sample's weight by the plain share of the reservoirs' counts, and counts a neighbour only
+// when its own sample merges. This is a model of a reservoir and one neighbour of the same surface, each with one sample
+// of its own pdf over a few points of light, where the neighbour's sample of the two bright points does not merge, as
+// one past the Jacobian's bounds does not. Summed over every pair of samples, the plain shares give an expectation
+// that is too dark and moves with the neighbour's pdf, so the ray guide changes it (see
+// docs/rendering/global-illumination.md#ray-guiding). The generalized balance heuristic, which shares a sample among
+// the reservoirs that could have given it, gives the light at every pdf.
+@(test)
+the_spatial_plain_shares_are_dark_by_the_pdf :: proc(t: ^testing.T) {
+	N :: 8
+	light := [N]f64{1, 1, 1, 1, 1, 1, 8, 8}
+	merges := [N]bool{true, true, true, true, true, true, false, false}
+	exact: f64
+	for v in light {
+		exact += v
+	}
+	uniform: [N]f64
+	for &p in uniform {
+		p = 1.0 / N
+	}
+	guided := [N]f64{0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.35, 0.35}
+	// The reservoir's light, summed over every pair of samples: the sum of the merged weights is the winner's light times
+	// its W, whichever sample wins.
+	expectation :: proc(
+		light: [N]f64,
+		merges: [N]bool,
+		own, neighbours: [N]f64,
+		balance: bool,
+	) -> f64 {
+		total: f64
+		for y0 in 0 ..< N {
+			for y1 in 0 ..< N {
+				chance := own[y0] * neighbours[y1]
+				// Each reservoir's W for its own sample is one over its pdf, so its weight here is the light over that pdf.
+				w0 := light[y0] / own[y0]
+				w1 := merges[y1] ? light[y1] / neighbours[y1] : 0
+				if balance {
+					// Both reservoirs count one sample and have the same target, so a sample's share is one over the
+					// reservoirs that could have given it.
+					w0 /= merges[y0] ? 2 : 1
+					w1 /= 2
+				} else {
+					count := merges[y1] ? 2.0 : 1.0
+					w0 /= count
+					w1 /= count
+				}
+				total += chance * (w0 + w1)
+			}
+		}
+		return total
+	}
+	for neighbours in ([][N]f64{uniform, guided}) {
+		testing.expect(
+			t,
+			abs(expectation(light, merges, uniform, neighbours, true) - exact) < 1e-9 * exact,
+		)
+	}
+	plain_uniform := expectation(light, merges, uniform, uniform, false)
+	plain_guided := expectation(light, merges, uniform, guided, false)
+	testing.expect(t, plain_uniform < 0.8 * exact)
+	testing.expect(t, abs(plain_guided - plain_uniform) > 0.1 * exact)
 }

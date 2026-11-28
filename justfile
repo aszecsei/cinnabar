@@ -704,20 +704,22 @@ refdiff:
 
 # Compare the running editor's Game view of a reference scene with its path traced reference: open it with
 # just edit reference_<name> first (see docs/rendering/reference-scenes.md). It sets the Game view to the reference's
-# size, with no tone mapping, bloom or post effects and the sun where the scene has it, at a quality preset, waits for
-# the light to settle, takes
-# screenshots into build/captures/reference/<name>, and compares their mean. Extra arguments go to refdiff, such as
-# --probe 900,360.
+# size, with the lit view, no tone mapping, bloom or post effects and the sun where the scene has it, at a quality
+# preset, waits for the light to settle, takes screenshots into build/captures/reference/<name>, and compares their
+# mean. Extra arguments go to refdiff, such as --probe 900,360. REFERENCE_STOPS=3 takes the screenshots 3 stops
+# brighter, and tells refdiff, so that 8-bit codes round less of the dark parts' light.
 [script]
 reference name="room" preset="Ultra" settle="20" shots="8" *args: editorctl refdiff
     set -euo pipefail
+    stops="${REFERENCE_STOPS:-0}"
+    exposure=$(awk "BEGIN { print 2 * 2 ^ ($stops) }")
     ctl="./{{tools_dir}}/editorctl.exe"
     ref="samples/{{game}}/reference/{{name}}/reference.png"
     out="build/captures/reference/{{name}}"
     mkdir -p "$out"
     rm -f "$out"/shot-*.png "$out"/shot-*.json
     "$ctl" viewport --viewport 4 --set shown=true --set size=1280x720 --set qualityPreset={{preset}} \
-        --set noToneMapping=true --set noBloom=true --set noPostEffects=true --set sunYaw=0 > /dev/null
+        --set debugView=Lit --set exposureOffset="$stops" --set noToneMapping=true --set noBloom=true --set noPostEffects=true --set sunYaw=0 > /dev/null
     sleep {{settle}}
     shots=()
     for i in $(seq -w 1 {{shots}}); do
@@ -725,7 +727,7 @@ reference name="room" preset="Ultra" settle="20" shots="8" *args: editorctl refd
         shots+=("$out/shot-$i.png")
         sleep 0.25
     done
-    "./{{tools_dir}}/refdiff.exe" "$ref" "${shots[@]}" --out "$out/{{preset}}" {{args}}
+    "./{{tools_dir}}/refdiff.exe" "$ref" "${shots[@]}" --capture-exposure "$exposure" --out "$out/{{preset}}" {{args}}
 
 # Write a screenshot of the running editor's viewport, with a JSON sidecar, and print the files: just screenshot --view depth
 screenshot *args: editorctl
